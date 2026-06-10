@@ -1,0 +1,30 @@
+name: threads-poll
+# 返信ポーリング＋リード検知＋通知（数時間おき）。インサイトは1日1回。
+# 返信送信は draft モードなので承認待ち。リード通知はここで飛ぶ。
+on:
+  schedule:
+    - cron: "0 0,3,6,9,12 * * *"  # UTC（JST 9,12,15,18,21時）
+  workflow_dispatch: {}
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    env:
+      STORE_BACKEND: sheets
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_KEY: ${{ secrets.GOOGLE_SHEET_KEY }}
+      THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+      THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CHATWORK_API_TOKEN: ${{ secrets.CHATWORK_API_TOKEN }}
+      CHATWORK_ROOM_ID: ${{ secrets.CHATWORK_ROOM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - name: replies + leads
+        run: python -m src.main replies
+      - name: insights (once a day at JST 21時)
+        if: github.event.schedule == '0 12 * * *'
+        run: python -m src.main insights

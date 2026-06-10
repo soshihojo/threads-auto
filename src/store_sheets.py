@@ -1,0 +1,249 @@
+"""Google Sheets バックエンド（store_sqlite.py と同じ公開APIを提供）。
+
+ホスティング時、ダッシュボード(Streamlit Cloud)とGitHub Actionsが
+同じスプレッドシートを共有ストアとして使うための実装。
+低頻度運用前提（候補は6時間に数件・リードも少数）。
+
+認証: 環境変数
+  GOOGLE_SERVICE_ACCOUNT_JSON … サービスアカウントJSONの「ファイルパス」か「JSON文字列」
+  GOOGLE_SHEET_KEY            … スプレッドシートのキー（URLの /d/<KEY>/ 部分）
+"""
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from functools import lru_cache
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import gspread
+from google.oauth2.service_account import Credentials
+
+from .config import env
+
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+JST = ZoneInfo("Asia/Tokyo")
+
+# 各ワークシートのヘッダ定義
+TABLES = {
+    "posts": ["media_id", "text", "profile", "created_at", "views", "likes", "replies", "insights_at"],
+    "processed_replies": ["reply_id", "post_id", "username", "text", "seen_at"],
+    "draft_replies": ["reply_id", "post_id", "username", "in_text", "draft_text", "status", "created_at", "sent_at"],
+    "leads": ["reply_id", "post_id", "username", "text", "keyword", "notified", "created_at"],
+    "scheduled_posts": ["id", "text", "region", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at"],
+}
+
+
+def _now() -> str:
+    return datetime.now(JST).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _creds_info() -> dict:
+    raw = env("GOOGLE_SERVICE_ACCOUNT_JSON", required=True)
+    p = Path(raw)
+    if p.exists():
+        return json.loads(p.read_text())
+    return json.loads(raw)  # 環境変数に直接JSONを入れているケース
+
+
+@lru_cache(maxsize=1)
+def _spreadsheet():
+    gc = gspread.authorize(Credentials.from_service_account_info(_creds_info(), scopes=SCOPES))
+    return gc.open_by_key(env("GOOGLE_SHEET_KEY", required=True))
+
+
+@lru_cache(maxsize=None)
+def _ws(name: str):
+    sh = _spreadsheet()
+    headers = TABLES[name]
+    try:
+        ws = sh.worksheet(name)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=name, rows=1000, cols=len(headers))
+        ws.append_row(headers)
+    # ヘッダが空なら入れる
+    if not ws.row_values(1):
+        ws.append_row(headers)
+    return ws
+
+
+def _records(name: str) -> list[dict]:
+    return _ws(name).get_all_records()
+
+
+def _append(name: str, row: dict) -> None:
+    headers = TABLES[name]
+    _ws(name).append_row([row.get(h, "") for h in headers], value_input_option="USER_ENTERED")
+
+
+def _find_row(name: str, key_col: str, key_val) -> int | None:
+    """key_col==key_val の行番号（1始まり・ヘッダ含む）を返す。無ければNone。"""
+    headers = TABLES[name]
+    col_idx = headers.index(key_col)
+    values = _ws(name).get_all_values()
+    for i, row in enumerate(values[1:], start=2):  # 2行目以降がデータ
+        if col_idx < len(row) and str(row[col_idx]) == str(key_val):
+            return i
+    return None
+
+
+def _update_cells(name: str, row_idx: int, updates: dict) -> None:
+    headers = TABLES[name]
+    ws = _ws(name)
+    for col, val in updates.items():
+        ws.update_cell(row_idx, headers.index(col) + 1, val)
+
+
+def init_db() -> None:
+    for name in TABLES:
+        _ws(name)  # 無ければ作成
+
+
+# ---- posts ----
+def save_post(media_id: str, text: str, profile: str) -> None:
+    if _find_row("posts", "media_id", media_id):
+        return
+    _append("posts", {"media_id": media_id, "text": text, "profile": profile,
+                      "created_at": _now(), "views": 0, "likes": 0, "replies": 0})
+
+
+def update_insights(media_id: str, views: int, likes: int, replies: int) -> None:
+    idx = _find_row("posts", "media_id", media_id)
+    if idx:
+        _update_cells("posts", idx, {"views": views, "likes": likes, "replies": replies, "insights_at": _now()})
+
+
+# ---- replies ----
+def is_reply_seen(reply_id: str) -> bool:
+    return _find_row("processed_replies", "reply_id", reply_id) is not None
+
+
+def mark_reply_seen(reply_id: str, post_id: str, username: str, text: str) -> None:
+    if is_reply_seen(reply_id):
+        return
+    _append("processed_replies", {"reply_id": reply_id, "post_id": post_id,
+                                  "username": username, "text": text, "seen_at": _now()})
+
+
+# ---- draft replies ----
+def add_draft(reply_id: str, post_id: str, username: str, in_text: str, draft_text: str) -> None:
+    if _find_row("draft_replies", "reply_id", reply_id):
+        return
+    _append("draft_replies", {"reply_id": reply_id, "post_id": post_id, "username": username,
+                             "in_text": in_text, "draft_text": draft_text, "status": "pending", "created_at": _now()})
+
+
+def pending_drafts() -> list[dict]:
+    return [r for r in _records("draft_replies") if r.get("status") == "pending"]
+
+
+def set_draft_status(reply_id: str, status: str, *, sent: bool = False) -> None:
+    idx = _find_row("draft_replies", "reply_id", reply_id)
+    if idx:
+        updates = {"status": status}
+        if sent:
+            updates["sent_at"] = _now()
+        _update_cells("draft_replies", idx, updates)
+
+
+def update_draft_text(reply_id: str, draft_text: str) -> None:
+    idx = _find_row("draft_replies", "reply_id", reply_id)
+    if idx:
+        _update_cells("draft_replies", idx, {"draft_text": draft_text})
+
+
+# ---- leads ----
+def add_lead(reply_id: str, post_id: str, username: str, text: str, keyword: str) -> bool:
+    if _find_row("leads", "reply_id", reply_id):
+        return False
+    _append("leads", {"reply_id": reply_id, "post_id": post_id, "username": username,
+                     "text": text, "keyword": keyword, "notified": 0, "created_at": _now()})
+    return True
+
+
+def mark_lead_notified(reply_id: str) -> None:
+    idx = _find_row("leads", "reply_id", reply_id)
+    if idx:
+        _update_cells("leads", idx, {"notified": 1})
+
+
+def recent_leads(limit: int = 50) -> list[dict]:
+    rows = sorted(_records("leads"), key=lambda r: r.get("created_at", ""), reverse=True)
+    return rows[:limit]
+
+
+# ---- scheduled posts / candidates ----
+def _next_id() -> int:
+    ids = [int(r["id"]) for r in _records("scheduled_posts") if str(r.get("id", "")).strip().isdigit()]
+    return (max(ids) + 1) if ids else 1
+
+
+def add_candidate(text: str, region: str | None) -> int:
+    new_id = _next_id()
+    _append("scheduled_posts", {"id": new_id, "text": text, "region": region or "", "scheduled_at": "",
+                               "status": "pending_review", "created_at": _now()})
+    return new_id
+
+
+def approve_candidate(post_id: int, scheduled_at: str, text: str | None = None) -> None:
+    idx = _find_row("scheduled_posts", "id", post_id)
+    if not idx:
+        return
+    updates = {"status": "scheduled", "scheduled_at": scheduled_at}
+    if text is not None:
+        updates["text"] = text
+    _update_cells("scheduled_posts", idx, updates)
+
+
+def add_scheduled(text: str, region: str | None, scheduled_at: str) -> int:
+    new_id = _next_id()
+    _append("scheduled_posts", {"id": new_id, "text": text, "region": region or "",
+                               "scheduled_at": scheduled_at, "status": "scheduled", "created_at": _now()})
+    return new_id
+
+
+def list_scheduled(status: str | None = None, limit: int = 200) -> list[dict]:
+    rows = _records("scheduled_posts")
+    if status:
+        rows = [r for r in rows if r.get("status") == status]
+        rows.sort(key=lambda r: str(r.get("scheduled_at", "")))
+    else:
+        rows.sort(key=lambda r: str(r.get("scheduled_at", "")), reverse=True)
+    return rows[:limit]
+
+
+def due_scheduled(now_iso: str) -> list[dict]:
+    rows = [r for r in _records("scheduled_posts")
+            if r.get("status") == "scheduled" and str(r.get("scheduled_at", "")) and str(r["scheduled_at"]) <= now_iso]
+    rows.sort(key=lambda r: str(r.get("scheduled_at", "")))
+    return rows
+
+
+def mark_scheduled(post_id: int, status: str, *, media_id: str | None = None, error: str | None = None) -> None:
+    idx = _find_row("scheduled_posts", "id", post_id)
+    if not idx:
+        return
+    updates = {"status": status}
+    if media_id is not None:
+        updates["media_id"] = media_id
+    if error is not None:
+        updates["error"] = error
+    if status == "posted":
+        updates["posted_at"] = _now()
+    _update_cells("scheduled_posts", idx, updates)
+
+
+def cancel_scheduled(post_id: int) -> None:
+    idx = _find_row("scheduled_posts", "id", post_id)
+    if not idx:
+        return
+    rows = {r["id"]: r for r in _records("scheduled_posts")}
+    cur = rows.get(post_id) or rows.get(str(post_id))
+    if cur and cur.get("status") in ("scheduled", "pending_review"):
+        _update_cells("scheduled_posts", idx, {"status": "canceled"})
+
+
+def update_scheduled(post_id: int, text: str, scheduled_at: str) -> None:
+    idx = _find_row("scheduled_posts", "id", post_id)
+    if idx:
+        _update_cells("scheduled_posts", idx, {"text": text, "scheduled_at": scheduled_at})

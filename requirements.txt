@@ -1,0 +1,7 @@
+requests>=2.31
+anthropic>=0.40
+PyYAML>=6.0
+python-dotenv>=1.0
+gspread>=6.0
+google-auth>=2.30
+streamlit>=1.40

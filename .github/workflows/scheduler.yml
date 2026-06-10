@@ -1,0 +1,25 @@
+name: threads-scheduler
+# 予約投稿の実行。15分おきに共有ストア(Sheets)のキューを見て、時刻が来た予約を自動投稿。
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # 15分おき
+  workflow_dispatch: {}
+
+jobs:
+  run-due:
+    runs-on: ubuntu-latest
+    env:
+      STORE_BACKEND: sheets
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_KEY: ${{ secrets.GOOGLE_SHEET_KEY }}
+      THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+      THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - name: refresh token
+        run: python -m src.main refresh-token || true
+      - name: run due scheduled posts
+        run: python -m src.main run-due
