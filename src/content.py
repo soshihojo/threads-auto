@@ -48,6 +48,29 @@ def pick_region() -> str | None:
     return random.choice(words) if words else None
 
 
+def _variation_directives(profile: dict) -> list[str]:
+    """profile.variation の各リストから1つずつランダムに選び、生成の振り（指示）を作る。
+    似た投稿への収束を防ぐ。variation が無いプロファイルでは空（従来動作）。"""
+    v = profile.get("variation") or {}
+    out: list[str] = []
+    if v.get("industries"):
+        out.append(f"今回の業種（自己投影させる主役）: {random.choice(v['industries'])}")
+    if v.get("topics"):
+        out.append(f"今回の話題（チラシ以外も積極的に。これを軸に）: {random.choice(v['topics'])}")
+    weights = v.get("type_weights") or {}
+    if weights:
+        chosen = random.choices(list(weights.keys()), weights=list(weights.values()))[0]
+        out.append(f"使う型（02_templates.md準拠）: {chosen}")
+    if v.get("tones"):
+        out.append(f"今回の文体・トーン: {random.choice(v['tones'])}")
+    if v.get("ctas"):
+        out.append(f"今回の締め方: {random.choice(v['ctas'])}")
+    if out:
+        out.append("上の振りに従い、過去の投稿と業種・話題・文体・締めが被らないようにする。"
+                   "毎回『チラシ1万枚→エリア絞る→新規◯件→いる？』のような同一パターンは避ける。")
+    return out
+
+
 def generate_post(type_hint: str | None = None, region: str | None = None) -> str:
     """1投稿の本文を生成して返す。type_hint で型を指定（無ければ自動選択）。
     region を渡すとその地域名を使う（None なら内部でランダム選択）。"""
@@ -66,7 +89,8 @@ def generate_post(type_hint: str | None = None, region: str | None = None) -> st
     if type_hint:
         instructions.append(f"使う型: {type_hint}")
     else:
-        instructions.append("型カタログから状況に合う型を1つ選んで使う（オファー直球型は頻度を抑える）")
+        # 業種・話題・型・文体・締めをランダムに振って多様化（収束防止）
+        instructions.extend(_variation_directives(profile))
 
     user = (
         "以下のルールに従って、Threads投稿を1つ作ってください。\n\n"
