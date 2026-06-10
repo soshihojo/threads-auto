@@ -110,10 +110,12 @@ def _records(name: str) -> list[dict]:
 
 def _append(name: str, row: dict) -> None:
     headers = TABLES[name]
-    # table_range をヘッダ(B2)にすると、その表の最終行の次（B列〜）に追記される
+    # table_range をヘッダ(B2)にすると、その表の最終行の次（B列〜）に追記される。
+    # RAW: SheetsがISO日時(...T...)を日付へ自動変換するのを防ぎ、文字列をそのまま保存する
+    #（scheduled_at の文字列比較が壊れないようにするため必須）。
     _ws(name).append_row(
         [row.get(h, "") for h in headers],
-        value_input_option="USER_ENTERED",
+        value_input_option="RAW",
         table_range=f"{_col(0)}{HEADER_ROW}",
     )
 
@@ -132,7 +134,9 @@ def _update_cells(name: str, row_idx: int, updates: dict) -> None:
     headers = TABLES[name]
     ws = _ws(name)
     for col, val in updates.items():
-        ws.update_cell(row_idx, FIRST_COL + headers.index(col), val)
+        a1 = rowcol_to_a1(row_idx, FIRST_COL + headers.index(col))
+        # RAW: ISO日時の日付自動変換を防ぐ（_append と同じ理由）
+        ws.update(range_name=a1, values=[[val]], value_input_option="RAW")
 
 
 def init_db() -> None:
