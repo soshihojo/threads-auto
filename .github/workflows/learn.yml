@@ -1,0 +1,39 @@
+name: threads-learn
+# 反応データを分析→勝ち要素を抽象化→学習ルール(rules_*/05_learned.md)を自動更新し、
+# 変更があればリポジトリにコミットして戻す（使い捨てランナーでも学びを永続化）。
+on:
+  schedule:
+    - cron: "0 0 */3 * *"   # 3日ごと UTC0時（JST9時）
+  workflow_dispatch: {}
+
+permissions:
+  contents: write            # 学習結果をpushするために必要
+
+jobs:
+  learn:
+    runs-on: ubuntu-latest
+    env:
+      STORE_BACKEND: sheets
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_KEY: ${{ secrets.GOOGLE_SHEET_KEY }}
+      THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+      THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - name: learn (analyze reactions, update rules)
+        run: python -m src.main learn
+      - name: commit updated rules if changed
+        run: |
+          git config user.name "threads-auto-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add rules rules_local
+          if git diff --staged --quiet; then
+            echo "学習による変更なし"
+          else
+            git commit -m "learn: 反応データから必勝要素を自動更新 [skip ci]"
+            git push
+          fi
