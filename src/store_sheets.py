@@ -55,11 +55,18 @@ def _now() -> str:
 
 
 def _creds_info() -> dict:
-    raw = env("GOOGLE_SERVICE_ACCOUNT_JSON", required=True)
-    p = Path(raw)
-    if p.exists():
-        return json.loads(p.read_text())
-    return json.loads(raw)  # 環境変数に直接JSONを入れているケース
+    raw = env("GOOGLE_SERVICE_ACCOUNT_JSON", required=True).strip()
+    # JSON文字列を直接渡しているケース（ホスティング時のSecrets）
+    if raw.startswith("{"):
+        return json.loads(raw)
+    # それ以外はファイルパス（ローカル）。長すぎる文字列で OSError にならないよう保護
+    try:
+        p = Path(raw)
+        if p.exists():
+            return json.loads(p.read_text())
+    except OSError:
+        pass
+    return json.loads(raw)
 
 
 @lru_cache(maxsize=1)
