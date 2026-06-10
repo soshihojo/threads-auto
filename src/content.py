@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+import re
 from pathlib import Path
 
 from .config import ROOT, active_profile, load_config
@@ -18,7 +19,19 @@ SYSTEM = """あなたは地域店舗の集客に詳しいSNS運用のプロで�
 - マーケ横文字を避け、店主の現場の言葉で書く
 - 売り込み臭を出しすぎない（価値提供を優先）
 - 出力は投稿本文のみ。説明・前置き・引用符・ハッシュタグの羅列は不要
+- Markdownの装飾記号を一切使わない（**太字**、見出し#、箇条書きの記号*など禁止）。Threadsはそのまま文字として表示されるため。プレーンテキストで書く
 - 文字数は概ね80〜400字"""
+
+
+def sanitize(text: str) -> str:
+    """Threadsはmarkdownを解釈せず記号がそのまま出るため、装飾記号を除去する。
+    特に `**`（太字）は絶対に残さない。"""
+    text = text.replace("**", "")          # 太字記号は必ず除去
+    text = text.replace("__", "")          # 下線太字
+    # 行頭の見出し記号（#, ##…）と箇条書き記号（- , * , ・の直後空白）を除去
+    text = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", text)
+    text = re.sub(r"(?m)^\s{0,3}[*\-]\s+", "", text)
+    return text.strip()
 
 
 def _read_rules(rules_dir: str) -> dict[str, str]:
@@ -60,7 +73,7 @@ def generate_post(type_hint: str | None = None, region: str | None = None) -> st
         f"=== ルール集 ===\n{rules_block}\n\n"
         f"=== 今回の指示 ===\n" + "\n".join(f"- {x}" for x in instructions)
     )
-    return complete(SYSTEM, user, max_tokens=800, temperature=1.0)
+    return sanitize(complete(SYSTEM, user, max_tokens=800, temperature=1.0))
 
 
 def generate_best(candidates: int | None = None, region: str | None = None) -> str:

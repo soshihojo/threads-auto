@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from . import store
 from .config import active_profile
+from .content import sanitize
 from .threads_client import ThreadsClient
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -28,7 +29,7 @@ def run_due(client: ThreadsClient) -> dict:
     due = store.due_scheduled(now_jst_iso())
     stats = {"due": len(due), "posted": 0, "failed": 0}
     for row in due:
-        text = row["text"]
+        text = sanitize(row["text"])  # 投稿直前に装飾記号(**等)を必ず除去
         region = row["region"]
         try:
             loc_id = client.first_location_id(region) if (profile.get("tag_location") and region) else None
