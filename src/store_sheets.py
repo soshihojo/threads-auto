@@ -16,13 +16,29 @@ from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import re
+
 import gspread
 from google.oauth2.service_account import Credentials
+from gspread.utils import rowcol_to_a1
 
 from .config import env
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 JST = ZoneInfo("Asia/Tokyo")
+
+# レイアウト: A列と1行目を空白にする。
+# ヘッダは2行目・データはB列(3行目)から書き込む。
+ROW_OFFSET = 1                    # ヘッダ上の空行数
+COL_OFFSET = 1                    # データ左の空列数
+HEADER_ROW = ROW_OFFSET + 1       # ヘッダ行 = 2
+FIRST_DATA_ROW = HEADER_ROW + 1   # データ開始行 = 3
+FIRST_COL = COL_OFFSET + 1        # データ開始列 = 2 (B)
+
+
+def _col(idx0: int) -> str:
+    """テーブル内0始まり列番号 → 実シートの列文字（例: 0→"B"）。"""
+    return re.sub(r"\d+$", "", rowcol_to_a1(1, FIRST_COL + idx0))
 
 # 各ワークシートのヘッダ定義
 TABLES = {
@@ -59,31 +75,49 @@ def _ws(name: str):
     try:
         ws = sh.worksheet(name)
     except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=name, rows=1000, cols=len(headers))
-        ws.append_row(headers)
-    # ヘッダが空なら入れる
-    if not ws.row_values(1):
-        ws.append_row(headers)
+        ws = sh.add_worksheet(title=name, rows=1000, cols=FIRST_COL + len(headers))
+    # ヘッダ行（2行目・B列〜）が空なら入れる
+    hdr_rng = f"{_col(0)}{HEADER_ROW}:{_col(len(headers) - 1)}{HEADER_ROW}"
+    existing = ws.get(hdr_rng)
+    if not existing or not any(existing[0]):
+        ws.update(range_name=f"{_col(0)}{HEADER_ROW}", values=[headers])
     return ws
 
 
+def _data_rows(name: str) -> list[list]:
+    """データ行（FIRST_DATA_ROW以降・B列〜）の生の値を返す。"""
+    headers = TABLES[name]
+    rng = f"{_col(0)}{FIRST_DATA_ROW}:{_col(len(headers) - 1)}"
+    return _ws(name).get(rng) or []
+
+
 def _records(name: str) -> list[dict]:
-    return _ws(name).get_all_records()
+    headers = TABLES[name]
+    out = []
+    for row in _data_rows(name):
+        if not any(c != "" for c in row):
+            continue  # 空行はスキップ
+        out.append({h: (row[i] if i < len(row) else "") for i, h in enumerate(headers)})
+    return out
 
 
 def _append(name: str, row: dict) -> None:
     headers = TABLES[name]
-    _ws(name).append_row([row.get(h, "") for h in headers], value_input_option="USER_ENTERED")
+    # table_range をヘッダ(B2)にすると、その表の最終行の次（B列〜）に追記される
+    _ws(name).append_row(
+        [row.get(h, "") for h in headers],
+        value_input_option="USER_ENTERED",
+        table_range=f"{_col(0)}{HEADER_ROW}",
+    )
 
 
 def _find_row(name: str, key_col: str, key_val) -> int | None:
-    """key_col==key_val の行番号（1始まり・ヘッダ含む）を返す。無ければNone。"""
+    """key_col==key_val の実シート行番号（1始まり）を返す。無ければNone。"""
     headers = TABLES[name]
     col_idx = headers.index(key_col)
-    values = _ws(name).get_all_values()
-    for i, row in enumerate(values[1:], start=2):  # 2行目以降がデータ
+    for i, row in enumerate(_data_rows(name)):
         if col_idx < len(row) and str(row[col_idx]) == str(key_val):
-            return i
+            return FIRST_DATA_ROW + i
     return None
 
 
@@ -91,7 +125,7 @@ def _update_cells(name: str, row_idx: int, updates: dict) -> None:
     headers = TABLES[name]
     ws = _ws(name)
     for col, val in updates.items():
-        ws.update_cell(row_idx, headers.index(col) + 1, val)
+        ws.update_cell(row_idx, FIRST_COL + headers.index(col), val)
 
 
 def init_db() -> None:
