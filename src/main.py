@@ -51,8 +51,9 @@ def cmd_check(_: argparse.Namespace) -> None:
 
 def cmd_post(args: argparse.Namespace) -> None:
     profile = active_profile()
-    region = content.pick_region()  # 本文と位置タグで同じ地域を使う
-    text = content.generate_best(region=region)
+    case = content.pick_case()  # 実話回は実話の地域、一般論回はランダム地域（本文と位置タグで同じ地域）
+    region = (case or {}).get("region") or content.pick_region()
+    text = content.generate_best(region=region, case=case)
     print(f"----- 生成された投稿（地域: {region or 'なし'}）-----")
     print(text)
     print("--------------------------")
@@ -122,8 +123,7 @@ def cmd_generate(_: argparse.Namespace) -> None:
     n = load_config()["posting"].get("candidates_per_batch", 3)
     created = []
     for _ in range(int(n)):
-        region = content.pick_region()
-        text = content.generate_post(region=region)
+        text, region = content.generate_candidate()  # 実話回は実話の地域に固定される
         cid = store.add_candidate(text, region)
         created.append((cid, region, text))
     print(f"✍️ 候補を{len(created)}件 生成（未承認）。ダッシュボードで承認してください。")

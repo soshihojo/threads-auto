@@ -14,7 +14,8 @@ SYSTEM = """あなたは地域店舗の集客に詳しいSNS運用のプロで�
 
 絶対条件:
 - 【最重要】短く書く。全体で概ね60〜120字。長文は読まれない。要素を詰め込まず、削れる言葉は全部削る
-- 【最重要】1行目で必ず指を止めさせる。「地域＋誰が何をしているか」か「具体的な結果・数字」を冒頭に置く。説明・前置き・自己紹介の長い導入から入らない
+- 【最重要】1行目で必ず指を止めさせる。「自分が何をしている人か」か「具体的な結果・数字」を冒頭に置く。説明・前置き・自己紹介の長い導入から入らない
+- 自分の拠点・所在地は名乗らない（「大阪で〜しています」のような書き方をしない）。何を提供している人かだけ伝える。地域名は実話や呼びかけ対象の店の地域として使う
 - 自分（自社）の実績・事例として語ってよいのは、ルール集の「実話アーカイブ」（06_real_cases.md）にある実話のみ。新しい事例や数字を捏造しない。同じ実話をフック・教訓・文体を変えて使い回すのは推奨
 - 実話を使わない回は一般論型で書く（「よくあるのが…」等）。一般論では自分の実績と主張する具体数字を出さない
 - 具体的な数字を1つだけ入れる（盛らない・嘘くさくしない）。身近・実体験のリアルさを出す
@@ -54,7 +55,22 @@ def pick_region() -> str | None:
     return random.choice(words) if words else None
 
 
-def _variation_directives(profile: dict) -> list[str]:
+def pick_case() -> dict | None:
+    """variation.case_focus からネタ元（実話 or 一般論）を1つ選ぶ。無ければNone。"""
+    v = active_profile().get("variation") or {}
+    cases = v.get("case_focus") or []
+    return random.choice(cases) if cases else None
+
+
+def generate_candidate() -> tuple[str, str | None]:
+    """候補1本を生成し (本文, 地域) を返す。
+    実話回はその実話の地域だけを使い、一般論回のみランダム地域を使う（無関係な地域の混入防止）。"""
+    case = pick_case()
+    region = (case or {}).get("region") or pick_region()
+    return generate_post(region=region, case=case), region
+
+
+def _variation_directives(profile: dict, case: dict | None = None) -> list[str]:
     """profile.variation の各リストから1つずつランダムに選び、生成の振り（指示）を作る。
     似た投稿への収束を防ぐ。variation が無いプロファイルでは空（従来動作）。"""
     v = profile.get("variation") or {}
@@ -63,12 +79,15 @@ def _variation_directives(profile: dict) -> list[str]:
         out.append(f"今回の業種（自己投影させる主役）: {random.choice(v['industries'])}")
     if v.get("topics"):
         out.append(f"今回の話題（チラシ以外も積極的に。これを軸に）: {random.choice(v['topics'])}")
-    if v.get("case_focus"):
-        out.append(f"今回のネタ元: {random.choice(v['case_focus'])}"
-                   "（実話の場合、業種・地域・数字は06_real_cases.mdの事実のまま変えない。"
-                   "話題とネタ元が噛み合わなければネタ元の実話に合わせて話題を寄せる。"
-                   "指定の地域名と実話の地域が違うときは、実話の地域はそのままにし、"
-                   "指定地域は『◯◯の店主さんも』のような呼びかけで使うか、不自然なら省略する）")
+    if case:
+        if case.get("region"):  # 実話回
+            out.append(f"今回のネタ元: {case['label']}。"
+                       "業種・地域・数字は06_real_cases.mdの事実のまま変えない。"
+                       "話題や業種の指定が実話と噛み合わなければ、実話に合わせて寄せる（実話が最優先）。"
+                       "実話の地域以外の地域名を本文に出さない。")
+        else:  # 一般論回
+            out.append(f"今回のネタ元: {case['label']}。"
+                       "自分の実績と主張する具体数字は出さず、あるある・考え方で価値を出す。")
     weights = v.get("type_weights") or {}
     if weights:
         chosen = random.choices(list(weights.keys()), weights=list(weights.values()))[0]
@@ -90,13 +109,17 @@ def _variation_directives(profile: dict) -> list[str]:
     return out
 
 
-def generate_post(type_hint: str | None = None, region: str | None = None) -> str:
+def generate_post(type_hint: str | None = None, region: str | None = None,
+                  case: dict | None = None) -> str:
     """1投稿の本文を生成して返す。type_hint で型を指定（無ければ自動選択）。
-    region を渡すとその地域名を使う（None なら内部でランダム選択）。"""
+    region を渡すとその地域名を使う（None なら内部でランダム選択）。
+    case はネタ元（pick_case の戻り値）。整合した生成には generate_candidate() を推奨。"""
     profile = active_profile()
     rules = _read_rules(profile["rules_dir"])
+    if case is None and not type_hint:
+        case = pick_case()
     if region is None:
-        region = pick_region()
+        region = (case or {}).get("region") or pick_region()
 
     rules_block = "\n\n".join(f"# {name}\n{body}" for name, body in rules.items())
     instructions = [
@@ -104,12 +127,12 @@ def generate_post(type_hint: str | None = None, region: str | None = None) -> st
         f"オファー（必要時のみ自然に）: {profile.get('offer','')}",
     ]
     if region:
-        instructions.append(f"この地域名を自然に本文へ入れる: {region}")
+        instructions.append(f"この地域名を自然に本文へ入れる（文脈に合わなければ無理に入れず省略してよい）: {region}")
     if type_hint:
         instructions.append(f"使う型: {type_hint}")
     else:
         # 業種・話題・型・文体・締めをランダムに振って多様化（収束防止）
-        instructions.extend(_variation_directives(profile))
+        instructions.extend(_variation_directives(profile, case))
 
     user = (
         "以下のルールに従って、Threads投稿を1つ作ってください。\n\n"
@@ -119,11 +142,12 @@ def generate_post(type_hint: str | None = None, region: str | None = None) -> st
     return sanitize(complete(SYSTEM, user, max_tokens=800, temperature=1.0))
 
 
-def generate_best(candidates: int | None = None, region: str | None = None) -> str:
-    """複数候補を生成し、最良の1本を選んで返す。region を渡すと全候補で同じ地域を使う。"""
+def generate_best(candidates: int | None = None, region: str | None = None,
+                  case: dict | None = None) -> str:
+    """複数候補を生成し、最良の1本を選んで返す。region/case を渡すと全候補で同じものを使う。"""
     cfg = load_config()
     n = candidates or cfg["posting"].get("candidates", 1)
-    posts = [generate_post(region=region) for _ in range(max(1, n))]
+    posts = [generate_post(region=region, case=case) for _ in range(max(1, n))]
     if len(posts) == 1:
         return posts[0]
     return _judge(posts)

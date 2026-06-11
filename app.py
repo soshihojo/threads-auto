@@ -87,8 +87,8 @@ with tab_gen:
     if st.button("➕ 今すぐ候補を生成", type="primary"):
         with st.spinner("生成中…"):
             for _ in range(int(n)):
-                region = content.pick_region()
-                store.add_candidate(content.generate_post(region=region), region)
+                text, region = content.generate_candidate()  # 実話回は実話の地域に固定
+                store.add_candidate(text, region)
         st.rerun()
 
     pending = store.list_scheduled(status="pending_review")
