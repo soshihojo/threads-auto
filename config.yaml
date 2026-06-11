@@ -198,7 +198,7 @@ profiles:
 posting:
   # 承認モデル：6時間ごとに候補を自動生成→ダッシュボードで承認したものだけ投稿。
   # 1回の自動生成バッチで作る候補数（未承認として溜まる）
-  candidates_per_batch: 3
+  candidates_per_batch: 1
   # 手動「今すぐ候補生成」やpost時の内部候補数（最良1本を選ぶ用）
   candidates: 2
 
