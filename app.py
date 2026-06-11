@@ -32,17 +32,28 @@ st.set_page_config(page_title="Threads運用ダッシュボード", page_icon="�
 
 
 # ---------------- 簡易パスワード認証 ----------------
+def _auth_token(pw: str) -> str:
+    """URL保持用のログイントークン（パスワード本体はURLに出さない）。"""
+    import hashlib
+    return hashlib.sha256(f"threads-auto:{pw}".encode()).hexdigest()[:20]
+
+
 def _auth() -> bool:
     pw = env("APP_PASSWORD")
     if not pw:
         return True  # 未設定なら認証なし（ローカル用）
     if st.session_state.get("authed"):
         return True
+    # URLの ?k=トークン で自動ログイン（リロード・ブックマークでも再入力不要）
+    if st.query_params.get("k") == _auth_token(pw):
+        st.session_state["authed"] = True
+        return True
     st.title("🔒 ログイン")
     entered = st.text_input("パスワード", type="password")
     if st.button("入る"):
         if entered == pw:
             st.session_state["authed"] = True
+            st.query_params["k"] = _auth_token(pw)  # URLに保持。このURLをブックマークすれば次回から入力不要
             st.rerun()
         else:
             st.error("パスワードが違います")
