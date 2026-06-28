@@ -1,8 +1,9 @@
 name: threads-scheduler
 # 予約投稿の実行。15分おきに共有ストア(Sheets)のキューを見て、時刻が来た予約を自動投稿。
 on:
-  schedule:
-    - cron: "*/15 * * * *"   # 15分おき
+  # 【停止中】ryota_a0621 への配信を止める。tsubaki_honne のトークンをSecretsへ設定後に再開。
+  # schedule:
+  #   - cron: "*/15 * * * *"   # 15分おき
   workflow_dispatch: {}
 
 jobs:

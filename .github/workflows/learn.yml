@@ -2,8 +2,9 @@ name: threads-learn
 # 反応データを分析→勝ち要素を抽象化→学習ルール(rules_*/05_learned.md)を自動更新し、
 # 変更があればリポジトリにコミットして戻す（使い捨てランナーでも学びを永続化）。
 on:
-  schedule:
-    - cron: "0 0 */3 * *"   # 3日ごと UTC0時（JST9時）
+  # 【停止中】移行中は学習も止める。tsubaki_honne 移行後に再開。
+  # schedule:
+  #   - cron: "0 0 */3 * *"   # 3日ごと UTC0時（JST9時）
   workflow_dispatch: {}
 
 permissions:
@@ -30,7 +31,7 @@ jobs:
         run: |
           git config user.name "threads-auto-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add rules rules_local
+          git add rules rules_local rules_tsubaki
           if git diff --staged --quiet; then
             echo "学習による変更なし"
           else

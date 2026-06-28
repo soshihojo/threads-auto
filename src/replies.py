@@ -18,16 +18,20 @@ REPLY_SYSTEM = """あなたは地域店舗の集客を支援する担当者と�
 - 1〜2文、長くても80字程度。絵文字は0〜1個まで
 - 出力は返信本文のみ"""
 
+DEFAULT_LEAD_INTENT = "この人は手挙げ（見込み客）です。関心に応えつつ、DMか詳細案内にやんわり誘導してください。"
+DEFAULT_NORMAL_INTENT = "コメントに自然に応答してください。無理に営業しないこと。"
+
 
 def _draft_reply(reply_text: str, username: str, is_lead: bool) -> str:
     profile = active_profile()
-    intent = "この人は手挙げ（見込み客）です。関心に応えつつ、DMか詳細案内にやんわり誘導してください。" if is_lead else \
-        "コメントに自然に応答してください。無理に営業しないこと。"
+    system = profile.get("reply_system") or REPLY_SYSTEM
+    intent = (profile.get("reply_lead_intent") or DEFAULT_LEAD_INTENT) if is_lead else \
+        (profile.get("reply_normal_intent") or DEFAULT_NORMAL_INTENT)
     user = (
         f"オファー文脈: {profile.get('offer','')}\n"
         f"相手(@{username})のコメント: 「{reply_text}」\n\n{intent}"
     )
-    return complete(REPLY_SYSTEM, user, max_tokens=200, temperature=0.8)
+    return complete(system, user, max_tokens=200, temperature=0.8)
 
 
 def process_replies(client: ThreadsClient) -> dict:

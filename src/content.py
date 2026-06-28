@@ -29,6 +29,22 @@ SYSTEM = """あなたは地域店舗の集客に詳しいSNS運用のプロで�
 - 出力は投稿本文のみ。説明・前置き・引用符・ハッシュタグの羅列は不要
 - Markdownの装飾記号を一切使わない（**太字**、見出し#、箇条書きの記号*など禁止）。プレーンテキストで書く"""
 
+# プロファイルが system_prompt / variation.closing_directive / judge_* を持たない場合のデフォルト。
+# （local_owner=集客プロファイルは従来どおりこのデフォルトで動く）
+DEFAULT_CLOSING = (
+    "扱うテーマは必ず3商品（ポスティング代行/SNSアカウント運用/HP制作・リニューアル）のいずれか、"
+    "またはその組み合わせに関わる内容にする。"
+    "全体は60〜120字で短く、1行目で必ず指を止める。具体数字を1つだけ入れ、身近な実体験のリアルさを出す。"
+    "締め（CTA）は必ず『いいね』を促す形にし、何に対するいいねか（サービス・提供内容）を明示する。"
+    "本文で『自分が何を提供している人か』が伝わり、いいね＝それを頼める合図だと分かるようにする。"
+    "コメント・DM・返信は求めない。『次に投稿します』等の実行しない約束は禁止。売り込まない。"
+    "過去の投稿と業種・話題・文体・締めが被らないようにし、同一パターンの連発を避ける。"
+)
+DEFAULT_JUDGE_SYSTEM = (
+    "あなたはThreadsのバズ投稿を見抜く編集者です。冒頭フックの強さと手挙げ（コメント）誘発力で評価します。"
+)
+DEFAULT_JUDGE_GOAL = "店舗オーナーの手挙げを最も取れそうな投稿"
+
 
 def sanitize(text: str) -> str:
     """Threadsはmarkdownを解釈せず記号がそのまま出るため、装飾記号を除去する。
@@ -74,11 +90,14 @@ def _variation_directives(profile: dict, case: dict | None = None) -> list[str]:
     """profile.variation の各リストから1つずつランダムに選び、生成の振り（指示）を作る。
     似た投稿への収束を防ぐ。variation が無いプロファイルでは空（従来動作）。"""
     v = profile.get("variation") or {}
+    labels = v.get("labels") or {}
     out: list[str] = []
     if v.get("industries"):
-        out.append(f"今回の業種（自己投影させる主役）: {random.choice(v['industries'])}")
+        lbl = labels.get("industries", "今回の業種（自己投影させる主役）")
+        out.append(f"{lbl}: {random.choice(v['industries'])}")
     if v.get("topics"):
-        out.append(f"今回の話題（チラシ以外も積極的に。これを軸に）: {random.choice(v['topics'])}")
+        lbl = labels.get("topics", "今回の話題（チラシ以外も積極的に。これを軸に）")
+        out.append(f"{lbl}: {random.choice(v['topics'])}")
     if case:
         if case.get("region"):  # 実話回
             out.append(f"今回のネタ元: {case['label']}。"
@@ -97,15 +116,7 @@ def _variation_directives(profile: dict, case: dict | None = None) -> list[str]:
     if v.get("ctas"):
         out.append(f"今回の締め方: {random.choice(v['ctas'])}")
     if out:
-        out.append(
-            "扱うテーマは必ず3商品（ポスティング代行/SNSアカウント運用/HP制作・リニューアル）のいずれか、"
-            "またはその組み合わせに関わる内容にする。"
-            "全体は60〜120字で短く、1行目で必ず指を止める。具体数字を1つだけ入れ、身近な実体験のリアルさを出す。"
-            "締め（CTA）は必ず『いいね』を促す形にし、何に対するいいねか（サービス・提供内容）を明示する。"
-            "本文で『自分が何を提供している人か』が伝わり、いいね＝それを頼める合図だと分かるようにする。"
-            "コメント・DM・返信は求めない。『次に投稿します』等の実行しない約束は禁止。売り込まない。"
-            "過去の投稿と業種・話題・文体・締めが被らないようにし、同一パターンの連発を避ける。"
-        )
+        out.append(v.get("closing_directive") or DEFAULT_CLOSING)
     return out
 
 
@@ -139,7 +150,8 @@ def generate_post(type_hint: str | None = None, region: str | None = None,
         f"=== ルール集 ===\n{rules_block}\n\n"
         f"=== 今回の指示 ===\n" + "\n".join(f"- {x}" for x in instructions)
     )
-    return sanitize(complete(SYSTEM, user, max_tokens=800, temperature=1.0))
+    system = profile.get("system_prompt") or SYSTEM
+    return sanitize(complete(system, user, max_tokens=800, temperature=1.0))
 
 
 def generate_best(candidates: int | None = None, region: str | None = None,
@@ -155,10 +167,12 @@ def generate_best(candidates: int | None = None, region: str | None = None,
 
 def _judge(posts: list[str]) -> str:
     """候補をClaudeに採点させ、最も手挙げ（コメント）を取れそうな1本を選ぶ。"""
+    profile = active_profile()
     listed = "\n\n".join(f"[{i}]\n{p}" for i, p in enumerate(posts))
-    sys = "あなたはThreadsのバズ投稿を見抜く編集者です。冒頭フックの強さと手挙げ（コメント）誘発力で評価します。"
+    sys = profile.get("judge_system") or DEFAULT_JUDGE_SYSTEM
+    goal = profile.get("judge_goal") or DEFAULT_JUDGE_GOAL
     user = (
-        "次の候補から、店舗オーナーの手挙げを最も取れそうな投稿を1つ選び、"
+        f"次の候補から、{goal}を1つ選び、"
         "その番号だけを半角数字で1文字返してください。\n\n" + listed
     )
     try:
