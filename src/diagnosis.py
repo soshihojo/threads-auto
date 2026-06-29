@@ -82,8 +82,10 @@ DIAG_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿姉（つば
 - 絵文字は締めに🌙を1つだけ。出力は鑑定文のみ"""
 
 
-def generate_reading(me_birth: str, him_birth: str, status: str, period: str) -> dict:
+def generate_reading(me_birth: str, him_birth: str, status: str, period: str,
+                     details: str = "") -> dict:
     """無料診断の鑑定文を生成して返す。
+    details は相談者の自由記述（例: 未読無視が続いてる／既読はつくが返信なし 等）。
     返り値: {me_shuku, him_shuku, distance, reading}
     """
     me_s = honmei_shuku(me_birth)
@@ -97,7 +99,9 @@ def generate_reading(me_birth: str, him_birth: str, status: str, period: str) ->
         "次の相談者に、椿姉として無料診断の鑑定文を書いてください。\n"
         "※相談者はすでに生年月日を送ってくれている。生年月日やDMを再度要求せず、続きはLINEへ誘導すること。\n\n"
         f"【相談者の状況】{status}\n"
-        f"【最後の連絡からの期間】{period}\n\n"
+        f"【最後の連絡からの期間】{period}\n"
+        + (f"【相談者が書いた具体的な状況】{details}\n" if details.strip() else "")
+        + "\n"
         "--- 以下は鑑定の内部参考（宿曜の算出結果）。専門用語なので本文には絶対に出さず、"
         "性質や相性の“中身”だけを日常語に翻訳して使うこと ---\n"
         f"・相談者の本命宿: {me_s}\n"
@@ -106,6 +110,8 @@ def generate_reading(me_birth: str, him_birth: str, status: str, period: str) ->
         "----------------------------------------------------------------\n\n"
         "彼の性質と二人の相性を、専門用語を使わず誰でも分かる言葉で具体的に語り、"
         "彼が今その状況になっている本音を7割明かし、残り（本音の核心と動き時）はLINEで視ると締めてください。\n"
+        + ("相談者が具体的な状況を書いている場合は、その内容に正面から触れ、"
+           "その状況ならではの彼の心理を語ってカスタマイズ感を出すこと。\n" if details.strip() else "")
         + (f"【LINE登録リンク】{line_url} ← 鑑定文の最後に、椿姉の言葉で「続きはLINEで視たる」と促してこのURLを1行で載せる"
            if line_url else "")
     )

@@ -134,22 +134,43 @@ with tab_gen:
 
 
 # ---------------- 無料診断 ----------------
+def _jp_birthday(label: str, key: str, default_year: int):
+    """年/月/日の日本語セレクトで生年月日を選ばせ 'YYYY-MM-DD' を返す。無効な日付ならNone。"""
+    st.markdown(f"**{label}**")
+    years = list(range(date.today().year, 1954, -1))
+    cy, cm, cd = st.columns(3)
+    y = cy.selectbox("年", years, index=years.index(default_year) if default_year in years else 0,
+                     key=f"{key}_y", format_func=lambda v: f"{v}年")
+    m = cm.selectbox("月", list(range(1, 13)), key=f"{key}_m", format_func=lambda v: f"{v}月")
+    d = cd.selectbox("日", list(range(1, 32)), key=f"{key}_d", format_func=lambda v: f"{v}日")
+    try:
+        return date(y, m, d).strftime("%Y-%m-%d")
+    except ValueError:
+        st.warning(f"「{label}」の{y}年{m}月{d}日は存在しません。日を選び直してください。")
+        return None
+
+
 with tab_diag:
-    st.caption("相談者の生年月日と状況を入れて「鑑定する」。椿姉の鑑定文（宿曜→彼の本音7割→LINE誘導）が出ます。")
-    c1, c2 = st.columns(2)
-    me = c1.date_input("相談者の生年月日", value=date(1995, 1, 1),
-                       min_value=date(1955, 1, 1), max_value=date.today(), key="diag_me")
-    him = c2.date_input("彼の生年月日", value=date(1993, 1, 1),
-                        min_value=date(1955, 1, 1), max_value=date.today(), key="diag_him")
+    st.caption("生年月日・状況・相談内容を入れて「鑑定する」。椿姉の鑑定文（彼の本音→LINE誘導）が出ます。")
+    me_birth = _jp_birthday("相談者（あなた）の生年月日", "diag_me", 1995)
+    him_birth = _jp_birthday("彼の生年月日", "diag_him", 1993)
     c3, c4 = st.columns(2)
     status = c3.selectbox("状況", ["音信不通", "既読スルー", "急に冷められた", "別れ話の後",
                                    "片思いで進展なし", "復縁したい"], key="diag_status")
     period = c4.selectbox("最後の連絡からの期間", ["〜3日", "〜2週間", "1ヶ月以上"], key="diag_period")
+    details = st.text_area(
+        "相談内容（自由記載・任意）",
+        placeholder="例：未読無視が続いてる／既読はつくけど返信がない／彼に新しい女がいそう など。書くほど鑑定が具体的になります",
+        key="diag_details", height=100,
+    )
     if st.button("🔮 鑑定する", type="primary", key="diag_run"):
-        try:
-            with st.spinner("椿姉が視てます…"):
-                res = diagnosis.generate_reading(me.strftime("%Y-%m-%d"), him.strftime("%Y-%m-%d"), status, period)
-            st.markdown(f"**あなた: {res['me_shuku']}　/　彼: {res['him_shuku']}　/　縁の距離: {res['distance']}**")
-            st.text_area("鑑定文（コピーして相談者に送れます）", value=res["reading"], height=320, key="diag_out")
-        except Exception as e:
-            st.error(f"鑑定の生成に失敗しました（{e}）。少し待って再度お試しください。")
+        if not me_birth or not him_birth:
+            st.error("生年月日を正しく選んでください。")
+        else:
+            try:
+                with st.spinner("椿姉が視てます…"):
+                    res = diagnosis.generate_reading(me_birth, him_birth, status, period, details)
+                st.markdown(f"**あなた: {res['me_shuku']}　/　彼: {res['him_shuku']}　/　縁の距離: {res['distance']}**")
+                st.text_area("鑑定文（コピーして相談者に送れます）", value=res["reading"], height=320, key="diag_out")
+            except Exception as e:
+                st.error(f"鑑定の生成に失敗しました（{e}）。少し待って再度お試しください。")

@@ -163,7 +163,7 @@ def cmd_run_due(_: argparse.Namespace) -> None:
 
 def cmd_diagnose(args: argparse.Namespace) -> None:
     """無料診断：状況＋二人の生年月日 → 椿姉の鑑定文を生成して表示。"""
-    res = diagnosis.generate_reading(args.me, args.him, args.status, args.period)
+    res = diagnosis.generate_reading(args.me, args.him, args.status, args.period, args.details)
     print(f"----- 無料診断（あなた:{res['me_shuku']} / 彼:{res['him_shuku']} / 距離:{res['distance']}）-----")
     print(res["reading"])
     print("--------------------------")
@@ -196,6 +196,7 @@ def main() -> None:
     p_diag.add_argument("--him", required=True, help="彼の生年月日 YYYY-MM-DD")
     p_diag.add_argument("--status", default="音信不通", help="状況（音信不通/既読スルー/冷められた/別れた 等）")
     p_diag.add_argument("--period", default="2週間", help="最後の連絡からの期間")
+    p_diag.add_argument("--details", default="", help="相談者の自由記述（任意）")
     p_diag.set_defaults(func=cmd_diagnose)
     sub.add_parser("refresh-token").set_defaults(func=cmd_refresh_token)
     args = parser.parse_args()
