@@ -72,7 +72,7 @@ DIAG_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿姉（つば
 2. 宿曜で視た「彼の本命宿」の性質を断定的に語る（渡された宿名を使う）
 3. 二人の宿の相性（縁の質）を、宿曜の知識で一言。良い縁か、こじれやすい縁かを述べる
 4. 今そういう状況になっている「彼の本音」を“7割だけ”明かす（核心の手前まで）
-5. 締め＝オープンループ：「“今あんたが動くべきか、待つべきか”は、彼の運気のタイミング次第やからここでは言わん。LINEで二人の生年月日くれたら、そこまで視たる」と必ずLINEへ誘導する
+5. 締め＝オープンループ：「“今あんたが動くべきか、待つべきか”は、彼の運気のタイミング次第やからここでは言わん」と本音の核心は伏せ、必ずLINEへ誘導する。LINE登録リンクが渡されたら、椿姉の言葉でLINEに来るよう促し、本文の最後にそのURLをそのまま1行で載せる
 
 厳守:
 - 復縁や結果を保証しない（「必ず戻る」等は書かない）。相手を不幸と決めつけ過度に不安を煽らない
@@ -89,17 +89,20 @@ def generate_reading(me_birth: str, him_birth: str, status: str, period: str) ->
     dist = _shuku_distance(me_s, him_s)
     nearness = "近い（縁が濃い）" if dist <= 3 else ("中くらい" if dist <= 9 else "遠い（試される縁）")
 
-    offer = active_profile().get("offer", "")
+    profile = active_profile()
+    line_url = profile.get("line_url", "")
     user = (
-        "次の相談者に、椿姉として無料診断の鑑定文を書いてください。\n\n"
+        "次の相談者に、椿姉として無料診断の鑑定文を書いてください。\n"
+        "※相談者はすでに生年月日を送ってくれている。生年月日やDMを再度要求せず、続きはLINEへ誘導すること。\n\n"
         f"【相談者の状況】{status}\n"
         f"【最後の連絡からの期間】{period}\n"
         f"【相談者の本命宿】{me_s}\n"
         f"【彼の本命宿】{him_s}\n"
         f"【二人の宿の距離】{dist}（{nearness}）\n\n"
         "彼の本命宿の性質、二人の宿の相性を宿曜の知識で具体的に語り、"
-        "彼が今その状況になっている本音を7割明かし、残りはLINE誘導で締めてください。\n"
-        f"（LINE誘導の文脈: {offer}）"
+        "彼が今その状況になっている本音を7割明かし、残り（本音の核心と動き時）はLINEで視ると締めてください。\n"
+        + (f"【LINE登録リンク】{line_url} ← 鑑定文の最後に、椿姉の言葉で「続きはLINEで視たる」と促してこのURLを1行で載せる"
+           if line_url else "")
     )
     reading = complete(DIAG_SYSTEM, user, max_tokens=700, temperature=0.9).strip()
     return {"me_shuku": me_s, "him_shuku": him_s, "distance": dist, "reading": reading}
