@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import argparse
 
-from . import analytics, content, notify, replies as replies_mod, schedule as schedule_mod, store
+from . import analytics, content, diagnosis, notify, replies as replies_mod, schedule as schedule_mod, store
 from .config import DATA_DIR, active_profile, env, load_config
 from .threads_client import ThreadsClient
 
@@ -161,6 +161,14 @@ def cmd_run_due(_: argparse.Namespace) -> None:
     print(f"⏰ 予約チェック: 対象 {stats['due']} / 配信 {stats['posted']} / 失敗 {stats['failed']}")
 
 
+def cmd_diagnose(args: argparse.Namespace) -> None:
+    """無料診断：状況＋二人の生年月日 → 椿姉の鑑定文を生成して表示。"""
+    res = diagnosis.generate_reading(args.me, args.him, args.status, args.period)
+    print(f"----- 無料診断（あなた:{res['me_shuku']} / 彼:{res['him_shuku']} / 距離:{res['distance']}）-----")
+    print(res["reading"])
+    print("--------------------------")
+
+
 def cmd_refresh_token(_: argparse.Namespace) -> None:
     c = make_client()
     data = c.refresh_long_lived_token()
@@ -183,6 +191,12 @@ def main() -> None:
     sub.add_parser("generate").set_defaults(func=cmd_generate)
     sub.add_parser("check-store").set_defaults(func=cmd_check_store)
     sub.add_parser("run-due").set_defaults(func=cmd_run_due)
+    p_diag = sub.add_parser("diagnose")
+    p_diag.add_argument("--me", required=True, help="相談者の生年月日 YYYY-MM-DD")
+    p_diag.add_argument("--him", required=True, help="彼の生年月日 YYYY-MM-DD")
+    p_diag.add_argument("--status", default="音信不通", help="状況（音信不通/既読スルー/冷められた/別れた 等）")
+    p_diag.add_argument("--period", default="2週間", help="最後の連絡からの期間")
+    p_diag.set_defaults(func=cmd_diagnose)
     sub.add_parser("refresh-token").set_defaults(func=cmd_refresh_token)
     args = parser.parse_args()
     args.func(args)
