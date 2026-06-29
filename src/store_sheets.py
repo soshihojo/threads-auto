@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -54,6 +55,31 @@ def _now() -> str:
     return datetime.now(JST).strftime("%Y-%m-%dT%H:%M:%S")
 
 
+# Sheets APIの「読み取り60回/分・ユーザー」上限(429)対策：
+# ① 429が出たら指数バックオフでリトライ（クォータは分単位で回復する）
+# ② 同一プロセス内でデータ行の読み取りをキャッシュ。書き込みで無効化し、
+#    init_db()（Streamlitは描画ごとに先頭で呼ぶ）で全クリア＝描画ごとに最新化。
+_CACHE: dict[str, list] = {}
+_RETRY_DELAYS = (0, 5, 12, 25, 45)  # 秒
+
+
+def _api(fn, *args, **kwargs):
+    """gspreadのネットワーク呼び出しを429リトライ付きで実行する。"""
+    last = None
+    for delay in _RETRY_DELAYS:
+        if delay:
+            time.sleep(delay)
+        try:
+            return fn(*args, **kwargs)
+        except gspread.exceptions.APIError as e:
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            if code == 429:
+                last = e
+                continue
+            raise
+    raise last
+
+
 def _creds_info() -> dict:
     raw = env("GOOGLE_SERVICE_ACCOUNT_JSON", required=True).strip()
     # JSON文字列を直接渡しているケース（ホスティング時のSecrets）
@@ -85,17 +111,21 @@ def _ws(name: str):
         ws = sh.add_worksheet(title=name, rows=1000, cols=FIRST_COL + len(headers))
     # ヘッダ行（2行目・B列〜）が空なら入れる
     hdr_rng = f"{_col(0)}{HEADER_ROW}:{_col(len(headers) - 1)}{HEADER_ROW}"
-    existing = ws.get(hdr_rng)
+    existing = _api(ws.get, hdr_rng)
     if not existing or not any(existing[0]):
-        ws.update(range_name=f"{_col(0)}{HEADER_ROW}", values=[headers])
+        _api(ws.update, range_name=f"{_col(0)}{HEADER_ROW}", values=[headers])
     return ws
 
 
 def _data_rows(name: str) -> list[list]:
-    """データ行（FIRST_DATA_ROW以降・B列〜）の生の値を返す。"""
+    """データ行（FIRST_DATA_ROW以降・B列〜）の生の値を返す。読み取りはキャッシュ。"""
+    if name in _CACHE:
+        return _CACHE[name]
     headers = TABLES[name]
     rng = f"{_col(0)}{FIRST_DATA_ROW}:{_col(len(headers) - 1)}"
-    return _ws(name).get(rng) or []
+    rows = _api(_ws(name).get, rng) or []
+    _CACHE[name] = rows
+    return rows
 
 
 def _records(name: str) -> list[dict]:
@@ -113,11 +143,13 @@ def _append(name: str, row: dict) -> None:
     # table_range をヘッダ(B2)にすると、その表の最終行の次（B列〜）に追記される。
     # RAW: SheetsがISO日時(...T...)を日付へ自動変換するのを防ぎ、文字列をそのまま保存する
     #（scheduled_at の文字列比較が壊れないようにするため必須）。
-    _ws(name).append_row(
+    _api(
+        _ws(name).append_row,
         [row.get(h, "") for h in headers],
         value_input_option="RAW",
         table_range=f"{_col(0)}{HEADER_ROW}",
     )
+    _CACHE.pop(name, None)  # 書き込みでキャッシュ無効化
 
 
 def _find_row(name: str, key_col: str, key_val) -> int | None:
@@ -136,10 +168,12 @@ def _update_cells(name: str, row_idx: int, updates: dict) -> None:
     for col, val in updates.items():
         a1 = rowcol_to_a1(row_idx, FIRST_COL + headers.index(col))
         # RAW: ISO日時の日付自動変換を防ぐ（_append と同じ理由）
-        ws.update(range_name=a1, values=[[val]], value_input_option="RAW")
+        _api(ws.update, range_name=a1, values=[[val]], value_input_option="RAW")
+    _CACHE.pop(name, None)  # 書き込みでキャッシュ無効化
 
 
 def init_db() -> None:
+    _CACHE.clear()  # 描画ごとに最新化（Streamlitは先頭で毎回呼ぶ）
     for name in TABLES:
         _ws(name)  # 無ければ作成
 
