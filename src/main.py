@@ -169,6 +169,14 @@ def cmd_diagnose(args: argparse.Namespace) -> None:
     print("--------------------------")
 
 
+def cmd_monthly(args: argparse.Namespace) -> None:
+    """月額会員向け：二人の生年月日＋今月の悩み → 今月の運気鑑定を生成して表示。"""
+    res = diagnosis.generate_monthly(args.me, args.him, args.worry, args.month)
+    print(f"----- {args.month}の会員鑑定（あなた:{res['me_shuku']} / 彼:{res['him_shuku']}）-----")
+    print(res["reading"])
+    print("--------------------------")
+
+
 def cmd_refresh_token(_: argparse.Namespace) -> None:
     c = make_client()
     data = c.refresh_long_lived_token()
@@ -198,6 +206,12 @@ def main() -> None:
     p_diag.add_argument("--period", default="2週間", help="最後の連絡からの期間")
     p_diag.add_argument("--details", default="", help="相談者の自由記述（任意）")
     p_diag.set_defaults(func=cmd_diagnose)
+    p_mon = sub.add_parser("monthly")
+    p_mon.add_argument("--me", required=True, help="相談者の生年月日 YYYY-MM-DD")
+    p_mon.add_argument("--him", required=True, help="彼の生年月日 YYYY-MM-DD")
+    p_mon.add_argument("--worry", default="", help="今月の悩み・状況（任意）")
+    p_mon.add_argument("--month", default="今月", help="対象月のラベル（例: 7月）")
+    p_mon.set_defaults(func=cmd_monthly)
     sub.add_parser("refresh-token").set_defaults(func=cmd_refresh_token)
     args = parser.parse_args()
     args.func(args)

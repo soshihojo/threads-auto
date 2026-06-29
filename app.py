@@ -72,7 +72,7 @@ profile = active_profile()
 st.title("🧵 Threads運用ダッシュボード")
 st.caption(f"プロファイル: {profile['name']}　|　返信モード: 下書き承認制　|　現在(JST): {now_jst():%Y-%m-%d %H:%M}")
 
-tab_gen, tab_diag = st.tabs(["✍️ 承認待ちの候補", "🔮 無料診断"])
+tab_gen, tab_diag, tab_monthly = st.tabs(["✍️ 承認待ちの候補", "🔮 無料診断", "🗓 月次会員鑑定"])
 
 
 def _post_now(text: str, region: str | None) -> None:
@@ -172,5 +172,32 @@ with tab_diag:
                     res = diagnosis.generate_reading(me_birth, him_birth, status, period, details)
                 st.markdown(f"**あなた: {res['me_shuku']}　/　彼: {res['him_shuku']}　/　縁の距離: {res['distance']}**")
                 st.text_area("鑑定文（コピーして相談者に送れます）", value=res["reading"], height=320, key="diag_out")
+            except Exception as e:
+                st.error(f"鑑定の生成に失敗しました（{e}）。少し待って再度お試しください。")
+
+
+# ---------------- 月次会員鑑定 ----------------
+_MONTHS = [f"{m}月" for m in range(1, 13)]
+
+with tab_monthly:
+    st.caption("月額会員向け。二人の生年月日と今月の悩みを入れて「今月の運気を視る」。出し惜しみせず価値を渡す版が出ます。")
+    m_me = _jp_birthday("会員（あなた）の生年月日", "mon_me", 1995)
+    m_him = _jp_birthday("彼の生年月日", "mon_him", 1993)
+    cM, _sp = st.columns([1, 2])
+    month = cM.selectbox("対象月", _MONTHS, index=date.today().month - 1, key="mon_month")
+    worry = st.text_area(
+        "今月の悩み・状況（任意）",
+        placeholder="例：先月から少し連絡が増えた／また既読が遅くなってきた／復縁を切り出すか迷ってる など",
+        key="mon_worry", height=90,
+    )
+    if st.button("🗓 今月の運気を視る", type="primary", key="mon_run"):
+        if not m_me or not m_him:
+            st.error("生年月日を正しく選んでください。")
+        else:
+            try:
+                with st.spinner("椿姉が今月を視てます…"):
+                    res = diagnosis.generate_monthly(m_me, m_him, worry, month)
+                st.markdown(f"**会員: {res['me_shuku']}　/　彼: {res['him_shuku']}　/　{month}**")
+                st.text_area("今月の鑑定（コピーして会員に送れます）", value=res["reading"], height=320, key="mon_out")
             except Exception as e:
                 st.error(f"鑑定の生成に失敗しました（{e}）。少し待って再度お試しください。")
