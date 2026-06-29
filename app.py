@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import streamlit as st
 
@@ -24,7 +24,7 @@ try:
 except Exception:
     pass
 
-from src import content, store
+from src import content, diagnosis, store
 from src.config import active_profile, env
 from src.schedule import JST, now_jst
 
@@ -69,7 +69,7 @@ profile = active_profile()
 st.title("🧵 Threads運用ダッシュボード")
 st.caption(f"プロファイル: {profile['name']}　|　返信モード: 下書き承認制　|　現在(JST): {now_jst():%Y-%m-%d %H:%M}")
 
-tab_gen, tab_sched, tab_leads = st.tabs(["✍️ 承認待ちの候補", "🗓 予約・実績", "🔥 リード"])
+tab_gen, tab_sched, tab_leads, tab_diag = st.tabs(["✍️ 承認待ちの候補", "🗓 予約・実績", "🔥 リード", "🔮 無料診断"])
 
 
 def _post_now(text: str, region: str | None) -> None:
@@ -154,3 +154,22 @@ with tab_leads:
             with st.container(border=True):
                 st.markdown(f"**@{l['username']}**　検知:`{l['keyword']}`　{l['created_at']}")
                 st.text(l["text"])
+
+
+# ---------------- 無料診断 ----------------
+with tab_diag:
+    st.caption("相談者の生年月日と状況を入れて「鑑定する」。椿姉の鑑定文（宿曜→彼の本音7割→LINE誘導）が出ます。")
+    c1, c2 = st.columns(2)
+    me = c1.date_input("相談者の生年月日", value=date(1995, 1, 1),
+                       min_value=date(1955, 1, 1), max_value=date.today(), key="diag_me")
+    him = c2.date_input("彼の生年月日", value=date(1993, 1, 1),
+                        min_value=date(1955, 1, 1), max_value=date.today(), key="diag_him")
+    c3, c4 = st.columns(2)
+    status = c3.selectbox("状況", ["音信不通", "既読スルー", "急に冷められた", "別れ話の後",
+                                   "片思いで進展なし", "復縁したい"], key="diag_status")
+    period = c4.selectbox("最後の連絡からの期間", ["〜3日", "〜2週間", "1ヶ月以上"], key="diag_period")
+    if st.button("🔮 鑑定する", type="primary", key="diag_run"):
+        with st.spinner("椿姉が視てます…"):
+            res = diagnosis.generate_reading(me.strftime("%Y-%m-%d"), him.strftime("%Y-%m-%d"), status, period)
+        st.markdown(f"**あなた: {res['me_shuku']}　/　彼: {res['him_shuku']}　/　縁の距離: {res['distance']}**")
+        st.text_area("鑑定文（コピーして相談者に送れます）", value=res["reading"], height=320, key="diag_out")
