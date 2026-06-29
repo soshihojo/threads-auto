@@ -90,9 +90,14 @@ with tab_gen:
     n = st.number_input("今すぐ追加生成する数", min_value=1, max_value=8, value=3)
     if st.button("➕ 今すぐ候補を生成", type="primary"):
         try:
+            try:
+                base = len(store.list_scheduled(limit=100000))
+            except Exception:
+                base = 0
             with st.spinner("生成中…"):
-                for _ in range(int(n)):
-                    text, region = content.generate_candidate()  # 実話回は実話の地域に固定
+                for i in range(int(n)):
+                    force = ((base + i) % 3 == 0)  # 3本に1本は必ずDM/無料鑑定へ誘導
+                    text, region = content.generate_candidate(force_cta=force)
                     store.add_candidate(text, region)
             st.rerun()
         except Exception as e:

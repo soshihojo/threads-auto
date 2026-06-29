@@ -78,12 +78,13 @@ def pick_case() -> dict | None:
     return random.choice(cases) if cases else None
 
 
-def generate_candidate() -> tuple[str, str | None]:
+def generate_candidate(force_cta: bool = False) -> tuple[str, str | None]:
     """候補1本を生成し (本文, 地域) を返す。
-    実話回はその実話の地域だけを使い、一般論回のみランダム地域を使う（無関係な地域の混入防止）。"""
+    実話回はその実話の地域だけを使い、一般論回のみランダム地域を使う（無関係な地域の混入防止）。
+    force_cta=True のときは型に関わらず必ずDM/無料鑑定への誘導を入れる。"""
     case = pick_case()
     region = (case or {}).get("region") or pick_region()
-    return generate_post(region=region, case=case), region
+    return generate_post(region=region, case=case, force_cta=force_cta), region
 
 
 def _variation_directives(profile: dict, case: dict | None = None) -> list[str]:
@@ -121,7 +122,7 @@ def _variation_directives(profile: dict, case: dict | None = None) -> list[str]:
 
 
 def generate_post(type_hint: str | None = None, region: str | None = None,
-                  case: dict | None = None) -> str:
+                  case: dict | None = None, force_cta: bool = False) -> str:
     """1投稿の本文を生成して返す。type_hint で型を指定（無ければ自動選択）。
     region を渡すとその地域名を使う（None なら内部でランダム選択）。
     case はネタ元（pick_case の戻り値）。整合した生成には generate_candidate() を推奨。"""
@@ -144,6 +145,13 @@ def generate_post(type_hint: str | None = None, region: str | None = None,
     else:
         # 業種・話題・型・文体・締めをランダムに振って多様化（収束防止）
         instructions.extend(_variation_directives(profile, case))
+
+    if force_cta:
+        instructions.append(
+            "【必須・最優先】この投稿は、どの型であっても最後に必ず無料鑑定への誘導を入れる。"
+            "椿姉の自然な流れで『二人の生年月日をDMに送ってみ、ウチが視たる』や『コメントに本音って置いてみ』等、"
+            "向こうからDM・コメントを促す一文で締めること。"
+        )
 
     user = (
         "以下のルールに従って、Threads投稿を1つ作ってください。\n\n"

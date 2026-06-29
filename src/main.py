@@ -121,9 +121,14 @@ def cmd_generate(_: argparse.Namespace) -> None:
     6時間おきにGitHub Actionsから実行する想定。承認はダッシュボードで行う。"""
     store.init_db()
     n = load_config()["posting"].get("candidates_per_batch", 3)
+    try:
+        base = len(store.list_scheduled(limit=100000))  # 既存の総数で3回に1回のDM誘導を判定
+    except Exception:
+        base = 0
     created = []
-    for _ in range(int(n)):
-        text, region = content.generate_candidate()  # 実話回は実話の地域に固定される
+    for i in range(int(n)):
+        force = ((base + i) % 3 == 0)  # 3本に1本は必ずDM/無料鑑定へ誘導
+        text, region = content.generate_candidate(force_cta=force)
         cid = store.add_candidate(text, region)
         created.append((cid, region, text))
     print(f"✍️ 候補を{len(created)}件 生成（未承認）。ダッシュボードで承認してください。")
