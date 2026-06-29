@@ -2,10 +2,8 @@ name: threads-generate
 # 12時間ごとに投稿候補を自動生成 → 共有ストア(Sheets)にpending_reviewで溜める。
 # 投稿は、ダッシュボードで承認 → scheduler(run-due)が配信する。
 on:
-  # 【停止中】tsubaki_honne のトークンをSecretsへ設定し椿姉へ移行するまで自動生成は止める。
-  # 移行後、下の schedule のコメントを外して再開する。手動実行(workflow_dispatch)は可能。
-  # schedule:
-  #   - cron: "0 */12 * * *"   # 12時間おき（UTC 0/12 = JST 9/21）
+  schedule:
+    - cron: "0 */12 * * *"   # 12時間おき（UTC 0/12 = JST 9/21）
   workflow_dispatch: {}
 
 jobs:

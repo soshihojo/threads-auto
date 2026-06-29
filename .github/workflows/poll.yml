@@ -2,9 +2,8 @@ name: threads-poll
 # 返信ポーリング＋リード検知＋通知（数時間おき）。インサイトは1日1回。
 # 返信送信は draft モードなので承認待ち。リード通知はここで飛ぶ。
 on:
-  # 【停止中】ryota_a0621 の返信/リード検知を止める。tsubaki_honne 移行後に再開。
-  # schedule:
-  #   - cron: "0 0,3,6,9,12 * * *"  # UTC（JST 9,12,15,18,21時）
+  schedule:
+    - cron: "0 0,3,6,9,12 * * *"  # UTC（JST 9,12,15,18,21時）
   workflow_dispatch: {}
 
 jobs:
