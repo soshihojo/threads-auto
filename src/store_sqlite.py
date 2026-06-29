@@ -56,6 +56,22 @@ CREATE TABLE IF NOT EXISTS scheduled_posts (
     created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
     posted_at    TEXT
 );
+CREATE TABLE IF NOT EXISTS members (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    nickname   TEXT,
+    me_birth   TEXT,
+    him_birth  TEXT,
+    note       TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS readings (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id  INTEGER,
+    month      TEXT,
+    worry      TEXT,
+    reading    TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -233,3 +249,43 @@ def update_scheduled(post_id: int, text: str, scheduled_at: str) -> None:
             "UPDATE scheduled_posts SET text=?, scheduled_at=? WHERE id=? AND status='scheduled'",
             (text, scheduled_at, post_id),
         )
+
+
+# ---- members（サブスク会員） ----
+def add_member(nickname: str, me_birth: str, him_birth: str, note: str = "") -> int:
+    with conn() as c:
+        cur = c.execute(
+            "INSERT INTO members(nickname, me_birth, him_birth, note) VALUES (?,?,?,?)",
+            (nickname, me_birth, him_birth, note),
+        )
+        return cur.lastrowid
+
+
+def list_members() -> list[sqlite3.Row]:
+    with conn() as c:
+        return c.execute("SELECT * FROM members ORDER BY nickname").fetchall()
+
+
+def delete_member(member_id: int) -> None:
+    with conn() as c:
+        c.execute("DELETE FROM members WHERE id=?", (member_id,))
+
+
+# ---- readings（鑑定の控え） ----
+def add_reading(member_id, month: str, worry: str, reading: str) -> int:
+    with conn() as c:
+        cur = c.execute(
+            "INSERT INTO readings(member_id, month, worry, reading) VALUES (?,?,?,?)",
+            (member_id, month, worry, reading),
+        )
+        return cur.lastrowid
+
+
+def list_readings(member_id=None, limit: int = 200) -> list[sqlite3.Row]:
+    with conn() as c:
+        if member_id is not None:
+            return c.execute(
+                "SELECT * FROM readings WHERE member_id=? ORDER BY created_at DESC LIMIT ?",
+                (member_id, limit),
+            ).fetchall()
+        return c.execute("SELECT * FROM readings ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()

@@ -48,6 +48,8 @@ TABLES = {
     "draft_replies": ["reply_id", "post_id", "username", "in_text", "draft_text", "status", "created_at", "sent_at"],
     "leads": ["reply_id", "post_id", "username", "text", "keyword", "notified", "created_at"],
     "scheduled_posts": ["id", "text", "region", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at"],
+    "members": ["id", "nickname", "me_birth", "him_birth", "note", "created_at"],
+    "readings": ["id", "member_id", "month", "worry", "reading", "created_at"],
 }
 
 
@@ -326,3 +328,43 @@ def update_scheduled(post_id: int, text: str, scheduled_at: str) -> None:
     idx = _find_row("scheduled_posts", "id", post_id)
     if idx:
         _update_cells("scheduled_posts", idx, {"text": text, "scheduled_at": scheduled_at})
+
+
+def _next_id_for(name: str) -> int:
+    ids = [int(r["id"]) for r in _records(name) if str(r.get("id", "")).strip().isdigit()]
+    return (max(ids) + 1) if ids else 1
+
+
+# ---- members（サブスク会員） ----
+def add_member(nickname: str, me_birth: str, him_birth: str, note: str = "") -> int:
+    new_id = _next_id_for("members")
+    _append("members", {"id": new_id, "nickname": nickname, "me_birth": me_birth,
+                        "him_birth": him_birth, "note": note, "created_at": _now()})
+    return new_id
+
+
+def list_members() -> list[dict]:
+    return sorted(_records("members"), key=lambda r: str(r.get("nickname", "")))
+
+
+def delete_member(member_id) -> None:
+    idx = _find_row("members", "id", member_id)
+    if idx:
+        _api(_ws("members").delete_rows, idx)
+        _CACHE.pop("members", None)
+
+
+# ---- readings（鑑定の控え） ----
+def add_reading(member_id, month: str, worry: str, reading: str) -> int:
+    new_id = _next_id_for("readings")
+    _append("readings", {"id": new_id, "member_id": str(member_id), "month": month,
+                        "worry": worry, "reading": reading, "created_at": _now()})
+    return new_id
+
+
+def list_readings(member_id=None, limit: int = 200) -> list[dict]:
+    rows = _records("readings")
+    if member_id is not None:
+        rows = [r for r in rows if str(r.get("member_id")) == str(member_id)]
+    rows.sort(key=lambda r: str(r.get("created_at", "")), reverse=True)
+    return rows[:limit]
