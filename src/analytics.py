@@ -115,7 +115,8 @@ def learn_and_update_rules(
         "### 表示は出たのに反応が薄かった投稿（スベり）\n" + "\n".join(_fmt(r) for r in losers) + "\n\n"
         "上記をふまえ、次の投稿生成に効く必勝要素へ更新してください。"
     )
-    body = complete(_LEARN_SYS, user, max_tokens=1500, temperature=0.4)
+    learn_system = active_profile().get("learn_system") or _LEARN_SYS
+    body = complete(learn_system, user, max_tokens=1500, temperature=0.4)
 
     today = datetime.now().strftime("%Y-%m-%d")
     header = (
