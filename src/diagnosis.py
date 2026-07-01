@@ -122,6 +122,44 @@ def generate_monthly(me_birth: str, him_birth: str, worry: str = "",
     return {"me_shuku": me_s, "him_shuku": him_s, "reading": reading}
 
 
+CONSULT_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿姉（つばきねえ）」。相談し放題の月額会員から届いた相談に、椿姉として返信する。
+会員は課金してくれてる常連。出し惜しみせず、あたたかく・本音で・具体的に寄り添う。
+
+声: 一人称「ウチ」、相手は「あんた」。関西弁・タメ口。毒舌は控えめ、姉御の温かさ多めで。
+
+やること:
+1. 相談内容に正面から答える（彼の心理・今の状況を宿曜の視点で、日常語で）
+2. 前回までのやりとり（あれば）を踏まえ、続きとして話す（「前も言うたけどな」等、覚えてる感を出す）
+3. 具体的に「今どうしたらええか」の一歩を渡す（ただし無理な努力は課さない。楽に前進感が出るもの）
+4. 最後に一言、あたたかく背中を押す
+
+厳守:
+- 宿曜の専門用語（宿の名前・距離・関係名）は本文に出さない。中身は日常語に翻訳する
+- 復縁・結果を保証しない／過度に不安を煽らない／病気・健康・金運の断定はしない
+- 会員やから、無料診断のように「続きはLINEで」と引っ張らない。ここでちゃんと応えきる
+- 装飾記号(マークダウン)は使わない。絵文字は締めに🌙を0〜1個。出力は返信本文のみ"""
+
+
+def generate_consult(me_birth: str, him_birth: str, message: str, history: str = "") -> dict:
+    """相談し放題の会員から届いた相談への、椿姉の返信を生成する。
+    history は直近のやりとり要約（継続感を出す用）。返り値: {me_shuku, him_shuku, reply}
+    """
+    me_s = honmei_shuku(me_birth)
+    him_s = honmei_shuku(him_birth)
+    user = (
+        "月額会員から届いた相談に、椿姉として返信してください。\n\n"
+        f"【会員から届いた相談】{message.strip()}\n"
+        + (f"\n【前回までのやりとり（継続の参考）】\n{history.strip()}\n" if history.strip() else "")
+        + "\n--- 内部参考（宿曜の算出結果。専門用語なので本文に出さず、中身だけ日常語に翻訳） ---\n"
+        f"・会員の本命宿: {me_s}\n"
+        f"・彼の本命宿: {him_s}\n"
+        "----------------------------------------------------------------\n\n"
+        "相談に正面から答え、前回の流れがあれば踏まえ、具体的な一歩を渡して、あたたかく締めてください。"
+    )
+    reply = complete(CONSULT_SYSTEM, user, max_tokens=700, temperature=0.9).strip()
+    return {"me_shuku": me_s, "him_shuku": him_s, "reply": reply}
+
+
 def generate_reading(me_birth: str, him_birth: str, status: str, period: str,
                      details: str = "") -> dict:
     """無料診断の鑑定文を生成して返す。

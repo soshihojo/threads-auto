@@ -72,8 +72,8 @@ profile = active_profile()
 st.title("🧵 Threads運用ダッシュボード")
 st.caption(f"プロファイル: {profile['name']}　|　返信モード: 下書き承認制　|　現在(JST): {now_jst():%Y-%m-%d %H:%M}")
 
-tab_gen, tab_diag, tab_monthly, tab_members = st.tabs(
-    ["✍️ 承認待ちの候補", "🔮 無料診断", "🗓 月次会員鑑定", "👥 会員"])
+tab_gen, tab_diag, tab_consult, tab_monthly, tab_members = st.tabs(
+    ["✍️ 承認待ちの候補", "🔮 無料診断", "💬 会員相談", "🗓 月次会員鑑定", "👥 会員"])
 
 
 def _post_now(text: str, region: str | None) -> None:
@@ -180,6 +180,53 @@ with tab_diag:
                 st.text_area("鑑定文（コピーして相談者に送れます）", value=res["reading"], height=320, key="diag_out")
             except Exception as e:
                 st.error(f"鑑定の生成に失敗しました（{e}）。少し待って再度お試しください。")
+
+
+# ---------------- 会員相談（相談し放題の返信生成＋履歴） ----------------
+with tab_consult:
+    st.caption("相談し放題の会員対応。会員を選び、届いた相談を貼ると、その子専用の返信を作ります。控えも残せます。")
+    try:
+        _cmembers = store.list_members()
+    except Exception as e:
+        st.warning(f"会員リストの読み込みに失敗（{e}）")
+        _cmembers = []
+    _cmap = {f"{m['nickname']}（{m['me_birth']} / {m['him_birth']}）": m for m in _cmembers}
+    if not _cmap:
+        st.info("会員がいません。👥会員タブで登録してください。")
+    else:
+        cpick = st.selectbox("会員を選ぶ", list(_cmap.keys()), key="con_pick")
+        cmem = _cmap[cpick]
+        chist = store.list_readings(cmem["id"], limit=5)
+        if chist:
+            with st.expander(f"📜 この子との直近のやりとり（{len(chist)}件）"):
+                for h in chist:
+                    if h["worry"]:
+                        st.caption(f"相談: {h['worry']}")
+                    st.text(h["reading"])
+        incoming = st.text_area("会員から届いた相談を貼る", key="con_msg", height=120,
+                                placeholder="例：昨日ひさびさに彼から連絡きた。なんて返したらいい？")
+        if st.button("💬 この子専用の返信を作る", type="primary", key="con_run"):
+            if not incoming.strip():
+                st.error("相談内容を貼ってください。")
+            else:
+                try:
+                    hist_str = "\n".join(
+                        f"- 相談: {h['worry']} / 返信: {str(h['reading'])[:60]}…" for h in chist[:3]
+                    )
+                    with st.spinner("椿姉が視てます…"):
+                        res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str)
+                    st.session_state["con_result"] = {"reply": res["reply"], "member_id": cmem["id"], "msg": incoming}
+                except Exception as e:
+                    st.error(f"生成に失敗しました（{e}）。少し待って再度お試しください。")
+        cr = st.session_state.get("con_result")
+        if cr and str(cr.get("member_id")) == str(cmem["id"]):
+            st.text_area("返信（コピーして送れます）", value=cr["reply"], height=300, key="con_out")
+            if st.button("✅ この相談と返信を控えに保存", key="con_save"):
+                try:
+                    store.add_reading(cmem["id"], "相談", cr["msg"], cr["reply"])
+                    st.success("控えに保存しました（👥会員タブの履歴にも残ります）")
+                except Exception as e:
+                    st.error(f"保存に失敗しました（{e}）")
 
 
 # ---------------- 月次会員鑑定 ----------------
