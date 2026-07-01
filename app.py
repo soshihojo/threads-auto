@@ -72,8 +72,8 @@ profile = active_profile()
 st.title("🧵 Threads運用ダッシュボード")
 st.caption(f"プロファイル: {profile['name']}　|　返信モード: 下書き承認制　|　現在(JST): {now_jst():%Y-%m-%d %H:%M}")
 
-tab_gen, tab_diag, tab_consult, tab_monthly, tab_members = st.tabs(
-    ["✍️ 承認待ちの候補", "🔮 無料診断", "💬 会員相談", "🗓 月次会員鑑定", "👥 会員"])
+tab_gen, tab_diag, tab_consult, tab_members = st.tabs(
+    ["✍️ 承認待ちの候補", "🔮 無料診断", "💬 会員相談", "👥 会員"])
 
 
 def _post_now(text: str, region: str | None) -> None:
@@ -227,60 +227,6 @@ with tab_consult:
                     st.success("控えに保存しました（👥会員タブの履歴にも残ります）")
                 except Exception as e:
                     st.error(f"保存に失敗しました（{e}）")
-
-
-# ---------------- 月次会員鑑定 ----------------
-_MONTHS = [f"{m}月" for m in range(1, 13)]
-
-with tab_monthly:
-    st.caption("月額会員向け。会員を選ぶ（or手動入力）と、今月の運気・動いてええ日・開運アクションを出します。")
-    try:
-        _members = store.list_members()
-    except Exception:
-        _members = []
-    _mon_map = {f"{m['nickname']}（{m['me_birth']} / {m['him_birth']}）": m for m in _members}
-    pick = st.selectbox("会員を選ぶ", ["（手動入力）"] + list(_mon_map.keys()), key="mon_pick")
-    if pick == "（手動入力）":
-        m_me = _jp_birthday("会員（あなた）の生年月日", "mon_me", 1995)
-        m_him = _jp_birthday("彼の生年月日", "mon_him", 1993)
-        member_id = None
-    else:
-        _mem = _mon_map[pick]
-        m_me, m_him, member_id = _mem["me_birth"], _mem["him_birth"], _mem["id"]
-        st.caption(f"生年月日：あなた {m_me} ／ 彼 {m_him}")
-    cM, _sp = st.columns([1, 2])
-    month = cM.selectbox("対象月", _MONTHS, index=date.today().month - 1, key="mon_month")
-    worry = st.text_area(
-        "今月の悩み・状況（任意）",
-        placeholder="例：先月から少し連絡が増えた／また既読が遅くなってきた／復縁を切り出すか迷ってる など",
-        key="mon_worry", height=90,
-    )
-    if st.button("🗓 今月の運気を視る", type="primary", key="mon_run"):
-        if not m_me or not m_him:
-            st.error("生年月日を正しく選んでください。")
-        else:
-            try:
-                with st.spinner("椿姉が今月を視てます…"):
-                    res = diagnosis.generate_monthly(m_me, m_him, worry, month)
-                st.session_state["mon_result"] = {
-                    "reading": res["reading"], "me_shuku": res["me_shuku"], "him_shuku": res["him_shuku"],
-                    "month": month, "worry": worry, "member_id": member_id,
-                }
-            except Exception as e:
-                st.error(f"鑑定の生成に失敗しました（{e}）。少し待って再度お試しください。")
-    r = st.session_state.get("mon_result")
-    if r:
-        st.markdown(f"**会員: {r['me_shuku']}　/　彼: {r['him_shuku']}　/　{r['month']}**")
-        st.text_area("今月の鑑定（コピーして会員に送れます）", value=r["reading"], height=320, key="mon_out")
-        if r.get("member_id"):
-            if st.button("✅ この鑑定を控えに保存", key="mon_save"):
-                try:
-                    store.add_reading(r["member_id"], r["month"], r["worry"], r["reading"])
-                    st.success("控えに保存しました（👥会員タブの履歴で見られます）")
-                except Exception as e:
-                    st.error(f"保存に失敗しました（{e}）")
-        else:
-            st.caption("※会員を選んで生成すると、控えに保存できます")
 
 
 # ---------------- 会員リスト ----------------
