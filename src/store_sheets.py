@@ -50,6 +50,8 @@ TABLES = {
     "scheduled_posts": ["id", "text", "region", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at"],
     "members": ["id", "nickname", "me_birth", "him_birth", "note", "created_at"],
     "readings": ["id", "member_id", "month", "worry", "reading", "created_at"],
+    "line_users": ["user_id", "display_name", "me_birth", "him_birth", "bot", "note", "created_at", "updated_at"],
+    "line_chats": ["id", "user_id", "role", "text", "created_at"],
 }
 
 
@@ -368,3 +370,35 @@ def list_readings(member_id=None, limit: int = 200) -> list[dict]:
         rows = [r for r in rows if str(r.get("member_id")) == str(member_id)]
     rows.sort(key=lambda r: str(r.get("created_at", "")), reverse=True)
     return rows[:limit]
+
+
+# ---- LINEボット（ユーザー・会話履歴） ----
+def get_line_user(user_id: str) -> dict | None:
+    for r in _records("line_users"):
+        if r.get("user_id") == user_id:
+            return r
+    return None
+
+
+def upsert_line_user(user_id: str, **fields) -> None:
+    allowed = {"display_name", "me_birth", "him_birth", "bot", "note"}
+    fields = {k: v for k, v in fields.items() if k in allowed}
+    idx = _find_row("line_users", "user_id", user_id)
+    if idx:
+        if fields:
+            _update_cells("line_users", idx, {**fields, "updated_at": _now()})
+    else:
+        _append("line_users", {"user_id": user_id, "bot": "on", **fields,
+                              "created_at": _now(), "updated_at": _now()})
+
+
+def add_line_chat(user_id: str, role: str, text: str) -> None:
+    _append("line_chats", {"id": _next_id_for("line_chats"), "user_id": user_id,
+                          "role": role, "text": text, "created_at": _now()})
+
+
+def recent_line_chats(user_id: str, limit: int = 12) -> list[dict]:
+    """直近のやりとりを古い順で返す（プロンプト組み立て用）。"""
+    rows = [r for r in _records("line_chats") if r.get("user_id") == user_id]
+    rows.sort(key=lambda r: str(r.get("created_at", "")), reverse=True)
+    return list(reversed(rows[:limit]))

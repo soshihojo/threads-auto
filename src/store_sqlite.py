@@ -72,6 +72,23 @@ CREATE TABLE IF NOT EXISTS readings (
     reading    TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS line_users (
+    user_id      TEXT PRIMARY KEY,
+    display_name TEXT,
+    me_birth     TEXT,
+    him_birth    TEXT,
+    bot          TEXT DEFAULT 'on',   -- on / hold(クロージング中) / off
+    note         TEXT,
+    created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TEXT
+);
+CREATE TABLE IF NOT EXISTS line_chats (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT,
+    role       TEXT,   -- user / assistant
+    text       TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -289,3 +306,39 @@ def list_readings(member_id=None, limit: int = 200) -> list[sqlite3.Row]:
                 (member_id, limit),
             ).fetchall()
         return c.execute("SELECT * FROM readings ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+
+
+# ---- LINEボット（ユーザー・会話履歴） ----
+def get_line_user(user_id: str) -> dict | None:
+    with conn() as c:
+        row = c.execute("SELECT * FROM line_users WHERE user_id=?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def upsert_line_user(user_id: str, **fields) -> None:
+    allowed = {"display_name", "me_birth", "him_birth", "bot", "note"}
+    fields = {k: v for k, v in fields.items() if k in allowed}
+    with conn() as c:
+        if c.execute("SELECT 1 FROM line_users WHERE user_id=?", (user_id,)).fetchone():
+            if fields:
+                sets = ", ".join(f"{k}=?" for k in fields)
+                c.execute(f"UPDATE line_users SET {sets}, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+                          (*fields.values(), user_id))
+        else:
+            cols = ["user_id", *fields.keys()]
+            c.execute(f"INSERT INTO line_users({','.join(cols)}) VALUES ({','.join('?'*len(cols))})",
+                      (user_id, *fields.values()))
+
+
+def add_line_chat(user_id: str, role: str, text: str) -> None:
+    with conn() as c:
+        c.execute("INSERT INTO line_chats(user_id, role, text) VALUES (?,?,?)", (user_id, role, text))
+
+
+def recent_line_chats(user_id: str, limit: int = 12) -> list[dict]:
+    """直近のやりとりを古い順で返す（プロンプト組み立て用）。"""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT * FROM line_chats WHERE user_id=? ORDER BY id DESC LIMIT ?", (user_id, limit)
+        ).fetchall()
+    return [dict(r) for r in reversed(rows)]
