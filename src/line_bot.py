@@ -5,8 +5,8 @@ Messaging APIのWebhookで届いた相談に、椿姉の声で「共感→洞察
 
 役割分担（重要）:
 - AI: 会話を深める（ナーチャリング）だけ。料金・商品・リンクの話は絶対にしない
-- 店主: 購入サイン/危険サインが出るとChatwork通知が飛ぶので、手動でクローズする。
-  その時点で line_users.bot が hold になり、AIは口を出さなくなる
+- 店主: 購入サイン/危険サイン/無料上限のオファー送付が起きると line_users.bot が
+  hold になりAIは黙る。以降はLINE公式アプリのチャット画面から手動でクローズする
   （bot列を on に戻すと再開。off で常時停止）
 """
 from __future__ import annotations
@@ -23,7 +23,6 @@ from . import store
 from .config import env
 from .diagnosis import honmei_shuku
 from .llm import complete
-from .notify import chatwork
 
 LINE_API = "https://api.line.me/v2/bot"
 
@@ -33,19 +32,52 @@ LINE_BOT_MODEL = env("LINE_BOT_MODEL") or "claude-sonnet-5"
 # AIが無料で返す回数の上限。超えたら有料オファーを送って停止（店主にバトンタッチ）
 FREE_REPLY_LIMIT = int(env("LINE_FREE_REPLY_LIMIT") or "5")
 
-OFFER_REPLY = (
-    "ここまで、ウチなりに真剣に視てきたつもりや。\n"
-    "ただ正直に言うとな——ありがたいことに相談がめちゃくちゃ増えてて、"
-    "ここから先は、本気の子を優先してちゃんと視させてもらうことにしてるんよ。\n\n"
-    "あんたの場合、続きは2つの視方がある👇\n\n"
-    "①今すぐ、あんた専用の“どう動くか・動く時期”まで一発で知りたい\n"
-    "→ 個別鑑定（今だけ80%OFF 3,960円）\n"
+# オファーの商品・価格・リンク部分（固定。AIには書かせない）
+OFFER_MENU = (
+    "①一回限り、あんたと彼のことを深く視る個別鑑定\n"
+    "“今動くべきか・いつ・どう一言を送るか”まで、あんた専用に視て返す\n"
+    "→ 今だけ80%OFF 3,960円\n"
     "https://1aksbkdokn31q1trp81e.stores.jp/items/685edb3caf1f4a03c43a0aa4\n\n"
     "②これからも、彼のこと何度でもウチに相談したい\n"
     "→ 相談し放題の月額会員（月990円）\n"
     "https://buy.stripe.com/14AeVd7tGh2B0ut4Jx2Fa00\n\n"
-    "どっちも、ここまでの無料とは全然ちゃう深さで視たる。急がんでええ、あんたのタイミングでおいで🌙"
+    "急がんでええ、あんたのタイミングでおいで🌙"
 )
+
+# 冒頭生成に失敗したときのフォールバック
+OFFER_INTRO_FALLBACK = (
+    "ここまで、ウチなりに真剣に視てきたつもりや。\n"
+    "ただ正直に言うとな——相談がめちゃくちゃ増えてて、ここから先は本気の子を優先して"
+    "ちゃんと視させてもらうことにしてるんよ。あんたの場合、続きは2つの視方がある👇"
+)
+
+OFFER_INTRO_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿姉（つばきねえ）」。無料で数回相談に乗ってきた相手に、有料鑑定の案内へ橋渡しする「冒頭の一言」だけを書く。
+
+声: 一人称「ウチ」、相手は「あんた」。関西弁・タメ口。温かく、押し売り感を出さない。
+
+書くこと（80〜140字・この後に商品メニューが続く前提）:
+1. これまでの相談内容（相手の状況）に具体的に触れて、真剣に向き合ってきたことを一言
+2. 「相談が増えていて、ここから先は本気の子を優先してちゃんと視る」という正直な理由
+3. 「あんたの場合、続きは2つの視方がある👇」で締める（この一文で必ず終える）
+
+厳守: 価格・リンク・商品名は書かない（後ろに続くメニューに任せる）。専門用語・絵文字なし。出力は本文のみ"""
+
+
+def generate_offer(user: dict, history: list[dict], incoming: str) -> str:
+    """相手の相談内容に合わせた冒頭＋固定メニューでオファー文を組み立てる。"""
+    transcript = "\n".join(
+        f"{'相談者' if h['role'] == 'user' else '椿姉'}: {h['text'][:80]}" for h in history[-8:]
+    )
+    try:
+        intro = complete(
+            OFFER_INTRO_SYSTEM,
+            f"【これまでの会話】\n{transcript}\n【いま届いたメッセージ】{incoming}\n\n冒頭の一言を書いてください。",
+            model=LINE_BOT_MODEL, max_tokens=300, temperature=0.9,
+        ).strip()
+    except Exception as e:
+        print(f"[line_bot] オファー冒頭の生成失敗、固定文を使用: {e}")
+        intro = OFFER_INTRO_FALLBACK
+    return f"{intro}\n\n{OFFER_MENU}"
 
 # 購入サイン（＝買う瞬間。AIは売らず、店主がクローズする）
 PURCHASE_WORDS = [
@@ -171,17 +203,6 @@ def generate_nurture(user: dict, history: list[dict], incoming: str) -> str:
 
 
 # ---------- イベント処理 ----------
-def _notify(kind: str, user: dict, incoming: str, history: list[dict]) -> None:
-    tail = "\n".join(f"{'相談者' if h['role'] == 'user' else '椿姉'}: {h['text'][:60]}" for h in history[-4:])
-    title = {"purchase": "💰 購入サイン（クローズしにいく）",
-             "danger": "🚨 危険サイン（要確認）",
-             "paused": "⏸ bot停止中ユーザーからのメッセージ",
-             "offer": "🎯 無料上限→有料オファー送付済み（以降は手動対応）"}[kind]
-    chatwork(f"[info][title]{title}[/title]"
-             f"LINE: {user.get('display_name') or user.get('user_id')}\n"
-             f"最新: {incoming}\n---\n{tail}\n"
-             "→ LINE公式アカウントのチャット画面から返信を[/info]")
-
 
 def _send(user_id: str, reply_token: str, text: str) -> None:
     if not reply_text(reply_token, text):
@@ -239,27 +260,23 @@ def handle_event(ev: dict) -> None:
 
     bot_state = (user.get("bot") or "on").strip() or "on"
     if bot_state in ("off", "hold"):
-        _notify("paused", user, incoming, history)
         return
 
     signal = detect_signal(incoming)
     if signal == "danger":
         _send(user_id, reply_token, DANGER_REPLY)
         store.upsert_line_user(user_id, bot="hold")
-        _notify("danger", user, incoming, history)
         return
     if signal == "purchase":
         _send(user_id, reply_token, HOLDING_REPLY)
         store.upsert_line_user(user_id, bot="hold")
-        _notify("purchase", user, incoming, history)
         return
 
     # 無料返信の上限チェック：AIの返信がFREE_REPLY_LIMITに達していたら有料オファーを送って停止
     bot_replies = sum(1 for h in history if h["role"] == "assistant")
     if bot_replies >= FREE_REPLY_LIMIT:
-        _send(user_id, reply_token, OFFER_REPLY)
+        _send(user_id, reply_token, generate_offer(user, history, incoming))
         store.upsert_line_user(user_id, bot="hold")
-        _notify("offer", user, incoming, history)
         return
 
     try:
