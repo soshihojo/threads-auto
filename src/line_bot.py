@@ -40,7 +40,7 @@ OFFER_MENU = (
     "https://1aksbkdokn31q1trp81e.stores.jp/items/685edb3caf1f4a03c43a0aa4\n\n"
     "②これからも、彼のこと何度でもウチに相談したい\n"
     "→ 相談し放題の月額会員（月990円）\n"
-    "https://buy.stripe.com/14AeVd7tGh2B0ut4Jx2Fa00\n\n"
+    "https://buy.stripe.com/fZu00ibsO4yD3MEeqC53O00\n\n"
     "急がんでええ、あんたのタイミングでおいで🌙"
 )
 

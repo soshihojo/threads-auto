@@ -67,7 +67,7 @@ Threads（さわり）→ LINE誘導文 → LINE Day0(挨拶で生年月日＋�
 ・「いつ・何を・どう送るか」まで一発で知りたいなら：個別鑑定（今だけ3,960円）
 　https://1aksbkdokn31q1trp81e.stores.jp/items/685edb3caf1f4a03c43a0aa4
 ・これから先もウチに聞きながら進めたいなら：相談し放題（月990円）
-　https://buy.stripe.com/14AeVd7tGh2B0ut4Jx2Fa00
+　https://buy.stripe.com/fZu00ibsO4yD3MEeqC53O00
 
 急がんでええ。あんたのタイミングでおいで🌙
 
