@@ -27,6 +27,9 @@ from .notify import chatwork
 
 LINE_API = "https://api.line.me/v2/bot"
 
+# LINE自動返信は最上位の一つ下のモデルで生成（環境変数 LINE_BOT_MODEL で差し替え可）
+LINE_BOT_MODEL = env("LINE_BOT_MODEL") or "claude-sonnet-5"
+
 # 購入サイン（＝買う瞬間。AIは売らず、店主がクローズする）
 PURCHASE_WORDS = [
     "料金", "値段", "いくら", "有料", "申し込", "購入", "支払", "課金",
@@ -147,7 +150,7 @@ def generate_nurture(user: dict, history: list[dict], incoming: str) -> str:
         f"{_internal_ref(user)}\n\n"
         "椿姉として返信を1つ書いてください。"
     )
-    return complete(NURTURE_SYSTEM, prompt, max_tokens=400, temperature=0.9)
+    return complete(NURTURE_SYSTEM, prompt, model=LINE_BOT_MODEL, max_tokens=400, temperature=0.9)
 
 
 # ---------- イベント処理 ----------

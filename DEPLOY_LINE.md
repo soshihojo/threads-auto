@@ -43,6 +43,8 @@
 | CHATWORK_API_TOKEN | （既存のもの） |
 | CHATWORK_ROOM_ID | （既存のもの） |
 | LINE_BOT_ENABLED | 1 |
+| CLAUDE_MODEL | （任意）未設定なら claude-opus-4-8（LINE以外の生成） |
+| LINE_BOT_MODEL | （任意）未設定なら claude-sonnet-5（LINE自動返信） |
 
 5. デプロイ完了後のURL（例 `https://tsubaki-line.onrender.com`）を控える
 
