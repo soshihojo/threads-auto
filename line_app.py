@@ -3,17 +3,40 @@
 LINE Messaging APIのWebhookを受けて src/line_bot.py に処理を渡す。
 デプロイ: Render等で `uvicorn line_app:app --host 0.0.0.0 --port $PORT`
 セットアップ手順は DEPLOY_LINE.md を参照。
+
+エルメ等の外部ツールと共存する場合:
+LINEのWebhook URLは1つしか設定できないため、このサーバーを受け口にして、
+環境変数 FORWARD_WEBHOOK_URL に外部ツールのWebhook URLを設定すると、
+受信イベントを署名ごとそのまま転送する（両方が動く）。未設定なら転送しない。
 """
 from __future__ import annotations
 
 import json
 
+import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
 from src import line_bot, store
+from src.config import env
 
 app = FastAPI()
 store.init_db()
+
+
+def _forward(body: bytes, signature: str) -> None:
+    """受信したWebhookを外部ツール（エルメ等）へそのまま転送する。"""
+    url = env("FORWARD_WEBHOOK_URL")
+    if not url:
+        return
+    try:
+        requests.post(
+            url,
+            data=body,
+            headers={"Content-Type": "application/json", "X-Line-Signature": signature},
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        print(f"[webhook] 転送失敗（処理は継続）: {e}")
 
 
 @app.get("/")
@@ -24,8 +47,11 @@ def health() -> dict:
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks) -> str:
     body = await request.body()
-    if not line_bot.verify_signature(body, request.headers.get("x-line-signature", "")):
+    signature = request.headers.get("x-line-signature", "")
+    if not line_bot.verify_signature(body, signature):
         raise HTTPException(status_code=400, detail="bad signature")
+    # エルメ等への転送（FORWARD_WEBHOOK_URL設定時のみ）
+    background_tasks.add_task(_forward, body, signature)
     data = json.loads(body)
     # LINEには即200を返し、生成・返信はバックグラウンドで行う
     #（replyトークンは約1分有効。Claude生成は数十秒以内に収まる）
