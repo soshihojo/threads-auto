@@ -5,8 +5,9 @@ from anthropic import Anthropic
 
 from .config import env
 
-# 生成は安価なSonnetを既定に（必要に応じてconfig/環境で差し替え可）
-DEFAULT_MODEL = "claude-sonnet-4-6"
+# 生成は安価なSonnetを既定に。環境変数 CLAUDE_MODEL で差し替え可
+# （例: claude-sonnet-5 / claude-haiku-4-5 / claude-opus-4-8）
+DEFAULT_MODEL = env("CLAUDE_MODEL") or "claude-sonnet-4-6"
 
 _client: Anthropic | None = None
 
