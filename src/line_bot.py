@@ -30,6 +30,23 @@ LINE_API = "https://api.line.me/v2/bot"
 # LINE自動返信は最上位の一つ下のモデルで生成（環境変数 LINE_BOT_MODEL で差し替え可）
 LINE_BOT_MODEL = env("LINE_BOT_MODEL") or "claude-sonnet-5"
 
+# AIが無料で返す回数の上限。超えたら有料オファーを送って停止（店主にバトンタッチ）
+FREE_REPLY_LIMIT = int(env("LINE_FREE_REPLY_LIMIT") or "5")
+
+OFFER_REPLY = (
+    "ここまで、ウチなりに真剣に視てきたつもりや。\n"
+    "ただ正直に言うとな——ありがたいことに相談がめちゃくちゃ増えてて、"
+    "ここから先は、本気の子を優先してちゃんと視させてもらうことにしてるんよ。\n\n"
+    "あんたの場合、続きは2つの視方がある👇\n\n"
+    "①今すぐ、あんた専用の“どう動くか・動く時期”まで一発で知りたい\n"
+    "→ 個別鑑定（今だけ80%OFF 3,960円）\n"
+    "https://1aksbkdokn31q1trp81e.stores.jp/items/685edb3caf1f4a03c43a0aa4\n\n"
+    "②これからも、彼のこと何度でもウチに相談したい\n"
+    "→ 相談し放題の月額会員（月990円）\n"
+    "https://buy.stripe.com/14AeVd7tGh2B0ut4Jx2Fa00\n\n"
+    "どっちも、ここまでの無料とは全然ちゃう深さで視たる。急がんでええ、あんたのタイミングでおいで🌙"
+)
+
 # 購入サイン（＝買う瞬間。AIは売らず、店主がクローズする）
 PURCHASE_WORDS = [
     "料金", "値段", "いくら", "有料", "申し込", "購入", "支払", "課金",
@@ -158,7 +175,8 @@ def _notify(kind: str, user: dict, incoming: str, history: list[dict]) -> None:
     tail = "\n".join(f"{'相談者' if h['role'] == 'user' else '椿姉'}: {h['text'][:60]}" for h in history[-4:])
     title = {"purchase": "💰 購入サイン（クローズしにいく）",
              "danger": "🚨 危険サイン（要確認）",
-             "paused": "⏸ bot停止中ユーザーからのメッセージ"}[kind]
+             "paused": "⏸ bot停止中ユーザーからのメッセージ",
+             "offer": "🎯 無料上限→有料オファー送付済み（以降は手動対応）"}[kind]
     chatwork(f"[info][title]{title}[/title]"
              f"LINE: {user.get('display_name') or user.get('user_id')}\n"
              f"最新: {incoming}\n---\n{tail}\n"
@@ -234,6 +252,14 @@ def handle_event(ev: dict) -> None:
         _send(user_id, reply_token, HOLDING_REPLY)
         store.upsert_line_user(user_id, bot="hold")
         _notify("purchase", user, incoming, history)
+        return
+
+    # 無料返信の上限チェック：AIの返信がFREE_REPLY_LIMITに達していたら有料オファーを送って停止
+    bot_replies = sum(1 for h in history if h["role"] == "assistant")
+    if bot_replies >= FREE_REPLY_LIMIT:
+        _send(user_id, reply_token, OFFER_REPLY)
+        store.upsert_line_user(user_id, bot="hold")
+        _notify("offer", user, incoming, history)
         return
 
     try:
