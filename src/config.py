@@ -29,6 +29,9 @@ def active_profile() -> dict[str, Any]:
 
 def env(key: str, default: str | None = None, required: bool = False) -> str | None:
     val = os.getenv(key, default)
+    if isinstance(val, str):
+        # GitHub Secrets等に紛れ込む前後の改行・空白でAPIのURLが壊れるのを防ぐ
+        val = val.strip()
     if required and not val:
         raise RuntimeError(f"環境変数 {key} が未設定です。.env を確認してください。")
     return val
