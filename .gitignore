@@ -10,3 +10,5 @@ venv/
 !.github/**
 render_env_line.txt
 render_env_paste.env
+
+kantei_out/

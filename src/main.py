@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from . import analytics, content, diagnosis, notify, replies as replies_mod, schedule as schedule_mod, store
 from .config import DATA_DIR, active_profile, env, load_config
@@ -194,6 +195,14 @@ def cmd_monthly(args: argparse.Namespace) -> None:
     print("--------------------------")
 
 
+def cmd_kantei(args: argparse.Namespace) -> None:
+    """個別鑑定（有料）: 章立て約10,000字の鑑定文を生成し、和風デザインのPDFを出力。"""
+    from . import kantei
+    details = Path(args.details_file).read_text(encoding="utf-8")
+    res = kantei.make_kantei(args.name, args.me, args.him, details)
+    print(f"→ LINE公式アプリのチャットからPDFを添付して送付: {res['pdf']}")
+
+
 def cmd_refresh_token(_: argparse.Namespace) -> None:
     c = make_client()
     data = c.refresh_long_lived_token()
@@ -230,6 +239,12 @@ def main() -> None:
     p_mon.add_argument("--worry", default="", help="今月の悩み・状況（任意）")
     p_mon.add_argument("--month", default="今月", help="対象月のラベル（例: 7月）")
     p_mon.set_defaults(func=cmd_monthly)
+    p_kan = sub.add_parser("kantei")
+    p_kan.add_argument("--name", required=True, help="購入者の呼び名（表紙に載る）")
+    p_kan.add_argument("--me", required=True, help="購入者の生年月日 YYYY-MM-DD")
+    p_kan.add_argument("--him", required=True, help="彼の生年月日 YYYY-MM-DD")
+    p_kan.add_argument("--details-file", required=True, help="悩み詳細のテキストファイル")
+    p_kan.set_defaults(func=cmd_kantei)
     sub.add_parser("refresh-token").set_defaults(func=cmd_refresh_token)
     args = parser.parse_args()
     args.func(args)
