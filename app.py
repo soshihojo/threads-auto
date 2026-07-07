@@ -72,8 +72,12 @@ profile = active_profile()
 st.title("🧵 Threads運用ダッシュボード")
 st.caption(f"プロファイル: {profile['name']}　|　返信モード: 下書き承認制　|　現在(JST): {now_jst():%Y-%m-%d %H:%M}")
 
-tab_gen, tab_diag, tab_consult, tab_members = st.tabs(
-    ["✍️ 承認待ちの候補", "🔮 無料診断", "💬 会員相談", "👥 会員"])
+# st.tabsは全タブの中身を毎回描画する（遅い・操作後に先頭タブへ戻る）ため、
+# 選んだ画面だけを描画する完全切り替え式にする。選択はセッションに保持される。
+VIEW_GEN, VIEW_DIAG, VIEW_CONSULT, VIEW_MEMBERS = VIEWS = [
+    "✍️ 承認待ちの候補", "🔮 無料診断", "💬 会員相談", "👥 会員"]
+view = st.radio("画面", VIEWS, horizontal=True, key="view", label_visibility="collapsed")
+st.divider()
 
 
 def _post_now(text: str, region: str | None) -> None:
@@ -85,7 +89,7 @@ def _post_now(text: str, region: str | None) -> None:
 
 
 # ---------------- 承認待ちの候補 ----------------
-with tab_gen:
+if view == VIEW_GEN:
     st.caption("6時間ごとに候補が自動生成され、ここに溜まります。承認したものだけが投稿されます。")
     n = st.number_input("今すぐ追加生成する数", min_value=1, max_value=8, value=3)
     if st.button("➕ 今すぐ候補を生成", type="primary"):
@@ -161,7 +165,7 @@ def _jp_birthday(label: str, key: str, default_year: int):
         return None
 
 
-with tab_diag:
+if view == VIEW_DIAG:
     st.caption("生年月日・状況・相談内容を入れて「鑑定する」。椿姉の鑑定文（彼の本音→LINE誘導）が出ます。")
     me_birth = _jp_birthday("相談者（あなた）の生年月日", "diag_me", 1995)
     him_birth = _jp_birthday("彼の生年月日", "diag_him", 1993)
@@ -188,7 +192,7 @@ with tab_diag:
 
 
 # ---------------- 会員相談（相談し放題の返信生成＋履歴） ----------------
-with tab_consult:
+if view == VIEW_CONSULT:
     st.caption("相談し放題の会員対応。会員を選び、届いた相談を貼ると、その子専用の返信を作ります。控えも残せます。")
     try:
         _cmembers = store.list_members()
@@ -197,7 +201,7 @@ with tab_consult:
         _cmembers = []
     _cmap = {f"{m['nickname']}（{m['me_birth']} / {m['him_birth']}）": m for m in _cmembers}
     if not _cmap:
-        st.info("会員がいません。👥会員タブで登録してください。")
+        st.info("会員がいません。👥会員の画面で登録してください。")
     else:
         cpick = st.selectbox("会員を選ぶ", list(_cmap.keys()), key="con_pick")
         cmem = _cmap[cpick]
@@ -229,14 +233,14 @@ with tab_consult:
             if st.button("✅ この相談と返信を控えに保存", key="con_save"):
                 try:
                     store.add_reading(cmem["id"], "相談", cr["msg"], cr["reply"])
-                    st.success("控えに保存しました（👥会員タブの履歴にも残ります）")
+                    st.success("控えに保存しました（👥会員の履歴にも残ります）")
                 except Exception as e:
                     st.error(f"保存に失敗しました（{e}）")
 
 
 # ---------------- 会員リスト ----------------
-with tab_members:
-    st.caption("サブスク会員を登録（二人の生年月日を保存）。月次鑑定タブで選ぶだけで生成できます。")
+if view == VIEW_MEMBERS:
+    st.caption("サブスク会員を登録（二人の生年月日を保存）。💬会員相談の画面で選ぶだけで返信を生成できます。")
     with st.expander("➕ 会員を登録する", expanded=False):
         nick = st.text_input("ニックネーム（LINE名など）", key="mem_nick")
         reg_me = _jp_birthday("会員（あなた）の生年月日", "mem_me", 1995)
