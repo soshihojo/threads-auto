@@ -184,10 +184,6 @@ if view == VIEW_DIAG:
         if not p["me"] or not p["him"]:
             st.error("生年月日が2つ見つかりませんでした。貼り付け文に「相談者→彼」の順で2つ入っているか確認してください。")
         else:
-            st.caption(
-                f"読み取り結果：あなた {p['me']} ／ 彼 {p['him']} ／ "
-                f"状況: {p['status'] or '本文から判断'} ／ 期間: {p['period'] or '本文から判断'}"
-            )
             try:
                 with st.spinner("椿が視てます…"):
                     res = diagnosis.generate_reading(
@@ -196,10 +192,25 @@ if view == VIEW_DIAG:
                         p["period"] or "（相談文から読み取る）",
                         raw,  # 貼り付け全文を相談内容として渡す（取りこぼしゼロ）
                     )
-                st.markdown(f"**あなた: {res['me_shuku']}　/　彼: {res['him_shuku']}　/　縁の距離: {res['distance']}**")
-                st.text_area("鑑定文（コピーして相談者に送れます）", value=res["reading"], height=320, key="diag_out")
+                # 結果は「どの入力から作ったか」とセットで保存（入力が変われば表示しない）
+                st.session_state["diag_result"] = {"input": (raw or "").strip(), "parsed": p, "res": res}
             except Exception as e:
                 st.error(f"鑑定の生成に失敗しました（{e}）。少し待って再度お試しください。")
+
+    _dr = st.session_state.get("diag_result")
+    if _dr and _dr["input"] != (raw or "").strip():
+        st.session_state.pop("diag_result", None)  # 入力が書き換わったら前の結果は破棄（誤送信防止）
+        _dr = None
+    if _dr:
+        p, res = _dr["parsed"], _dr["res"]
+        st.caption(
+            f"読み取り結果：あなた {p['me']} ／ 彼 {p['him']} ／ "
+            f"状況: {p['status'] or '本文から判断'} ／ 期間: {p['period'] or '本文から判断'}"
+        )
+        st.markdown(f"**あなた: {res['me_shuku']}　/　彼: {res['him_shuku']}　/　縁の距離: {res['distance']}**")
+        # keyを鑑定文の内容から作る＝古い表示が新しい結果を上書きする事故を構造的に防ぐ
+        st.text_area("鑑定文（コピーして相談者に送れます）", value=res["reading"], height=320,
+                     key=f"diag_out_{abs(hash(res['reading'])) % 10**8}")
 
 
 # ---------------- 会員相談（相談し放題の返信生成＋履歴） ----------------
@@ -240,7 +251,9 @@ if view == VIEW_CONSULT:
                     st.error(f"生成に失敗しました（{e}）。少し待って再度お試しください。")
         cr = st.session_state.get("con_result")
         if cr and str(cr.get("member_id")) == str(cmem["id"]):
-            st.text_area("返信（コピーして送れます）", value=cr["reply"], height=300, key="con_out")
+            # keyを返信内容から作る＝2回目以降の生成で古い表示が残るのを防ぐ
+            st.text_area("返信（コピーして送れます）", value=cr["reply"], height=300,
+                         key=f"con_out_{abs(hash(cr['reply'])) % 10**8}")
             if st.button("✅ この相談と返信を控えに保存", key="con_save"):
                 try:
                     store.add_reading(cmem["id"], "相談", cr["msg"], cr["reply"])
