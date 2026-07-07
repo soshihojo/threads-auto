@@ -64,9 +64,35 @@ def _shuku_distance(a: str, b: str) -> int:
 # ---------------- 貼り付けテキストの自動読み取り ----------------
 # DM/LINEで届いた文章（生年月日＋①状況②期間のテンプレ回答＋自由文）をそのまま解析する。
 
+# 全角の数字・区切りを半角へ寄せてから解析する
+_Z2H = str.maketrans("０１２３４５６７８９．，／－", "0123456789.,/-")
+
+# 区切りの揺れを許容（1つ目=年/記号、2つ目=月/記号。カンマ・読点・中黒も可）
+_SEP1 = r"[年/\-\.,，、･・]"
+_SEP2 = r"[月/\-\.,，、･・]"
 _DATE_RE = re.compile(
-    r"(19[4-9]\d|20[0-2]\d)\s*[年/\-\.]\s*(1[0-2]|0?[1-9])\s*[月/\-\.]\s*(3[01]|[12]\d|0?[1-9])\s*日?"
+    rf"(19[4-9]\d|20[0-2]\d)\s*{_SEP1}\s*(1[0-2]|0?[1-9])\s*{_SEP2}\s*(3[01]|[12]\d|0?[1-9])\s*日?"
 )
+# 「1973.0908」「19730908」のように月日が4桁でくっついた書き方
+_DATE_COMPACT_RE = re.compile(
+    rf"(19[4-9]\d|20[0-2]\d)\s*{_SEP1}?\s*(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)"
+)
+
+
+def _find_birthdates(text: str) -> list[str]:
+    """本文から生年月日を出現順に最大2件（1つ目=相談者、2つ目=彼）。表記揺れを広く許容する。"""
+    hits: list[tuple[int, str, str, str]] = []
+    for pat in (_DATE_RE, _DATE_COMPACT_RE):
+        for m in pat.finditer(text):
+            hits.append((m.start(), m.group(1), m.group(2), m.group(3)))
+    hits.sort()
+    dates, used = [], []
+    for pos, y, mo, d in hits:
+        if any(abs(pos - u) < 6 for u in used):
+            continue  # 同じ箇所への二重マッチは除外
+        used.append(pos)
+        dates.append(f"{y}-{int(mo):02d}-{int(d):02d}")
+    return dates[:2]
 # 状況は長い語から先に判定（「急に冷められた」を「冷められた」より優先）
 _STATUS_PATTERNS = [
     ("音信不通", "音信不通"),
@@ -83,10 +109,10 @@ _STATUS_PATTERNS = [
 
 def parse_free_input(text: str) -> dict:
     """貼り付け文から 生年月日2件（1つ目=相談者、2つ目=彼）・状況・期間 を読み取る。"""
-    text = (text or "").strip()
-    dates = [f"{y}-{int(m):02d}-{int(d):02d}" for y, m, d in _DATE_RE.findall(text)][:2]
+    text = (text or "").strip().translate(_Z2H)
+    dates = _find_birthdates(text)
     # 期間の判定は、日付表記（6月13日 等）の「3日」を誤検知しないよう日付を除いた文で行う
-    stripped = _DATE_RE.sub(" ", text)
+    stripped = _DATE_COMPACT_RE.sub(" ", _DATE_RE.sub(" ", text))
     # 複数の状況語があるときは、本文で先に出てくるもの（=①で本人が選んだ回答）を採用
     found = [(stripped.find(pat), canon) for pat, canon in _STATUS_PATTERNS if pat in stripped]
     status = min(found)[1] if found else ""
