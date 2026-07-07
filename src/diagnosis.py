@@ -15,6 +15,7 @@ CLI:
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from .config import active_profile
@@ -58,6 +59,51 @@ def _shuku_distance(a: str, b: str) -> int:
     ia, ib = SHUKU_27.index(a), SHUKU_27.index(b)
     diff = abs(ia - ib) % 27
     return min(diff, 27 - diff)
+
+
+# ---------------- 貼り付けテキストの自動読み取り ----------------
+# DM/LINEで届いた文章（生年月日＋①状況②期間のテンプレ回答＋自由文）をそのまま解析する。
+
+_DATE_RE = re.compile(
+    r"(19[4-9]\d|20[0-2]\d)\s*[年/\-\.]\s*(1[0-2]|0?[1-9])\s*[月/\-\.]\s*(3[01]|[12]\d|0?[1-9])\s*日?"
+)
+# 状況は長い語から先に判定（「急に冷められた」を「冷められた」より優先）
+_STATUS_PATTERNS = [
+    ("音信不通", "音信不通"),
+    ("既読スルー", "既読スルー"),
+    ("未読スルー", "既読スルー"),
+    ("急に冷められた", "急に冷められた"),
+    ("冷められた", "急に冷められた"),
+    ("冷たくなった", "急に冷められた"),
+    ("別れ話", "別れ話の後"),
+    ("片思い", "片思いで進展なし"),
+    ("復縁", "復縁したい"),
+]
+
+
+def parse_free_input(text: str) -> dict:
+    """貼り付け文から 生年月日2件（1つ目=相談者、2つ目=彼）・状況・期間 を読み取る。"""
+    text = (text or "").strip()
+    dates = [f"{y}-{int(m):02d}-{int(d):02d}" for y, m, d in _DATE_RE.findall(text)][:2]
+    # 期間の判定は、日付表記（6月13日 等）の「3日」を誤検知しないよう日付を除いた文で行う
+    stripped = _DATE_RE.sub(" ", text)
+    # 複数の状況語があるときは、本文で先に出てくるもの（=①で本人が選んだ回答）を採用
+    found = [(stripped.find(pat), canon) for pat, canon in _STATUS_PATTERNS if pat in stripped]
+    status = min(found)[1] if found else ""
+    if re.search(r"[〜~]?\s*3\s*日", stripped):
+        period = "〜3日"
+    elif re.search(r"[〜~]?\s*2\s*週間", stripped):
+        period = "〜2週間"
+    elif re.search(r"[1１]?\s*[ヶケヵか][月]|ヶ月以上", stripped):
+        period = "1ヶ月以上"
+    else:
+        period = ""
+    return {
+        "me": dates[0] if dates else "",
+        "him": dates[1] if len(dates) > 1 else "",
+        "status": status,
+        "period": period,
+    }
 
 
 DIAG_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。宿曜占星術で「彼の本音」を視る、関西弁・毒舌・姉御肌の鑑定士。

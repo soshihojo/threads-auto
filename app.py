@@ -166,25 +166,36 @@ def _jp_birthday(label: str, key: str, default_year: int):
 
 
 if view == VIEW_DIAG:
-    st.caption("生年月日・状況・相談内容を入れて「鑑定する」。椿の鑑定文（彼の本音→LINE誘導）が出ます。")
-    me_birth = _jp_birthday("相談者（あなた）の生年月日", "diag_me", 1995)
-    him_birth = _jp_birthday("彼の生年月日", "diag_him", 1993)
-    c3, c4 = st.columns(2)
-    status = c3.selectbox("状況", ["音信不通", "既読スルー", "急に冷められた", "別れ話の後",
-                                   "片思いで進展なし", "復縁したい"], key="diag_status")
-    period = c4.selectbox("最後の連絡からの期間", ["〜3日", "〜2週間", "1ヶ月以上"], key="diag_period")
-    details = st.text_area(
-        "相談内容（自由記載・任意）",
-        placeholder="例：未読無視が続いてる／既読はつくけど返信がない／彼に新しい女がいそう など。書くほど鑑定が具体的になります",
-        key="diag_details", height=100,
+    st.caption("DMやLINEで届いた文章をそのまま貼るだけ。生年月日（1つ目=相談者、2つ目=彼）・状況・期間は自動で読み取ります。")
+    raw = st.text_area(
+        "届いた文章を貼り付け",
+        key="diag_raw", height=240,
+        placeholder=(
+            "例：\n"
+            "・1995年4月3日\n"
+            "・1993.08.21\n"
+            "①復縁したい\n"
+            "②1ヶ月以上\n"
+            "未読無視が続いてて、彼に新しい女がいそうで不安です…"
+        ),
     )
     if st.button("🔮 鑑定する", type="primary", key="diag_run"):
-        if not me_birth or not him_birth:
-            st.error("生年月日を正しく選んでください。")
+        p = diagnosis.parse_free_input(raw)
+        if not p["me"] or not p["him"]:
+            st.error("生年月日が2つ見つかりませんでした。貼り付け文に「相談者→彼」の順で2つ入っているか確認してください。")
         else:
+            st.caption(
+                f"読み取り結果：あなた {p['me']} ／ 彼 {p['him']} ／ "
+                f"状況: {p['status'] or '本文から判断'} ／ 期間: {p['period'] or '本文から判断'}"
+            )
             try:
                 with st.spinner("椿が視てます…"):
-                    res = diagnosis.generate_reading(me_birth, him_birth, status, period, details)
+                    res = diagnosis.generate_reading(
+                        p["me"], p["him"],
+                        p["status"] or "（相談文から読み取る）",
+                        p["period"] or "（相談文から読み取る）",
+                        raw,  # 貼り付け全文を相談内容として渡す（取りこぼしゼロ）
+                    )
                 st.markdown(f"**あなた: {res['me_shuku']}　/　彼: {res['him_shuku']}　/　縁の距離: {res['distance']}**")
                 st.text_area("鑑定文（コピーして相談者に送れます）", value=res["reading"], height=320, key="diag_out")
             except Exception as e:
