@@ -342,3 +342,13 @@ def recent_line_chats(user_id: str, limit: int = 12) -> list[dict]:
             "SELECT * FROM line_chats WHERE user_id=? ORDER BY id DESC LIMIT ?", (user_id, limit)
         ).fetchall()
     return [dict(r) for r in reversed(rows)]
+
+
+def all_line_chats(days: int = 45) -> list[dict]:
+    """全相談者の直近days日のやりとりを（相談者→時系列）順で返す（お客様の声学習用）。"""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT * FROM line_chats WHERE created_at >= datetime('now', ?) ORDER BY user_id, id",
+            (f"-{int(days)} day",),
+        ).fetchall()
+    return [dict(r) for r in rows]

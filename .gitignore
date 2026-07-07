@@ -9,3 +9,4 @@ venv/
 *.json
 !.github/**
 render_env_line.txt
+render_env_paste.env

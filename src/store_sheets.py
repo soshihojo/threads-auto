@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -402,3 +402,11 @@ def recent_line_chats(user_id: str, limit: int = 12) -> list[dict]:
     rows = [r for r in _records("line_chats") if r.get("user_id") == user_id]
     rows.sort(key=lambda r: str(r.get("created_at", "")), reverse=True)
     return list(reversed(rows[:limit]))
+
+
+def all_line_chats(days: int = 45) -> list[dict]:
+    """全相談者の直近days日のやりとりを（相談者→時系列）順で返す（お客様の声学習用）。"""
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    rows = [r for r in _records("line_chats") if str(r.get("created_at", "")) >= cutoff]
+    rows.sort(key=lambda r: (str(r.get("user_id", "")), str(r.get("created_at", ""))))
+    return rows

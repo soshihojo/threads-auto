@@ -26,6 +26,9 @@ jobs:
       - run: pip install -r requirements.txt
       - name: learn (analyze reactions, update rules)
         run: python -m src.main learn
+      - name: voice-learn (mine LINE customer voice, update rules)
+        continue-on-error: true   # 声学習が失敗しても投稿学習の反映は止めない
+        run: python -m src.main voice-learn
       - name: commit updated rules if changed
         run: |
           git config user.name "threads-auto-bot"

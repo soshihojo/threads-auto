@@ -7,6 +7,7 @@
   python -m src.main approve             返信下書きを承認/編集/送信（対話）
   python -m src.main insights            インサイト取得→DB更新→伸びた投稿を学習記録
   python -m src.main learn               反応データを分析→勝ち要素を抽象化→ルール自動更新
+  python -m src.main voice-learn         LINE相談ログから「お客様の声」を学習→投稿ルール更新
   python -m src.main refresh-token       長期トークンを更新して表示
 """
 from __future__ import annotations
@@ -150,6 +151,17 @@ def cmd_learn(_: argparse.Namespace) -> None:
           f"→ {res['path']} を更新しました。")
 
 
+def cmd_voice_learn(_: argparse.Namespace) -> None:
+    """LINE相談ログから「お客様の声」を学習し、投稿生成ルール(06_customer_voice.md)を自動更新。"""
+    from . import voice_learn
+    res = voice_learn.mine_customer_voice()
+    if not res.get("updated"):
+        print(f"⏭️ 学習スキップ: {res.get('reason')}")
+        return
+    print(f"🗣️ お客様の声を学習: 相談者{res['users']}人・{res['messages']}メッセージ"
+          f"→ {res['path']} を更新しました。")
+
+
 def cmd_check_store(_: argparse.Namespace) -> None:
     """保存先（Sheets/SQLite）に接続できるか確認。Sheetsなら必要なシートを作成する。"""
     print(f"保存先バックエンド: {store._backend}")
@@ -201,6 +213,7 @@ def main() -> None:
     sub.add_parser("approve").set_defaults(func=cmd_approve)
     sub.add_parser("insights").set_defaults(func=cmd_insights)
     sub.add_parser("learn").set_defaults(func=cmd_learn)
+    sub.add_parser("voice-learn").set_defaults(func=cmd_voice_learn)
     sub.add_parser("generate").set_defaults(func=cmd_generate)
     sub.add_parser("check-store").set_defaults(func=cmd_check_store)
     sub.add_parser("run-due").set_defaults(func=cmd_run_due)
