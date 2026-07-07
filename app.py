@@ -120,7 +120,8 @@ with tab_gen:
             text = st.text_area("本文（編集可）", value=cand["text"], key=f"text_{cand['id']}", height=150)
             c1, c2, c3, c4 = st.columns([1.2, 1, 1.1, 1])
             d = c1.date_input("投稿日", value=now_jst().date(), key=f"date_{cand['id']}")
-            t = c2.time_input("時刻", value=(now_jst() + timedelta(hours=1)).time().replace(second=0, microsecond=0), key=f"time_{cand['id']}")
+            t = c2.time_input("時刻", value=(now_jst() + timedelta(hours=1)).time().replace(minute=0, second=0, microsecond=0),
+                              step=3600, key=f"time_{cand['id']}")
             if c3.button("✅ 承認して予約", key=f"approve_{cand['id']}", use_container_width=True):
                 sched_iso = datetime.combine(d, t).strftime("%Y-%m-%dT%H:%M:%S")
                 store.approve_candidate(cand["id"], sched_iso, text=text)
