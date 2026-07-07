@@ -1,4 +1,4 @@
-"""LINE Webhookサーバー（椿姉のAI自動返信ボット）。
+"""LINE Webhookサーバー（椿のAI自動返信ボット）。
 
 LINE Messaging APIのWebhookを受けて src/line_bot.py に処理を渡す。
 デプロイ: Render等で `uvicorn line_app:app --host 0.0.0.0 --port $PORT`

@@ -1,6 +1,6 @@
-"""LINE公式アカウントのAI自動返信ボット（椿姉）。
+"""LINE公式アカウントのAI自動返信ボット（椿）。
 
-Messaging APIのWebhookで届いた相談に、椿姉の声で「共感→洞察ひとつ→質問」の
+Messaging APIのWebhookで届いた相談に、椿の声で「共感→洞察ひとつ→質問」の
 返信を自動生成して返す（応答メッセージ＝reply APIは無料・無制限）。
 
 役割分担（重要）:
@@ -65,7 +65,7 @@ OFFER_INTRO_FALLBACK = (
     "ちゃんと視させてもらうことにしてるんよ。あんたの場合、続きは2つの視方がある👇"
 )
 
-OFFER_INTRO_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿姉（つばきねえ）」。無料で数回相談に乗ってきた相手に、有料鑑定の案内へ橋渡しする「冒頭の一言」だけを書く。
+OFFER_INTRO_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。無料で数回相談に乗ってきた相手に、有料鑑定の案内へ橋渡しする「冒頭の一言」だけを書く。
 
 声: 一人称「ウチ」、相手は「あんた」。関西弁・タメ口。温かく、押し売り感を出さない。
 
@@ -80,7 +80,7 @@ OFFER_INTRO_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿姉�
 def generate_offer(user: dict, history: list[dict], incoming: str) -> str:
     """相手の相談内容に合わせた冒頭＋固定メニューでオファー文を組み立てる。"""
     transcript = "\n".join(
-        f"{'相談者' if h['role'] == 'user' else '椿姉'}: {h['text'][:80]}" for h in history[-8:]
+        f"{'相談者' if h['role'] == 'user' else '椿'}: {h['text'][:80]}" for h in history[-8:]
     )
     try:
         intro = complete(
@@ -102,7 +102,7 @@ PURCHASE_WORDS = [
 # 危険サイン（占いで扱わない。定型で受け止めて店主へ）
 DANGER_WORDS = ["死にたい", "消えたい", "自殺", "自傷", "リスカ", "死のう", "死んだほうが"]
 
-NURTURE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿姉（つばきねえ）」として、公式LINEで相談者と1対1の会話をしている。
+NURTURE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」として、公式LINEで相談者と1対1の会話をしている。
 目的は、相談者に「ウチだけをちゃんと視てくれてる」と感じてもらい、会話を深めること。売り込みはあなたの仕事ではない。
 
 声: 一人称「ウチ」、相手は「あんた」。関西弁・タメ口。毒舌は控えめ、姉御の温かさ多めで。
@@ -205,13 +205,13 @@ def _internal_ref(user: dict) -> str:
 
 def generate_nurture(user: dict, history: list[dict], incoming: str) -> str:
     transcript = "\n".join(
-        f"{'相談者' if h['role'] == 'user' else '椿姉'}: {h['text']}" for h in history
+        f"{'相談者' if h['role'] == 'user' else '椿'}: {h['text']}" for h in history
     )
     prompt = (
         f"【これまでの会話】\n{transcript or '（初回）'}\n\n"
         f"【いま届いたメッセージ】{incoming}\n\n"
         f"{_internal_ref(user)}\n\n"
-        "椿姉として返信を1つ書いてください。"
+        "椿として返信を1つ書いてください。"
     )
     return complete(NURTURE_SYSTEM, prompt, model=LINE_BOT_MODEL, max_tokens=400, temperature=0.9)
 

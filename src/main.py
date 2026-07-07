@@ -179,7 +179,7 @@ def cmd_run_due(_: argparse.Namespace) -> None:
 
 
 def cmd_diagnose(args: argparse.Namespace) -> None:
-    """無料診断：状況＋二人の生年月日 → 椿姉の鑑定文を生成して表示。"""
+    """無料診断：状況＋二人の生年月日 → 椿の鑑定文を生成して表示。"""
     res = diagnosis.generate_reading(args.me, args.him, args.status, args.period, args.details)
     print(f"----- 無料診断（あなた:{res['me_shuku']} / 彼:{res['him_shuku']} / 距離:{res['distance']}）-----")
     print(res["reading"])

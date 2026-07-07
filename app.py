@@ -2,7 +2,7 @@
 
 機能:
 - ポスト候補を生成 → 編集 → 投稿日時を指定して予約（or 今すぐ投稿）
-- 無料診断（椿姉の鑑定文を生成）
+- 無料診断（椿の鑑定文を生成）
 
 予約の自動投稿は別途 `python -m src.main run-due` を GitHub Actions が定期実行して行う。
 （このダッシュボードを閉じていても予約時刻に投稿される）
@@ -166,7 +166,7 @@ def _jp_birthday(label: str, key: str, default_year: int):
 
 
 if view == VIEW_DIAG:
-    st.caption("生年月日・状況・相談内容を入れて「鑑定する」。椿姉の鑑定文（彼の本音→LINE誘導）が出ます。")
+    st.caption("生年月日・状況・相談内容を入れて「鑑定する」。椿の鑑定文（彼の本音→LINE誘導）が出ます。")
     me_birth = _jp_birthday("相談者（あなた）の生年月日", "diag_me", 1995)
     him_birth = _jp_birthday("彼の生年月日", "diag_him", 1993)
     c3, c4 = st.columns(2)
@@ -183,7 +183,7 @@ if view == VIEW_DIAG:
             st.error("生年月日を正しく選んでください。")
         else:
             try:
-                with st.spinner("椿姉が視てます…"):
+                with st.spinner("椿が視てます…"):
                     res = diagnosis.generate_reading(me_birth, him_birth, status, period, details)
                 st.markdown(f"**あなた: {res['me_shuku']}　/　彼: {res['him_shuku']}　/　縁の距離: {res['distance']}**")
                 st.text_area("鑑定文（コピーして相談者に送れます）", value=res["reading"], height=320, key="diag_out")
@@ -222,7 +222,7 @@ if view == VIEW_CONSULT:
                     hist_str = "\n".join(
                         f"- 相談: {h['worry']} / 返信: {str(h['reading'])[:60]}…" for h in chist[:3]
                     )
-                    with st.spinner("椿姉が視てます…"):
+                    with st.spinner("椿が視てます…"):
                         res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str)
                     st.session_state["con_result"] = {"reply": res["reply"], "member_id": cmem["id"], "msg": incoming}
                 except Exception as e:

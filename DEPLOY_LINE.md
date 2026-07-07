@@ -1,9 +1,9 @@
-# LINE AI自動返信ボット（椿姉）セットアップ手順
+# LINE AI自動返信ボット（椿）セットアップ手順
 
 ## 仕組み
 ```
 相談者がLINEにメッセージ
- → Webhook → このサーバー → Claudeが椿姉の声で返信を生成 → 自動返信（無料）
+ → Webhook → このサーバー → Claudeが椿の声で返信を生成 → 自動返信（無料）
 購入サイン（料金/どうしたらいい 等）や危険サイン
  → 定型で受け止め＆bot一時停止（hold）＆Chatworkへ通知 → 店主が手動でクローズ
 ```
@@ -11,7 +11,7 @@
 - AIは料金・商品の話を一切しない。売るのは店主だけ
 
 ## STEP 1. LINE側の設定（あなたの作業）
-1. https://manager.line.biz → 椿姉のアカウント → 設定 → **Messaging API** → 「Messaging APIを利用する」
+1. https://manager.line.biz → 椿のアカウント → 設定 → **Messaging API** → 「Messaging APIを利用する」
    - プロバイダーは新規作成でOK（名前は任意。例: tsubaki）
    - 発行された **Channel secret** を控える
 2. https://developers.line.biz → 同チャネル → **Messaging API設定**タブ →
@@ -51,7 +51,7 @@
 ## STEP 3. Webhookをつなぐ
 1. LINE Developers → Messaging API設定 → **Webhook URL** に `https://<RenderのURL>/webhook` を設定
 2. 「検証」を押して Success を確認 → 「Webhookの利用」をオン
-3. 自分のLINEから椿姉に試しにメッセージ → 椿姉の返信が来れば完了
+3. 自分のLINEから椿に試しにメッセージ → 椿の返信が来れば完了
 
 ## STEP 4. スリープ対策（無料プランは15分無通信で休眠する）
 - https://uptimerobot.com （無料）で、RenderのURL（`/`）を **5分間隔で監視** に登録

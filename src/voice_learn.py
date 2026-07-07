@@ -25,7 +25,7 @@ _BIRTH_RE = re.compile(r"(?:19|20)\d{2}\s*[年/.\-]\s*\d{1,2}\s*[月/.\-]\s*\d{1
 _MAX_LINES = 600
 _MAX_CHARS_PER_MSG = 200
 
-_SYS = """あなたは恋愛・復縁相談アカウント「椿姉」のマーケ分析担当です。
+_SYS = """あなたは恋愛・復縁相談アカウント「椿」のマーケ分析担当です。
 LINEに届いた相談者との生のやりとりから、SNS投稿（Threads/Instagram）の質を上げる
 「お客様の声データ」を抽出・言語化します。ゴールは、読んだ女性が「私のことだ…」と
 感じる解像度の投稿を作れるようにすることです。
@@ -58,7 +58,7 @@ def mine_customer_voice(*, days: int = 45, min_messages: int = 10) -> dict:
         uid = str(c.get("user_id", ""))
         if uid not in labels:
             labels[uid] = f"相談者{len(labels) + 1}"
-        role = "相談者" if c.get("role") == "user" else "椿姉"
+        role = "相談者" if c.get("role") == "user" else "椿"
         text = _BIRTH_RE.sub("（生年月日）", str(c.get("text", "")).strip())
         lines.append(f"[{labels[uid]}] {role}: {text[:_MAX_CHARS_PER_MSG]}")
     if len(lines) > _MAX_LINES:
