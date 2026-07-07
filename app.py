@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time as dtime, timedelta
 
 import streamlit as st
 
@@ -116,14 +116,18 @@ with tab_gen:
         st.write(f"承認待ち {len(pending)} 件")
     for cand in pending:
         with st.container(border=True):
-            st.markdown(f"**候補 #{cand['id']}**　地域: `{cand['region'] or 'なし'}`")
+            st.markdown(f"**候補 #{cand['id']}**")
             text = st.text_area("本文（編集可）", value=cand["text"], key=f"text_{cand['id']}", height=150)
             c1, c2, c3, c4 = st.columns([1.2, 1, 1.1, 1])
             d = c1.date_input("投稿日", value=now_jst().date(), key=f"date_{cand['id']}")
-            t = c2.time_input("時刻", value=(now_jst() + timedelta(hours=1)).time().replace(minute=0, second=0, microsecond=0),
-                              step=3600, key=f"time_{cand['id']}")
+            # 投稿時間帯は7時〜24時のみ（24時=その日の深夜0時として翌日0:00に予約）
+            _hours = list(range(7, 24)) + [24]
+            _next = (now_jst() + timedelta(hours=1)).hour
+            h = c2.selectbox("時刻", _hours, index=_hours.index(_next) if _next in _hours else 0,
+                             format_func=lambda x: f"{x}:00", key=f"time_{cand['id']}")
             if c3.button("✅ 承認して予約", key=f"approve_{cand['id']}", use_container_width=True):
-                sched_iso = datetime.combine(d, t).strftime("%Y-%m-%dT%H:%M:%S")
+                sched = (datetime.combine(d, dtime(0)) + timedelta(days=1)) if h == 24 else datetime.combine(d, dtime(h))
+                sched_iso = sched.strftime("%Y-%m-%dT%H:%M:%S")
                 store.approve_candidate(cand["id"], sched_iso, text=text)
                 st.success(f"予約しました（{sched_iso}）")
                 st.rerun()

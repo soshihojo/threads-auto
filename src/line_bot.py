@@ -15,7 +15,9 @@ import base64
 import hashlib
 import hmac
 import json
+import random
 import re
+import time
 
 import requests
 
@@ -31,6 +33,18 @@ LINE_BOT_MODEL = env("LINE_BOT_MODEL") or "claude-sonnet-5"
 
 # AIが無料で返す回数の上限。超えたら有料オファーを送って停止（店主にバトンタッチ）
 FREE_REPLY_LIMIT = int(env("LINE_FREE_REPLY_LIMIT") or "5")
+
+# 人間らしい「間」：即答するとAI感が出るため、返信前にランダムに待つ秒数の範囲。
+# 生成時間（5〜15秒）と合わせて受信から30〜50秒後の返信になる。
+# replyトークンは約1分有効なので範囲を広げすぎない（失効時はpushフォールバック＝月200通枠を消費）
+REPLY_DELAY_RANGE = (
+    int(env("LINE_REPLY_DELAY_MIN") or "20"),
+    int(env("LINE_REPLY_DELAY_MAX") or "35"),
+)
+
+
+def _human_pause() -> None:
+    time.sleep(random.uniform(*REPLY_DELAY_RANGE))
 
 # オファーの商品・価格・リンク部分（固定。AIには書かせない）
 OFFER_MENU = (
@@ -256,20 +270,27 @@ def handle_event(ev: dict) -> None:
             store.upsert_line_user(user_id, **updates)
             user = {**user, **updates}
 
-    history = store.recent_line_chats(user_id, limit=12)
-
     bot_state = (user.get("bot") or "on").strip() or "on"
     if bot_state in ("off", "hold"):
         return
 
     signal = detect_signal(incoming)
-    if signal == "danger":
+    if signal == "danger":  # 危険サインは待たせず即返す
         _send(user_id, reply_token, DANGER_REPLY)
         store.upsert_line_user(user_id, bot="hold")
         return
     if signal == "purchase":
         _send(user_id, reply_token, HOLDING_REPLY)
         store.upsert_line_user(user_id, bot="hold")
+        return
+
+    # 人間らしい「間」を置いてから返信する
+    _human_pause()
+    history = store.recent_line_chats(user_id, limit=12)
+    # 待っている間に次のメッセージが届いていたら、この返信はスキップ
+    #（新しいメッセージ側の処理が全履歴を見て返す＝二重返信・順番の乱れを防ぐ）
+    last_user = next((h["text"] for h in reversed(history) if h["role"] == "user"), None)
+    if last_user != incoming:
         return
 
     # 無料返信の上限チェック：AIの返信がFREE_REPLY_LIMITに達していたら有料オファーを送って停止
