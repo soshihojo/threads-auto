@@ -186,12 +186,14 @@ def generate_post(type_hint: str | None = None, region: str | None = None,
         instructions.extend(_variation_directives(profile, case))
 
     if force_cta:
-        instructions.append(
+        # プロファイルが独自のCTA指示を持つ場合はそれを優先（例: こはく育成期=フォロー/保存促しのみ）
+        _cta = (profile.get("variation") or {}).get("force_cta_directive") or (
             "【必須・最優先】この投稿は、どの型であっても最後に必ず無料鑑定への誘導を入れる。"
             "誘導は3つセットで促すこと：①この投稿にいいね ②フォロー ③プロフィールの固定投稿にあるLINEから二人の生年月日を送る。"
             "『この投稿にいいねとフォローして、固定投稿のLINEから二人の生年月日を送ってきてな。最初は無料で視たる』のように、"
             "向こうから動く形で締める。URLは書かない。コメントを受付条件にしない。"
         )
+        instructions.append(_cta)
     if split:
         instructions.append(
             "【分割投稿で書く】今回は2〜3分割のツリー投稿として書く。"
