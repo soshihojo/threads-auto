@@ -109,6 +109,11 @@ _STATUS_PATTERNS = [
 ]
 
 
+def find_birthdates(text: str) -> list[str]:
+    """本文から生年月日を出現順に最大2件抽出（公開API。LINEボット等から使う）。"""
+    return _find_birthdates((text or "").translate(_Z2H))
+
+
 def parse_free_input(text: str) -> dict:
     """貼り付け文から 生年月日2件（1つ目=相談者、2つ目=彼）・状況・期間 を読み取る。"""
     text = (text or "").strip().translate(_Z2H)
@@ -234,10 +239,32 @@ def generate_consult(me_birth: str, him_birth: str, message: str, history: str =
     return {"me_shuku": me_s, "him_shuku": him_s, "reply": reply}
 
 
+DIAG_LINE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。公式LINEに二人の生年月日を送ってくれた相談者に、無料診断の鑑定文を書く。相談者はもうLINEの中にいる。
+
+声のルール:
+- 一人称「ウチ」、相手は「あんた」。関西弁・タメ口（〜や／〜やで／〜してみ／〜知ってるで）
+- 慰めの嘘は言わん。本音をズバッと。ただし最後は突き放さず受け止める（厳しさ7・愛3）
+
+鑑定文の構成（この順で、全体250〜400字・プレーンテキスト）:
+1. 送ってくれたことへの一言＋相手の状況への一突き（共感しつつ本音を一言）
+2. 彼の性質を断定的に語る。「こういうタイプの男や」と、誰が読んでも分かる日常の言葉で具体的に
+3. 二人の相性（縁の質）を平易に。良いところと、こじれやすいところの両方
+4. 今の状況への椿の読みを正直に渡す。希望が視えるならそう書き、厳しいならそれも書く
+5. 締め＝会話の継続：「ここまでが今の情報でウチが視れるとこや。ここから先も付き合うで。今いちばん聞きたいこと、ひとつ送ってみ」のように、相手が返しやすい問いかけで終える
+
+厳守:
+- 専門用語を本文に一切出さない。『宿曜』という占術名、宿の名前、「距離」「命・業・胎」等の関係名は禁止。中身は日常語に翻訳する
+- 復縁や結果を保証しない。病気・健康・金運の断定をしない
+- 不安を製造しない（「今動かないと手遅れ」等、焦らせるための期限や脅しは書かない。厳しい見立てを正直に伝えるのは可）
+- URLや登録への誘導を書かない（相手はもうLINEにいる）
+- マークダウン記号は使わない。絵文字は締めに🌙を1つだけ。出力は鑑定文のみ"""
+
+
 def generate_reading(me_birth: str, him_birth: str, status: str, period: str,
-                     details: str = "") -> dict:
+                     details: str = "", *, for_line: bool = False) -> dict:
     """無料診断の鑑定文を生成して返す。
     details は相談者の自由記述（例: 未読無視が続いてる／既読はつくが返信なし 等）。
+    for_line=True はLINE内で自動返信する用（URL誘導なし・会話を続ける締め）。
     返り値: {me_shuku, him_shuku, distance, reading}
     """
     me_s = honmei_shuku(me_birth)
@@ -246,11 +273,13 @@ def generate_reading(me_birth: str, him_birth: str, status: str, period: str,
     nearness = "近い（縁が濃い）" if dist <= 3 else ("中くらい" if dist <= 9 else "遠い（試される縁）")
 
     profile = active_profile()
-    line_url = profile.get("line_url", "")
+    line_url = "" if for_line else profile.get("line_url", "")
     user = (
         "次の相談者に、椿として無料診断の鑑定文を書いてください。\n"
-        "※相談者はすでに生年月日を送ってくれている。生年月日やDMを再度要求せず、続きはLINEへ誘導すること。\n\n"
-        f"【相談者の状況】{status}\n"
+        + ("※相談者はもうLINEの中にいる。URLや登録誘導は書かず、会話を続ける問いかけで締めること。\n\n"
+           if for_line else
+           "※相談者はすでに生年月日を送ってくれている。生年月日やDMを再度要求せず、続きはLINEへ誘導すること。\n\n")
+        + f"【相談者の状況】{status}\n"
         f"【最後の連絡からの期間】{period}\n"
         + (f"【相談者が書いた具体的な状況】{details}\n" if details.strip() else "")
         + "\n"
@@ -260,12 +289,16 @@ def generate_reading(me_birth: str, him_birth: str, status: str, period: str,
         f"・彼の本命宿: {him_s}\n"
         f"・二人の宿の距離: {dist}（{nearness}）\n"
         "----------------------------------------------------------------\n\n"
-        "彼の性質と二人の相性を、専門用語を使わず誰でも分かる言葉で具体的に語り、"
-        "彼が今その状況になっている本音を7割明かし、残り（本音の核心と動き時）はLINEで視ると締めてください。\n"
+        + ("彼の性質と二人の相性を、専門用語を使わず誰でも分かる言葉で具体的に語り、"
+           "今の状況への読みを正直に渡して、会話を続ける問いかけで締めてください。\n"
+           if for_line else
+           "彼の性質と二人の相性を、専門用語を使わず誰でも分かる言葉で具体的に語り、"
+           "彼が今その状況になっている本音を7割明かし、残り（本音の核心と動き時）はLINEで視ると締めてください。\n")
         + ("相談者が具体的な状況を書いている場合は、その内容に正面から触れ、"
            "その状況ならではの彼の心理を語ってカスタマイズ感を出すこと。\n" if details.strip() else "")
         + (f"【LINE登録リンク】{line_url} ← 鑑定文の最後に、椿の言葉で「続きはLINEで視たる」と促してこのURLを1行で載せる"
            if line_url else "")
     )
-    reading = complete(DIAG_SYSTEM, user, max_tokens=700, temperature=0.9).strip()
+    system = DIAG_LINE_SYSTEM if for_line else DIAG_SYSTEM
+    reading = complete(system, user, max_tokens=700, temperature=0.9).strip()
     return {"me_shuku": me_s, "him_shuku": him_s, "distance": dist, "reading": reading}

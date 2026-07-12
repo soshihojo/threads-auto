@@ -23,7 +23,7 @@ import requests
 
 from . import store
 from .config import env
-from .diagnosis import honmei_shuku
+from .diagnosis import find_birthdates, generate_reading, honmei_shuku, parse_free_input
 from .llm import complete
 
 LINE_API = "https://api.line.me/v2/bot"
@@ -131,10 +131,9 @@ DANGER_REPLY = (
 )
 IMAGE_REPLY = "ごめんな、画像はウチ視られへんのよ。文字で教えてくれるか🌙"
 
-# 生年月日の抽出（1940〜2029年・年/月/日 or ハイフン等の区切り）
-_DATE_RE = re.compile(
-    r"(19[4-9]\d|20[0-2]\d)\s*[年/\-\.]\s*(1[0-2]|0?[1-9])\s*[月/\-\.]\s*(3[01]|[12]\d|0?[1-9])"
-)
+# 無料診断（長文）とナーチャリング返信（60〜160字）を見分ける文字数のしきい値。
+# 「診断を送ったか」「無料返信が何通目か」の判定に使う
+_DIAG_LEN = 220
 
 
 # ---------- LINE API ----------
@@ -176,8 +175,9 @@ def get_display_name(user_id: str) -> str:
 
 # ---------- 解析 ----------
 def extract_birthdates(text: str) -> list[str]:
-    """本文から生年月日をISO形式で抽出（最大2件。1件目=本人、2件目=彼、の想定）。"""
-    return [f"{y}-{int(m):02d}-{int(d):02d}" for y, m, d in _DATE_RE.findall(text)][:2]
+    """本文から生年月日をISO形式で抽出（最大2件。1件目=本人、2件目=彼、の想定）。
+    表記揺れ対応は diagnosis.find_birthdates に集約（スペース区切り・カンマ・全角等）。"""
+    return find_birthdates(text)
 
 
 def detect_signal(text: str) -> str | None:
@@ -279,6 +279,34 @@ def handle_event(ev: dict) -> None:
         _send(user_id, reply_token, DANGER_REPLY)
         store.upsert_line_user(user_id, bot="hold")
         return
+
+    # 生年月日が二人分揃っていて、まだ無料診断を送っていなければ、自動で無料診断を返す
+    #（Threadsの投稿から「LINEで生年月日を送って」で来た人への一通目。
+    #  「鑑定してほしい」等の購入ワードが同時に入っていても、診断が先）
+    me_b = (user.get("me_birth") or "").strip()
+    him_b = (user.get("him_birth") or "").strip()
+    if me_b and him_b:
+        history = store.recent_line_chats(user_id, limit=12)
+        diag_sent = any(len(h["text"]) > _DIAG_LEN for h in history if h["role"] == "assistant")
+        if not diag_sent:
+            parsed = parse_free_input(incoming)
+            try:
+                res = generate_reading(
+                    me_b, him_b,
+                    parsed["status"] or "（相談文から読み取る）",
+                    parsed["period"] or "（相談文から読み取る）",
+                    incoming, for_line=True,
+                )
+            except Exception as e:
+                print(f"[line_bot] 無料診断の生成失敗: {e}")
+                return  # 次のメッセージで再挑戦
+            # 生成中に並行処理が先に診断を送っていたら二重送信しない
+            latest = store.recent_line_chats(user_id, limit=12)
+            if any(len(h["text"]) > _DIAG_LEN for h in latest if h["role"] == "assistant"):
+                return
+            _send(user_id, reply_token, res["reading"])
+            return
+
     if signal == "purchase":
         _send(user_id, reply_token, HOLDING_REPLY)
         store.upsert_line_user(user_id, bot="hold")
@@ -293,8 +321,10 @@ def handle_event(ev: dict) -> None:
     if last_user != incoming:
         return
 
-    # 無料返信の上限チェック：AIの返信がFREE_REPLY_LIMITに達していたら有料オファーを送って停止
-    bot_replies = sum(1 for h in history if h["role"] == "assistant")
+    # 無料返信の上限チェック：診断（長文）は数えず、ナーチャリング返信が
+    # FREE_REPLY_LIMIT通に達していたら有料オファーを送って停止
+    bot_replies = sum(1 for h in history
+                      if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN)
     if bot_replies >= FREE_REPLY_LIMIT:
         _send(user_id, reply_token, generate_offer(user, history, incoming))
         store.upsert_line_user(user_id, bot="hold")
