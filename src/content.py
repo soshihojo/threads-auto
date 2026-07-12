@@ -58,12 +58,19 @@ def sanitize(text: str) -> str:
 
 
 def _ensure_line_url(text: str) -> str:
-    """CTA（生年月日の送信を促す）投稿には必ずLINEのURLを付ける（生成AIが書き忘れても保証）。"""
+    """CTA（生年月日の送信を促す）投稿に、LINEのURLと「無料」の明記を保証する
+    （生成AIが書き忘れても配信前にコードで補正する）。"""
     url = active_profile().get("line_url", "")
-    if not url or url in text:
+    if not url or "生年月日" not in text:  # 生年月日を求める回＝無料鑑定CTA。それ以外は触らない
         return text
-    if "生年月日" in text:  # 生年月日を求める＝無料鑑定CTAの回
-        return f"{text}\n▶ {url}"
+    if url not in text:
+        label = "▶ " + ("" if "無料" in text else "無料鑑定はこちら → ") + url
+        return f"{text}\n{label}"
+    if "無料" not in text:
+        # URLはあるが「無料」の明記が無い → URL行にラベルを付けて補う
+        text = text.replace(f"▶ {url}", f"▶ 無料鑑定はこちら → {url}", 1)
+        if "無料" not in text:
+            text = text.replace(url, f"無料鑑定はこちら → {url}", 1)
     return text
 
 
