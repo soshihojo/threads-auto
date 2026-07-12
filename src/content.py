@@ -57,20 +57,24 @@ def sanitize(text: str) -> str:
     return _ensure_line_url(text.strip())
 
 
+_NATURAL_FREE = "最初は無料で視たるで。"
+
+
 def _ensure_line_url(text: str) -> str:
-    """CTA（生年月日の送信を促す）投稿に、LINEのURLと「無料」の明記を保証する
-    （生成AIが書き忘れても配信前にコードで補正する）。"""
+    """CTA（生年月日の送信を促す）投稿に、LINEのURLと「無料」の言及を保証する。
+    無料の補いは機械的なラベルではなく、椿の言葉としてURL行の直前に自然に挿す。"""
     url = active_profile().get("line_url", "")
     if not url or "生年月日" not in text:  # 生年月日を求める回＝無料鑑定CTA。それ以外は触らない
         return text
     if url not in text:
-        label = "▶ " + ("" if "無料" in text else "無料鑑定はこちら → ") + url
-        return f"{text}\n{label}"
+        free = "" if "無料" in text else f"{_NATURAL_FREE}\n"
+        return f"{text}\n{free}▶ {url}"
     if "無料" not in text:
-        # URLはあるが「無料」の明記が無い → URL行にラベルを付けて補う
-        text = text.replace(f"▶ {url}", f"▶ 無料鑑定はこちら → {url}", 1)
-        if "無料" not in text:
-            text = text.replace(url, f"無料鑑定はこちら → {url}", 1)
+        # URLはあるが無料の言及が無い → URL行の直前に椿の一文を挿す
+        lines = text.splitlines()
+        idx = next(i for i, ln in enumerate(lines) if url in ln)
+        lines.insert(idx, _NATURAL_FREE)
+        text = "\n".join(lines)
     return text
 
 
