@@ -99,13 +99,24 @@ def pick_case() -> dict | None:
     return random.choice(cases) if cases else None
 
 
+# 伏せ字の検出（「1位◯月」「○○な子」等、穴埋めされないまま出てきた本文を弾く）
+_PLACEHOLDER_RE = re.compile(r"[◯〇○](?=月|位|時|日|歳)|[◯〇○]{2}|××|□□")
+
+
+def _has_placeholder(text: str) -> bool:
+    return bool(_PLACEHOLDER_RE.search(text))
+
+
 def generate_candidate(force_cta: bool = False) -> tuple[str, str | None]:
     """候補1本を生成し (本文, 地域) を返す。
     実話回はその実話の地域だけを使い、一般論回のみランダム地域を使う（無関係な地域の混入防止）。
     force_cta=True のときは型に関わらず必ずDM/無料鑑定への誘導を入れる。"""
     case = pick_case()
     region = (case or {}).get("region") or pick_region()
-    return generate_post(region=region, case=case, force_cta=force_cta), region
+    text = generate_post(region=region, case=case, force_cta=force_cta)
+    if _has_placeholder(text):  # 伏せ字が残っていたら一度だけ作り直す
+        text = generate_post(region=region, case=case, force_cta=force_cta)
+    return text, region
 
 
 def _variation_directives(profile: dict, case: dict | None = None) -> list[str]:
@@ -190,6 +201,7 @@ def generate_best(candidates: int | None = None, region: str | None = None,
     cfg = load_config()
     n = candidates or cfg["posting"].get("candidates", 1)
     posts = [generate_post(region=region, case=case) for _ in range(max(1, n))]
+    posts = [p for p in posts if not _has_placeholder(p)] or posts  # 伏せ字入りは除外（全滅なら残す）
     if len(posts) == 1:
         return posts[0]
     return _judge(posts)
