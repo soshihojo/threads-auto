@@ -100,7 +100,7 @@ def pick_case() -> dict | None:
 
 
 # 伏せ字の検出（「1位◯月」「○○な子」等、穴埋めされないまま出てきた本文を弾く）
-_PLACEHOLDER_RE = re.compile(r"[◯〇○](?=月|位|時|日|歳)|[◯〇○]{2}|××|□□")
+_PLACEHOLDER_RE = re.compile(r"[◯〇○](?=月|位|時|分|日|歳|円|人|回)|[◯〇○]{2}|××|□□")
 
 
 def _has_placeholder(text: str) -> bool:
