@@ -129,6 +129,9 @@ def parse_free_input(text: str) -> dict:
         period = "〜2週間"
     elif re.search(r"[1１]?\s*[ヶケヵか][月]|ヶ月以上", stripped):
         period = "1ヶ月以上"
+    elif re.search(r"(?:^|\n|・|④|➃)\s*(今日|昨日)(?:です|や|やで|。|！|!)?\s*(?:\n|$)", stripped):
+        # ④の選択肢「今日」「昨日」への回答（行として独立している場合のみ＝文中の誤検知を防ぐ）
+        period = "今日〜昨日（ごく最近）"
     else:
         period = ""
     return {
