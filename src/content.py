@@ -54,7 +54,17 @@ def sanitize(text: str) -> str:
     # 行頭の見出し記号（#, ##…）と箇条書き記号（- , * , ・の直後空白）を除去
     text = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", text)
     text = re.sub(r"(?m)^\s{0,3}[*\-]\s+", "", text)
-    return text.strip()
+    return _ensure_line_url(text.strip())
+
+
+def _ensure_line_url(text: str) -> str:
+    """CTA（生年月日の送信を促す）投稿には必ずLINEのURLを付ける（生成AIが書き忘れても保証）。"""
+    url = active_profile().get("line_url", "")
+    if not url or url in text:
+        return text
+    if "生年月日" in text:  # 生年月日を求める＝無料鑑定CTAの回
+        return f"{text}\n▶ {url}"
+    return text
 
 
 def _read_rules(rules_dir: str) -> dict[str, str]:
