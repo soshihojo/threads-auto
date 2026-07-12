@@ -61,20 +61,22 @@ _NATURAL_FREE = "最初は無料で視たるで。"
 
 
 def _ensure_line_url(text: str) -> str:
-    """CTA（生年月日の送信を促す）投稿に、LINEのURLと「無料」の言及を保証する。
-    無料の補いは機械的なラベルではなく、椿の言葉としてURL行の直前に自然に挿す。"""
+    """CTA（生年月日の送信を促す）投稿の仕上げ保証。
+    - URLは投稿本文に載せない（リンク付き投稿はリーチが下がるため、入口は固定投稿に集約）
+    - 「無料」の言及が無ければ椿の一文を補う"""
     url = active_profile().get("line_url", "")
     if not url or "生年月日" not in text:  # 生年月日を求める回＝無料鑑定CTA。それ以外は触らない
         return text
-    if url not in text:
-        free = "" if "無料" in text else f"{_NATURAL_FREE}\n"
-        return f"{text}\n{free}▶ {url}"
+    # 生成AIがURLを書いてしまった場合は、その行ごと除去して固定投稿への案内に置き換える
+    if url in text:
+        lines = [ln for ln in text.splitlines() if url not in ln]
+        while lines and lines[-1].strip() in ("", "▼", "▶"):
+            lines.pop()
+        text = "\n".join(lines).strip()
+        if "固定投稿" not in text and "プロフィール" not in text:
+            text += "\nLINEはプロフィールの固定投稿から飛べるで。"
     if "無料" not in text:
-        # URLはあるが無料の言及が無い → URL行の直前に椿の一文を挿す
-        lines = text.splitlines()
-        idx = next(i for i, ln in enumerate(lines) if url in ln)
-        lines.insert(idx, _NATURAL_FREE)
-        text = "\n".join(lines)
+        text += f"\n{_NATURAL_FREE}"
     return text
 
 
