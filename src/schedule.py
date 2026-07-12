@@ -33,7 +33,7 @@ def run_due(client: ThreadsClient) -> dict:
         region = row["region"]
         try:
             loc_id = client.first_location_id(region) if (profile.get("tag_location") and region) else None
-            media_id = client.publish_text(text, location_id=loc_id)
+            media_id = client.publish_thread(text, location_id=loc_id)
             store.mark_scheduled(row["id"], "posted", media_id=media_id)
             store.save_post(media_id, text, profile["name"])
             stats["posted"] += 1

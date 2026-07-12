@@ -80,6 +80,8 @@ profiles:
       - 出力はMarkdownの本文のみ（見出し・前置き・コードフェンス不要）
     # 生成の多様化軸（似た投稿への収束を防ぐ）
     variation:
+      # 分割投稿（ツリー式）にする割合。1本目で話を切り、続きを自動でぶら下げる
+      split_ratio: 0.5
       # _variation_directives に渡すラベル（集客用ラベルを占い用に上書き）
       labels:
         industries: "今回の相談者の状況（自己投影させる主役）"

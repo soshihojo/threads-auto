@@ -116,9 +116,12 @@ def generate_candidate(force_cta: bool = False) -> tuple[str, str | None]:
     force_cta=True のときは型に関わらず必ずDM/無料鑑定への誘導を入れる。"""
     case = pick_case()
     region = (case or {}).get("region") or pick_region()
-    text = generate_post(region=region, case=case, force_cta=force_cta)
+    # 分割投稿（ツリー式）の割合は variation.split_ratio で制御（未設定なら常に単発）
+    v = active_profile().get("variation") or {}
+    split = random.random() < float(v.get("split_ratio", 0) or 0)
+    text = generate_post(region=region, case=case, force_cta=force_cta, split=split)
     if _has_placeholder(text):  # 伏せ字が残っていたら一度だけ作り直す
-        text = generate_post(region=region, case=case, force_cta=force_cta)
+        text = generate_post(region=region, case=case, force_cta=force_cta, split=split)
     return text, region
 
 
@@ -157,7 +160,8 @@ def _variation_directives(profile: dict, case: dict | None = None) -> list[str]:
 
 
 def generate_post(type_hint: str | None = None, region: str | None = None,
-                  case: dict | None = None, force_cta: bool = False) -> str:
+                  case: dict | None = None, force_cta: bool = False,
+                  split: bool = False) -> str:
     """1投稿の本文を生成して返す。type_hint で型を指定（無ければ自動選択）。
     region を渡すとその地域名を使う（None なら内部でランダム選択）。
     case はネタ元（pick_case の戻り値）。整合した生成には generate_candidate() を推奨。"""
@@ -184,9 +188,17 @@ def generate_post(type_hint: str | None = None, region: str | None = None,
     if force_cta:
         instructions.append(
             "【必須・最優先】この投稿は、どの型であっても最後に必ず無料鑑定への誘導を入れる。"
-            "誘導は3つセットで促すこと：①コメントに🌙（or🔮）を送る ②フォローする ③二人の生年月日をDMで送る。"
-            "『コメントに🌙送って、フォローして、二人の生年月日をDMに送ってきてな。ウチが視たる』のように、"
-            "向こうから動く形で締める。コメントだけで終わる誘導は禁止。"
+            "誘導は3つセットで促すこと：①この投稿にいいね ②フォロー ③プロフィールの固定投稿にあるLINEから二人の生年月日を送る。"
+            "『この投稿にいいねとフォローして、固定投稿のLINEから二人の生年月日を送ってきてな。最初は無料で視たる』のように、"
+            "向こうから動く形で締める。URLは書かない。コメントを受付条件にしない。"
+        )
+    if split:
+        instructions.append(
+            "【分割投稿で書く】今回は2〜3分割のツリー投稿として書く。"
+            "1本目は60〜120字で、話をいちばん気になるところで切り、結論を言わない（タップして続きを読みたくさせる）。"
+            "パートとパートの間には「===続き===」だけの行を入れる。"
+            "2本目以降で本題を渡し、最終パートを通常どおりの締め（CTA指定があればそのCTA）で終える。"
+            "全パート合計でも300字以内。各パートは単体でも読みやすい塊にする。"
         )
 
     user = (

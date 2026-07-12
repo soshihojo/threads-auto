@@ -64,7 +64,7 @@ def cmd_post(args: argparse.Namespace) -> None:
         return
     c = make_client()
     loc_id = c.first_location_id(region) if (profile.get("tag_location") and region) else None
-    media_id = c.publish_text(text, location_id=loc_id)
+    media_id = c.publish_thread(text, location_id=loc_id)
     store.init_db()
     store.save_post(media_id, text, profile["name"])
     print(f"🚀 配信しました: media_id={media_id}")

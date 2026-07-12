@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -162,6 +163,21 @@ class ThreadsClient:
             {"fields": "id,text,username,timestamp,replied_to,root_post,has_replies,hide_status"},
         )
         return res.get("data", [])
+
+    SPLIT_MARK = "===続き==="
+
+    def publish_thread(self, text: str, *, location_id: str | None = None,
+                       part_delay: int = 75) -> str:
+        """「===続き===」区切りの分割投稿をツリー（自分への返信の連なり）として順に公開する。
+        区切りが無ければ通常の単発投稿。先頭の media_id を返す。
+        1本目がフィードに流れ、タップした人が続きを読む構造（分割でクリックを誘発する型）。"""
+        parts = [p.strip() for p in re.split(r"\n?===続き===\n?", text) if p.strip()]
+        first = self.publish_text(parts[0], location_id=location_id)
+        prev = first
+        for part in parts[1:]:
+            time.sleep(part_delay)
+            prev = self.reply_to(prev, part)
+        return first
 
     def reply_to(self, media_id: str, text: str) -> str:
         """指定投稿/返信へ返信する。新しい返信の media_id を返す。"""

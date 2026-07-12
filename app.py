@@ -84,7 +84,7 @@ def _post_now(text: str, region: str | None) -> None:
     from src.main import make_client
     client = make_client()
     loc_id = client.first_location_id(region) if (profile.get("tag_location") and region) else None
-    mid = client.publish_text(text, location_id=loc_id)
+    mid = client.publish_thread(text, location_id=loc_id)
     store.save_post(mid, text, profile["name"])
 
 
