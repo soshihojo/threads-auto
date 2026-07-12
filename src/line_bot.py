@@ -120,6 +120,17 @@ NURTURE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば
 - 復縁や結果を保証しない。過度に不安を煽らない。病気・健康・金運の断定をしない
 - 鑑定の納期を約束しない。絵文字は🌙を0〜1個。出力は返信本文のみ"""
 
+# 生年月日は届いたが状況が分からないときの定型ヒアリング（生成なし・トークン消費ゼロ）
+ASK_MARKER = "①今の状況は、どれに近い？"
+ASK_DETAILS = (
+    "生年月日ありがとう。あと追加で2つだけ教えて。\n"
+    "これ揃たら、彼の本音ちゃんと視たるからな🌙\n\n"
+    "①今の状況は、どれに近い？\n"
+    "・音信不通\n・既読スルー\n・急に冷められた\n・別れ話の後\n・片思いで進展なし\n・復縁したい\n\n"
+    "②彼と最後に連絡取れたん、いつ頃や？\n"
+    "・〜3日\n・〜2週間\n・1ヶ月以上"
+)
+
 HOLDING_REPLY = (
     "その話な、ウチがちゃんと自分の言葉で返したいから、少しだけ待っててな。"
     "適当に答えたない、大事なとこやから🌙"
@@ -289,13 +300,20 @@ def handle_event(ev: dict) -> None:
         history = store.recent_line_chats(user_id, limit=12)
         diag_sent = any(len(h["text"]) > _DIAG_LEN for h in history if h["role"] == "assistant")
         if not diag_sent:
-            parsed = parse_free_input(incoming)
+            # 状況・期間は直近のやりとり全体から読み取る（①②の回答が別メッセージでも拾える）
+            recent_user = "\n".join(h["text"] for h in history if h["role"] == "user")[-800:]
+            parsed = parse_free_input(recent_user)
+            asked = any(ASK_MARKER in h["text"] for h in history if h["role"] == "assistant")
+            if not parsed["status"] and not asked:
+                # 状況がまだ分からない → まず①②の定型ヒアリングを返す
+                _send(user_id, reply_token, ASK_DETAILS)
+                return
             try:
                 res = generate_reading(
                     me_b, him_b,
                     parsed["status"] or "（相談文から読み取る）",
                     parsed["period"] or "（相談文から読み取る）",
-                    incoming, for_line=True,
+                    recent_user, for_line=True,
                 )
             except Exception as e:
                 print(f"[line_bot] 無料診断の生成失敗: {e}")
@@ -321,10 +339,11 @@ def handle_event(ev: dict) -> None:
     if last_user != incoming:
         return
 
-    # 無料返信の上限チェック：診断（長文）は数えず、ナーチャリング返信が
-    # FREE_REPLY_LIMIT通に達していたら有料オファーを送って停止
+    # 無料返信の上限チェック：診断（長文）と①②の定型ヒアリングは数えず、
+    # ナーチャリング返信がFREE_REPLY_LIMIT通に達していたら有料オファーを送って停止
     bot_replies = sum(1 for h in history
-                      if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN)
+                      if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN
+                      and ASK_MARKER not in h["text"])
     if bot_replies >= FREE_REPLY_LIMIT:
         _send(user_id, reply_token, generate_offer(user, history, incoming))
         store.upsert_line_user(user_id, bot="hold")
