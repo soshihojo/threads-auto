@@ -203,6 +203,27 @@ def cmd_kantei(args: argparse.Namespace) -> None:
     print(f"→ LINE公式アプリのチャットからPDFを添付して送付: {res['pdf']}")
 
 
+def cmd_tsukiyomi(args: argparse.Namespace) -> None:
+    """月詠み（月額会員の月次ミニ鑑定書PDF）: 登録会員を選び、鑑定書と一貫した今月の鑑定を出力。"""
+    from . import kantei, store
+    members = {str(m["nickname"]): m for m in store.list_members()}
+    m = members.get(args.member)
+    if not m:
+        print(f"会員「{args.member}」が見つかりません。登録済み: {', '.join(members) or '（なし）'}")
+        return
+    # 納品済みの個別鑑定書（👥会員でPDF登録したもの）があれば、読み・処方箋を一貫させる
+    kantei_rows = [r for r in store.list_readings(m["id"]) if r["month"] == "個別鑑定書"]
+    kantei_text = str(kantei_rows[0]["reading"]) if kantei_rows else ""
+    worry = args.worry
+    if args.worry_file:
+        worry = Path(args.worry_file).read_text(encoding="utf-8")
+    res = kantei.make_tsukiyomi(m["nickname"], m["me_birth"], m["him_birth"], worry,
+                                kantei_text=kantei_text, month_label=args.month or None)
+    # 控えを保存（💬会員相談の返信生成が「今月の月詠み」も踏まえられるように）
+    store.add_reading(m["id"], f"月詠み {res['month_label']}", worry, res["body"][:15000])
+    print(f"→ LINE公式アプリのチャットからPDFを添付して送付: {res['pdf']}")
+
+
 def cmd_refresh_token(_: argparse.Namespace) -> None:
     c = make_client()
     data = c.refresh_long_lived_token()
@@ -245,6 +266,12 @@ def main() -> None:
     p_kan.add_argument("--him", required=True, help="彼の生年月日 YYYY-MM-DD")
     p_kan.add_argument("--details-file", required=True, help="悩み詳細のテキストファイル")
     p_kan.set_defaults(func=cmd_kantei)
+    p_tsu = sub.add_parser("tsukiyomi")
+    p_tsu.add_argument("--member", required=True, help="👥会員に登録済みのニックネーム")
+    p_tsu.add_argument("--worry", default="", help="会員の近況・今月の悩み（任意）")
+    p_tsu.add_argument("--worry-file", default="", help="近況・悩みのテキストファイル（任意）")
+    p_tsu.add_argument("--month", default="", help="対象月ラベル（例: 2026年8月。省略時は今月）")
+    p_tsu.set_defaults(func=cmd_tsukiyomi)
     sub.add_parser("refresh-token").set_defaults(func=cmd_refresh_token)
     args = parser.parse_args()
     args.func(args)

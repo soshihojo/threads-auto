@@ -52,6 +52,7 @@ TABLES = {
     "readings": ["id", "member_id", "month", "worry", "reading", "created_at"],
     "line_users": ["user_id", "display_name", "me_birth", "him_birth", "bot", "note", "created_at", "updated_at"],
     "line_chats": ["id", "user_id", "role", "text", "created_at"],
+    "web_diag": ["code", "me_birth", "him_birth", "status", "period", "type_name", "used", "created_at", "used_at"],
 }
 
 
@@ -369,6 +370,32 @@ def list_readings(member_id=None, limit: int = 200) -> list[dict]:
     if member_id is not None:
         rows = [r for r in rows if str(r.get("member_id")) == str(member_id)]
     rows.sort(key=lambda r: str(r.get("created_at", "")), reverse=True)
+    return rows[:limit]
+
+
+# ---- Web無料診断（鑑定番号） ----
+def add_web_diag(code: str, me_birth: str, him_birth: str, status: str,
+                 period: str, type_name: str) -> None:
+    _append("web_diag", {"code": code, "me_birth": me_birth, "him_birth": him_birth,
+                        "status": status, "period": period, "type_name": type_name,
+                        "used": 0, "created_at": _now()})
+
+
+def get_web_diag(code: str) -> dict | None:
+    for r in _records("web_diag"):
+        if str(r.get("code")) == str(code):
+            return r
+    return None
+
+
+def mark_web_diag_used(code: str) -> None:
+    idx = _find_row("web_diag", "code", code)
+    if idx:
+        _update_cells("web_diag", idx, {"used": 1, "used_at": _now()})
+
+
+def list_web_diag(limit: int = 1000) -> list[dict]:
+    rows = sorted(_records("web_diag"), key=lambda r: str(r.get("created_at", "")), reverse=True)
     return rows[:limit]
 
 

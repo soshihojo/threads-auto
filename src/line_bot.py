@@ -21,9 +21,9 @@ import time
 
 import requests
 
-from . import store
+from . import store, web_diag
 from .config import env
-from .diagnosis import find_birthdates, generate_reading, honmei_shuku, parse_free_input
+from .diagnosis import _Z2H, find_birthdates, generate_reading, honmei_shuku, parse_free_input
 from .llm import complete
 
 LINE_API = "https://api.line.me/v2/bot"
@@ -47,14 +47,13 @@ def _human_pause() -> None:
     time.sleep(random.uniform(*REPLY_DELAY_RANGE))
 
 # オファーの商品・価格・リンク部分（固定。AIには書かせない）
+# 1回目のオファーは個別鑑定のみ。月額会員（椿の月詠み）は個別鑑定の納品後にだけ案内する
+#（案内文は funnel/line_step_7days.md の「月詠み案内」参照。ボットからは送らない）
 OFFER_MENU = (
-    "①一回限り、あんたと彼のことを深く視る個別鑑定\n"
-    "“今動くべきか・いつ・どう一言を送るか”まで、あんた専用に視て返す\n"
+    "あんたと彼のことを、一回限りで深く視る「個別鑑定書」や。\n"
+    "“今動くべきか・いつ・どう一言を送るか”まで、あんた専用に視て、鑑定書にまとめて返す\n"
     "→ 今だけ80%OFF 3,960円\n"
     "https://1aksbkdokn31q1trp81e.stores.jp/items/685edb3caf1f4a03c43a0aa4\n\n"
-    "②これからも、彼のこと何度でもウチに相談したい\n"
-    "→ 相談し放題の月額会員（月999円）\n"
-    "https://buy.stripe.com/fZu00ibsO4yD3MEeqC53O00\n\n"
     "「実際どんな鑑定が届くん？」て子は、中身と受けた子の感想をここにまとめてあるから、読んでから決めてくれてええで。\n"
     "▼\n"
     "https://note.com/tsubaki_honne/n/n24b6aed96bf2\n\n"
@@ -65,7 +64,7 @@ OFFER_MENU = (
 OFFER_INTRO_FALLBACK = (
     "ここまで、ウチなりに真剣に視てきたつもりや。\n"
     "ただ正直に言うとな——相談がめちゃくちゃ増えてて、ここから先は本気の子を優先して"
-    "ちゃんと視させてもらうことにしてるんよ。あんたの場合、続きは2つの視方がある👇"
+    "ちゃんと視させてもらうことにしてるんよ。あんたの場合、ちゃんと視るならこれや👇"
 )
 
 OFFER_INTRO_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。無料で数回相談に乗ってきた相手に、有料鑑定の案内へ橋渡しする「冒頭の一言」だけを書く。
@@ -75,7 +74,7 @@ OFFER_INTRO_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（�
 書くこと（80〜140字・この後に商品メニューが続く前提）:
 1. これまでの相談内容（相手の状況）に具体的に触れて、真剣に向き合ってきたことを一言
 2. 「相談が増えていて、ここから先は本気の子を優先してちゃんと視る」という正直な理由
-3. 「あんたの場合、続きは2つの視方がある👇」で締める（この一文で必ず終える）
+3. 「あんたの場合、ちゃんと視るならこれや👇」で締める（この一文で必ず終える）
 
 厳守: 価格・リンク・商品名は書かない（後ろに続くメニューに任せる）。専門用語・絵文字なし。出力は本文のみ"""
 
@@ -145,6 +144,21 @@ DANGER_REPLY = (
     "ウチもここにおるからな🌙"
 )
 IMAGE_REPLY = "ごめんな、画像はウチ視られへんのよ。文字で教えてくれるか🌙"
+
+# ---- Web診断（椿の縁視）の鑑定番号 ----
+# /shindan で発行した4桁番号（3000〜9999）だけのメッセージを合言葉として受け付ける
+_CODE_RE = re.compile(r"^[#＃]?\s*([3-9]\d{3})\s*$")
+# 本診断の前置き。番号経由の診断が _DIAG_LEN(220字) を確実に超えるための固定文でもある
+#（超えないと「診断送付済み」の判定に乗らず、次のメッセージで診断が二重生成されるため）
+WEB_DIAG_INTRO = (
+    "番号、確かに受け取ったで。Webで視た「二人の縁」の続き——"
+    "ここからは、彼の“今”の話や。\n\n"
+)
+CODE_NOT_FOUND = (
+    "ん、その番号……ウチの手元に見当たらへんわ。期限切れかもしれん。\n"
+    "プロフィールのリンクからもう一回視てくれてもええし、"
+    "めんどくさかったら二人の生年月日（あんた→彼の順）をここに送ってくれたら、それで視たるで🌙"
+)
 
 # 無料診断（長文）とナーチャリング返信（60〜160字）を見分ける文字数のしきい値。
 # 「診断を送ったか」「無料返信が何通目か」の判定に使う
@@ -293,6 +307,32 @@ def handle_event(ev: dict) -> None:
     if signal == "danger":  # 危険サインは待たせず即返す
         _send(user_id, reply_token, DANGER_REPLY)
         store.upsert_line_user(user_id, bot="hold")
+        return
+
+    # Web診断（/shindan）の鑑定番号だけが届いたら、保存済みの入力で本診断を自動返信
+    code_m = _CODE_RE.match(incoming.translate(_Z2H))
+    if code_m:
+        row = web_diag.redeem(code_m.group(1))
+        if not row:
+            _send(user_id, reply_token, CODE_NOT_FOUND)
+            return
+        store.upsert_line_user(user_id, me_birth=row["me_birth"], him_birth=row["him_birth"])
+        try:
+            res = generate_reading(
+                row["me_birth"], row["him_birth"],
+                row.get("status") or "（不明。性質と縁を中心に視る）",
+                row.get("period") or "（不明）",
+                "", for_line=True,
+            )
+        except Exception as e:
+            print(f"[line_bot] 番号診断の生成失敗: {e}")
+            return  # 次のメッセージで再挑戦（番号は未使用のまま残る）
+        store.mark_web_diag_used(code_m.group(1))
+        # 生成中に並行処理が先に診断を送っていたら二重送信しない
+        latest = store.recent_line_chats(user_id, limit=12)
+        if any(len(h["text"]) > _DIAG_LEN for h in latest if h["role"] == "assistant"):
+            return
+        _send(user_id, reply_token, WEB_DIAG_INTRO + res["reading"])
         return
 
     # 生年月日が二人分揃っていて、まだ無料診断を送っていなければ、自動で無料診断を返す

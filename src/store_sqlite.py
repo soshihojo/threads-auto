@@ -89,6 +89,17 @@ CREATE TABLE IF NOT EXISTS line_chats (
     text       TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS web_diag (
+    code       TEXT PRIMARY KEY,   -- Web診断で発行する鑑定番号（LINEで送ってもらう合言葉）
+    me_birth   TEXT,
+    him_birth  TEXT,
+    status     TEXT,
+    period     TEXT,
+    type_name  TEXT,
+    used       INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    used_at    TEXT
+);
 """
 
 
@@ -306,6 +317,33 @@ def list_readings(member_id=None, limit: int = 200) -> list[sqlite3.Row]:
                 (member_id, limit),
             ).fetchall()
         return c.execute("SELECT * FROM readings ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+
+
+# ---- Web無料診断（鑑定番号） ----
+def add_web_diag(code: str, me_birth: str, him_birth: str, status: str,
+                 period: str, type_name: str) -> None:
+    with conn() as c:
+        c.execute(
+            "INSERT INTO web_diag(code, me_birth, him_birth, status, period, type_name) VALUES (?,?,?,?,?,?)",
+            (code, me_birth, him_birth, status, period, type_name),
+        )
+
+
+def get_web_diag(code: str) -> dict | None:
+    with conn() as c:
+        row = c.execute("SELECT * FROM web_diag WHERE code=?", (code,)).fetchone()
+        return dict(row) if row else None
+
+
+def mark_web_diag_used(code: str) -> None:
+    with conn() as c:
+        c.execute("UPDATE web_diag SET used=1, used_at=CURRENT_TIMESTAMP WHERE code=?", (code,))
+
+
+def list_web_diag(limit: int = 1000) -> list[dict]:
+    with conn() as c:
+        rows = c.execute("SELECT * FROM web_diag ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ---- LINEボット（ユーザー・会話履歴） ----

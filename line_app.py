@@ -15,8 +15,9 @@ import json
 
 import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 
-from src import line_bot, store
+from src import line_bot, store, web_diag
 from src.config import env
 
 app = FastAPI()
@@ -42,6 +43,22 @@ def _forward(body: bytes, signature: str) -> None:
 @app.get("/")
 def health() -> dict:
     return {"ok": True}
+
+
+@app.get("/shindan", response_class=HTMLResponse)
+def shindan_page() -> str:
+    """Web無料診断「椿の縁視」（Threadsのプロフィール/固定投稿からの入口）。"""
+    return web_diag.page_html()
+
+
+@app.post("/shindan/api")
+async def shindan_api(request: Request) -> JSONResponse:
+    try:
+        data = await request.json()
+        return JSONResponse(web_diag.submit(data))
+    except Exception as e:
+        print(f"[shindan] 受付失敗: {e}")
+        return JSONResponse({"ok": False, "error": "invalid input"}, status_code=400)
 
 
 @app.post("/webhook")

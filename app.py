@@ -166,6 +166,15 @@ def _jp_birthday(label: str, key: str, default_year: int):
 
 
 if view == VIEW_DIAG:
+    # Web診断「椿の縁視」の利用状況（固定投稿・プロフのA/Bテストの判定材料）
+    try:
+        _wd = store.list_web_diag(limit=1000)
+        _used = sum(1 for r in _wd if str(r.get("used") or "0").lower() in ("1", "true"))
+        if _wd:
+            st.caption(f"🌐 Web診断「椿の縁視」: 入力 {len(_wd)}件 → LINEで番号使用 {_used}件"
+                       f"（転換率 {_used * 100 // len(_wd)}%）")
+    except Exception:
+        pass
     st.caption("DMやLINEで届いた文章をそのまま貼るだけ。生年月日（1つ目=相談者、2つ目=彼）・状況・期間は自動で読み取ります。")
     raw = st.text_area(
         "届いた文章を貼り付け",

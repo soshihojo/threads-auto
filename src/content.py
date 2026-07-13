@@ -62,20 +62,19 @@ _NATURAL_FREE = "最初は無料で視たるで。"
 
 def _ensure_line_url(text: str) -> str:
     """生成投稿の仕上げ保証。
-    - URLは生成投稿には一切載せない（入口は固定投稿に集約。リンク付き投稿はリーチも下がる）
-    - CTA（生年月日の送信を促す）回は「固定投稿のLINEから」の案内と「無料」の言及を補う"""
-    url = active_profile().get("line_url", "")
-    if not url:
+    - URLは生成投稿には一切載せない（入口はプロフィールのリンクに集約。リンク付き投稿はリーチも下がる）
+    - CTA（無料診断へ促す）回は「プロフィールのリンクから」の案内と「無料」の言及を補う"""
+    if not active_profile().get("line_url") and not active_profile().get("web_diag_url"):
         return text
     # 生成AIがURLを書いてしまった場合は、CTAかどうかを問わずその行ごと除去する
-    if url in text:
-        lines = [ln for ln in text.splitlines() if url not in ln]
+    if "http://" in text or "https://" in text:
+        lines = [ln for ln in text.splitlines() if "http://" not in ln and "https://" not in ln]
         while lines and lines[-1].strip() in ("", "▼", "▶", "→"):
             lines.pop()
         text = "\n".join(lines).strip()
-    if "生年月日" in text:  # 無料鑑定CTAの回
-        if "固定投稿" not in text:
-            text += "\nLINEはプロフィールの固定投稿からやで。"
+    if "生年月日" in text or "無料診断" in text:  # 無料鑑定CTAの回
+        if "プロフ" not in text:
+            text += "\n診断はプロフィールのリンクから30秒やで。"
         if "無料" not in text:
             text += f"\n{_NATURAL_FREE}"
     return text
@@ -188,9 +187,9 @@ def generate_post(type_hint: str | None = None, region: str | None = None,
     if force_cta:
         # プロファイルが独自のCTA指示を持つ場合はそれを優先（例: こはく育成期=フォロー/保存促しのみ）
         _cta = (profile.get("variation") or {}).get("force_cta_directive") or (
-            "【必須・最優先】この投稿は、どの型であっても最後に必ず無料鑑定への誘導を入れる。"
-            "誘導は3つセットで促すこと：①この投稿にいいね ②フォロー ③プロフィールの固定投稿にあるLINEから二人の生年月日を送る。"
-            "『この投稿にいいねとフォローして、固定投稿のLINEから二人の生年月日を送ってきてな。最初は無料で視たる』のように、"
+            "【必須・最優先】この投稿は、どの型であっても最後に必ず無料診断への誘導を入れる。"
+            "誘導は3つセットで促すこと：①この投稿にいいね ②フォロー ③プロフィールのリンクから無料診断（二人の生年月日を入れるだけ・30秒）。"
+            "『この投稿にいいねとフォローして、プロフのリンクから無料診断してみてな。生年月日入れるだけ、30秒で視たる』のように、"
             "向こうから動く形で締める。URLは書かない。コメントを受付条件にしない。"
         )
         instructions.append(_cta)

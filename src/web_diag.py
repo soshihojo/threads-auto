@@ -1,0 +1,261 @@
+"""Web無料診断「椿の縁視（えにしみ）」。
+
+Threadsのプロフィール/固定投稿のリンクから来た人に、
+1) その場で「二人の縁のタイプ」だけ即表示（宿曜の決定的計算＝APIコストゼロ）
+2) 鑑定番号（合言葉）を発行して入力内容を保存
+3) LINE追加→番号を送ると、ボットが保存済みの内容で本診断を自動返信（line_bot側）
+という導線を作る。ページは line_app.py の GET /shindan で配信。
+
+BAN対策の設計: Threads側では返信もDMも一切せず、入口をこのページに集約する。
+"""
+from __future__ import annotations
+
+import random
+from datetime import datetime, timedelta
+
+from . import store
+from .config import active_profile
+from .diagnosis import _shuku_distance, honmei_shuku
+
+# 番号の有効期限（発行からこの日数を過ぎたらLINE側で受け付けない）
+CODE_TTL_DAYS = 7
+
+# 二人の縁のタイプ（27宿サイクルの距離から決定的に判定。同じ二人なら必ず同じ結果）
+# 生年月日フラグメント（1940〜2030）と紛れない番号帯を使うため、コードは3000〜9999で発行する
+EN_TYPES = [
+    (0, {
+        "name": "写し鏡の縁", "yomi": "うつしかがみのえん",
+        "catch": "似すぎるほど似た二人",
+        "desc": "あんたと彼は、根っこの性質がほとんど同じや。分かり合えるのも早いけど、意地の張り方まで同じやから、一度こじれると二人とも引くに引けんくなる。今の膠着は、たぶんそれや。",
+    }),
+    (2, {
+        "name": "庇の縁", "yomi": "ひさしのえん",
+        "catch": "守り、守られる縁",
+        "desc": "どちらかが自然と相手を守る形になる、居心地のええ縁や。ただな、居心地がええ分だけ「甘え」も出やすい。彼が安心しきって動かんのは、この縁の裏の顔やで。",
+    }),
+    (5, {
+        "name": "棘の縁", "yomi": "とげのえん",
+        "catch": "惹かれ合うほど、傷つけ合う",
+        "desc": "強烈に惹かれ合うのに、近づきすぎるとお互いを傷つける。ほんで離れたら離れたで、忘れられへん。厄介やけど、それだけ引力の強い縁や。扱い方さえ間違えんかったらな。",
+    }),
+    (7, {
+        "name": "並木の縁", "yomi": "なみきのえん",
+        "catch": "同じ歩幅で並んで歩く",
+        "desc": "恋人というより相棒に近い、波風の少ない縁や。安心はあるけど、ドキドキが薄れやすい。彼が「居て当たり前」みたいな顔しとるんは、この縁の性質でもあるんよ。",
+    }),
+    (10, {
+        "name": "火花の縁", "yomi": "ひばなのえん",
+        "catch": "ぶつかって、育つ",
+        "desc": "性質が違いすぎて、ぶつかる時は派手にぶつかる。そのかわり、噛み合うた時の熱は人一倍や。退屈だけは絶対せえへん縁。問題は、今どっちの局面におるかや。",
+    }),
+    (13, {
+        "name": "糸の縁", "yomi": "いとのえん",
+        "catch": "切れそうで、切れへん",
+        "desc": "持ってるもんが正反対で、お互いに無いもんを埋め合う縁や。理解し合うのに時間はかかる。せやけど、細うて強い糸で繋がっとって、簡単には切れへん。焦りが一番の毒やな。",
+    }),
+]
+
+
+def en_type(me_birth: str, him_birth: str) -> dict:
+    """二人の縁のタイプを決定的に返す（同じ生年月日の組なら必ず同じタイプ）。"""
+    dist = _shuku_distance(honmei_shuku(me_birth), honmei_shuku(him_birth))
+    for max_dist, t in EN_TYPES:
+        if dist <= max_dist:
+            return {**t, "distance": dist}
+    return {**EN_TYPES[-1][1], "distance": dist}
+
+
+def _issue_code() -> str:
+    """未使用の4桁鑑定番号を発行する（3000〜9999＝生年月日の年と紛れない帯）。"""
+    for _ in range(30):
+        code = str(random.randint(3000, 9999))
+        if not store.get_web_diag(code):
+            return code
+    raise RuntimeError("鑑定番号の発行に失敗（空きが見つからない）")
+
+
+def submit(data: dict) -> dict:
+    """フォーム送信を受けて、縁タイプ判定＋鑑定番号の発行・保存を行う。"""
+    me = str(data.get("me", "")).strip()
+    him = str(data.get("him", "")).strip()
+    datetime.strptime(me, "%Y-%m-%d")   # 不正な日付はここでValueError
+    datetime.strptime(him, "%Y-%m-%d")
+    status = str(data.get("status", "")).strip()[:30]
+    period = str(data.get("period", "")).strip()[:30]
+    t = en_type(me, him)
+    code = _issue_code()
+    store.add_web_diag(code, me, him, status, period, t["name"])
+    return {"ok": True, "code": code, "type": t,
+            "line_url": active_profile().get("line_url", "")}
+
+
+def redeem(code: str) -> dict | None:
+    """LINEで届いた鑑定番号を照合し、有効なら保存済みの入力を返す（line_botから使う）。"""
+    row = store.get_web_diag(code)
+    if not row:
+        return None
+    if str(row.get("used") or "0").lower() in ("1", "true"):
+        return None
+    created = str(row.get("created_at") or "").replace(" ", "T")
+    try:
+        if created and datetime.fromisoformat(created) < datetime.now() - timedelta(days=CODE_TTL_DAYS):
+            return None
+    except ValueError:
+        pass
+    return row
+
+
+# ---------------- 診断ページ（1ファイル完結・モバイル前提） ----------------
+
+_CAMELLIA = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" class="flower">
+<circle cx="50" cy="34" r="17" fill="#b3364b"/><circle cx="35" cy="45" r="17" fill="#a52e44"/>
+<circle cx="65" cy="45" r="17" fill="#c04057"/><circle cx="41" cy="60" r="17" fill="#b3364b"/>
+<circle cx="59" cy="60" r="17" fill="#a52e44"/><circle cx="50" cy="48" r="10" fill="#d9a441"/>
+<circle cx="46" cy="45" r="1.8" fill="#f3e3b8"/><circle cx="54" cy="45" r="1.8" fill="#f3e3b8"/>
+<circle cx="50" cy="52" r="1.8" fill="#f3e3b8"/><circle cx="45" cy="51" r="1.5" fill="#f3e3b8"/>
+<circle cx="55" cy="51" r="1.5" fill="#f3e3b8"/>
+<path d="M62 72 Q78 70 84 84 Q68 88 62 76 Z" fill="#3f6b4f"/></svg>"""
+
+PAGE_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>椿の縁視｜彼の本音、視たろか</title>
+<meta name="description" content="二人の生年月日だけで、縁の形と彼の本音を無料で視る。登録不要・30秒。">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#171114; color:#efe6da; font-family:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+  -webkit-font-smoothing:antialiased; line-height:1.9; }
+main { max-width:480px; margin:0 auto; padding:34px 20px 60px; }
+.flower { width:64px; display:block; margin:0 auto 14px; }
+h1 { text-align:center; font-size:26px; letter-spacing:.3em; font-weight:600; }
+.yomi { text-align:center; font-size:11px; letter-spacing:.5em; color:#b08d3e; margin:4px 0 18px; }
+.copy { text-align:center; font-size:14px; color:#cdbfae; margin-bottom:30px; }
+.copy b { color:#efe6da; font-weight:600; }
+fieldset { border:1px solid #3a2a30; border-radius:10px; padding:16px 14px 14px; margin-bottom:18px; background:#1e1519; }
+legend { padding:0 8px; font-size:13px; color:#d9a441; letter-spacing:.2em; }
+.row { display:flex; gap:8px; }
+select { flex:1 1 0; min-width:0; width:100%; appearance:none; background:#241a20 url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6"><path d="M0 0l5 6 5-6z" fill="%23b08d3e"/></svg>') no-repeat right 10px center;
+  color:#efe6da; border:1px solid #443037; border-radius:8px; padding:12px 22px 12px 8px; font-size:16px; font-family:inherit; }
+.pills { display:flex; flex-wrap:wrap; gap:8px; }
+.pills label { display:block; }
+.pills input { display:none; }
+.pills span { display:inline-block; padding:9px 14px; border:1px solid #443037; border-radius:999px;
+  font-size:13.5px; color:#cdbfae; cursor:pointer; }
+.pills input:checked + span { background:#c04057; border-color:#c04057; color:#fff; }
+button { width:100%; padding:16px; margin-top:6px; background:#c04057; color:#fff; border:none; border-radius:10px;
+  font-size:17px; letter-spacing:.15em; font-family:inherit; cursor:pointer; }
+button:disabled { opacity:.5; }
+.err { color:#e88; font-size:13px; text-align:center; margin-top:10px; min-height:1em; }
+.note { font-size:11.5px; color:#8d8177; text-align:center; margin-top:14px; }
+#result { display:none; }
+.card { border:1px solid #b08d3e; border-radius:12px; padding:26px 20px; text-align:center;
+  background:linear-gradient(160deg,#241a20,#1c1318); margin-bottom:22px; }
+.card .lbl { font-size:11px; letter-spacing:.5em; color:#b08d3e; }
+.card h2 { font-size:30px; letter-spacing:.18em; margin:10px 0 2px; }
+.card .ty { font-size:11px; letter-spacing:.4em; color:#8d8177; margin-bottom:12px; }
+.card .catch { font-size:15px; color:#d9a441; margin-bottom:14px; }
+.card .desc { font-size:14px; text-align:left; color:#e5dbcd; }
+.next { text-align:center; font-size:14.5px; margin-bottom:20px; }
+.next b { color:#d9a441; font-weight:600; }
+.codebox { border:1px dashed #b08d3e; border-radius:10px; text-align:center; padding:14px; margin-bottom:20px; }
+.codebox .lbl { font-size:12px; color:#b08d3e; letter-spacing:.3em; }
+.codebox .code { font-size:38px; letter-spacing:.3em; color:#fff; font-weight:600; }
+.linebtn { display:block; text-align:center; background:#06C755; color:#fff; text-decoration:none;
+  padding:16px; border-radius:10px; font-size:16.5px; letter-spacing:.1em; margin-bottom:14px; }
+.step { font-size:13px; color:#cdbfae; text-align:center; }
+footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d6257; margin-top:44px; }
+</style></head><body><main>
+""" + _CAMELLIA + """
+<h1>椿の縁視</h1>
+<div class="yomi">つばきのえにしみ</div>
+<p class="copy">彼の本音、視たろか。<br>二人の生年月日だけでええ。<b>登録不要・30秒</b>や。</p>
+
+<form id="f">
+  <fieldset><legend>あんたの生年月日</legend>
+    <div class="row"><select id="my" required></select><select id="mm" required></select><select id="md" required></select></div>
+  </fieldset>
+  <fieldset><legend>彼の生年月日</legend>
+    <div class="row"><select id="hy" required></select><select id="hm" required></select><select id="hd" required></select></div>
+  </fieldset>
+  <fieldset><legend>今の状況</legend>
+    <div class="pills" id="st"></div>
+  </fieldset>
+  <fieldset><legend>彼と最後に連絡が取れたのは</legend>
+    <div class="pills" id="pe"></div>
+  </fieldset>
+  <button type="submit" id="go">縁を視る（無料）</button>
+  <div class="err" id="err"></div>
+  <p class="note">入力した内容は鑑定のためだけに使うで。</p>
+</form>
+
+<section id="result">
+  <div class="card">
+    <div class="lbl">二人の縁</div>
+    <h2 id="tname"></h2>
+    <div class="ty" id="tyomi"></div>
+    <div class="catch" id="tcatch"></div>
+    <div class="desc" id="tdesc"></div>
+  </div>
+  <p class="next">縁の形は、これで分かった。<br>ほな——彼が<b>“今”あんたをどう思てるか</b>。<br>それはここでは視られへん。<b>LINEで視たる。</b></p>
+  <div class="codebox"><div class="lbl">あんたの鑑定番号</div><div class="code" id="code"></div></div>
+  <a class="linebtn" id="lbtn" href="#">LINEで続きを視てもらう</a>
+  <p class="step">追加したら、この番号だけ送ってな。<br>すぐに“彼の今の本音”を視て返すで🌙</p>
+</section>
+
+<footer>椿｜彼の本音しか視ん</footer>
+</main>
+<script>
+const STATUS = ["音信不通","既読スルー","急に冷められた","別れ話の後","片思いで進展なし","復縁したい","その他・複雑"];
+const PERIOD = ["今日〜昨日（ごく最近）","〜3日","〜2週間","1ヶ月以上","片思い・まだこれから"];
+function opts(sel, from, to, suffix, ph){
+  sel.add(new Option(ph, ""));
+  for(let v=from; from<to ? v<=to : v>=to; v+=(from<to?1:-1)) sel.add(new Option(v+suffix, v));
+}
+["my","hy"].forEach(id=>opts(document.getElementById(id), 2012, 1950, "年", "年"));
+["mm","hm"].forEach(id=>opts(document.getElementById(id), 1, 12, "月", "月"));
+["md","hd"].forEach(id=>opts(document.getElementById(id), 1, 31, "日", "日"));
+function pills(id, arr, name){
+  document.getElementById(id).innerHTML = arr.map(v=>
+    `<label><input type="radio" name="${name}" value="${v}"><span>${v}</span></label>`).join("");
+}
+pills("st", STATUS, "status"); pills("pe", PERIOD, "period");
+function bd(p){
+  const y=document.getElementById(p+"y").value, m=document.getElementById(p+"m").value, d=document.getElementById(p+"d").value;
+  if(!y||!m||!d) return null;
+  const dt=new Date(+y, +m-1, +d);
+  if(dt.getMonth() !== +m-1) return "bad";
+  return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+}
+document.getElementById("f").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  const err=document.getElementById("err"); err.textContent="";
+  const me=bd("m"), him=bd("h");
+  if(!me||!him){ err.textContent="生年月日を選んでな。"; return; }
+  if(me==="bad"||him==="bad"){ err.textContent="その日は暦に無いで。日を選び直してな。"; return; }
+  const st=document.querySelector('input[name="status"]:checked');
+  if(!st){ err.textContent="今の状況をひとつ選んでな。"; return; }
+  const pe=document.querySelector('input[name="period"]:checked');
+  const go=document.getElementById("go"); go.disabled=true; go.textContent="視てる……";
+  try{
+    const r=await fetch("/shindan/api",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({me, him, status:st.value, period:pe?pe.value:""})});
+    const j=await r.json();
+    if(!j.ok) throw new Error(j.error||"failed");
+    document.getElementById("tname").textContent=j.type.name;
+    document.getElementById("tyomi").textContent=j.type.yomi;
+    document.getElementById("tcatch").textContent="——"+j.type.catch+"——";
+    document.getElementById("tdesc").textContent=j.type.desc;
+    document.getElementById("code").textContent=j.code;
+    document.getElementById("lbtn").href=j.line_url;
+    document.getElementById("f").style.display="none";
+    document.getElementById("result").style.display="block";
+    window.scrollTo({top:0, behavior:"smooth"});
+  }catch(_){
+    err.textContent="ごめんな、視るのに失敗したわ。少し待ってもう一回押してみて。";
+    go.disabled=false; go.textContent="縁を視る（無料）";
+  }
+});
+</script></body></html>"""
+
+
+def page_html() -> str:
+    return PAGE_HTML

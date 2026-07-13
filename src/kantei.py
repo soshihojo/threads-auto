@@ -182,7 +182,9 @@ html, body { font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", 
 """
 
 
-def build_html(name: str, chapters: list[dict], today: str) -> str:
+def build_html(name: str, chapters: list[dict], today: str, *,
+               sub: str = "個別鑑定書", title: str = "彼の本音",
+               meta_note: str = "この鑑定書は、あなたひとりのために視て、書いたものです。") -> str:
     d = datetime.strptime(today, "%Y-%m-%d")
     date_jp = f"{d.year}年{d.month}月{d.day}日"
     toc_items = "".join(
@@ -205,11 +207,11 @@ def build_html(name: str, chapters: list[dict], today: str) -> str:
 <title>鑑定書</title><style>{_CSS}</style></head><body>
 <div class="page cover">
   <div class="flower">{_CAMELLIA}</div>
-  <div class="sub">個別鑑定書</div>
-  <h1>彼の本音</h1>
+  <div class="sub">{html.escape(sub)}</div>
+  <h1>{html.escape(title)}</h1>
   <div class="for">{html.escape(name)} 様へ</div>
   <div class="line"></div>
-  <div class="meta">鑑定日　{date_jp}<br>この鑑定書は、あなたひとりのために視て、書いたものです。</div>
+  <div class="meta">鑑定日　{date_jp}<br>{html.escape(meta_note)}</div>
   <div class="sig">鑑定士　椿</div>
 </div>
 <div class="page toc">
@@ -244,3 +246,94 @@ def make_kantei(name: str, me_birth: str, him_birth: str, details: str,
     html_to_pdf(html_path, pdf_path)
     print(f"📜 完成: {pdf_path}（本文{total}字）")
     return {"html": str(html_path), "pdf": str(pdf_path), "chars": total}
+
+
+# ---------------- 月詠み（月額会員向けの月次ミニ鑑定書） ----------------
+# 月額会員「椿の月詠み」（月2,980円）の毎月の納品物。個別鑑定書のミニ版（2,000〜3,000字・A4数枚）。
+# 個別鑑定書が納品済みの会員は、その内容と一貫した「続き」として書く。
+
+TSUKIYOMI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。月額会員に毎月納品する「月詠み鑑定書」の本文を、章ごとに書く。
+
+これは月2,980円の有料納品物。会員はすでにお金を払ってくれてる常連やから、出し惜しみは一切しない。今月の時期の読みも、送る一言の実文面も、具体的に渡しきる。
+
+声と文体:
+- 一人称「ウチ」、相手は「あんた」。関西弁。ただし話し言葉すぎない「手紙の文体」で、じっくり読ませる
+- 毒舌は控えめ、姉御の温かさ多め。慰めの嘘は書かないが、突き放さない
+- 会員の近況・悩みの言葉を具体的に引用して、この人の今月だけの鑑定にする
+
+厳守:
+- 『宿曜』という占術名、宿の名前、「距離」「命・業・胎」などの専門用語は一切書かない。内部参考は日常語に翻訳する
+- 個別鑑定書（あれば）で伝えた性質の読み・時期・処方箋と矛盾させない。「鑑定書にも書いたけどな」と自然に参照してよい
+- 結果の保証はしない。過度に不安を煽らない。病気・健康・金運の断定はしない
+- 「続きはLINEで」のような引っ張りはしない（会員には渡しきる）
+- マークダウン記号は使わない。プレーンな段落文（段落の区切りは空行）。絵文字は最終章の締めの一文にだけ🌙を1つ
+- 指定された章の内容だけを書く。章タイトルや見出しは書かず、本文だけを出力する"""
+
+TSUKIYOMI_CHAPTERS = [
+    ("nagare", "今月の二人", 700,
+     "今月の彼の心の流れと、二人のあいだの空気を日常語で読む。会員の近況・悩み（与えられていれば）に正面から触れ、"
+     "「今こういう位置におる」と現在地をはっきりさせる。"),
+    ("jiki", "動いてええ時、待つ時", 700,
+     "今月を上旬・中旬・下旬の感覚で分けて、連絡・誘い・大事な話をするなら「動いてええ時期」と「待った方がええ時期」の目安を具体的に示す。"
+     "なぜその時期なのか、彼の状態と結びつけて理由も書く。"),
+    ("shohousen", "今月の処方箋", 800,
+     "今月やること・言うことを具体的に。送る一言の実文面をひとつ、避けるべき行動（追いLINE等その人の状況に応じた地雷）、"
+     "会えた時・連絡が来た時の受け方まで。頑張らせすぎない、楽に実行できる範囲で。"),
+    ("musubi", "むすびに", 300,
+     "今月のあんたへの寄り添いの一言。来月もまた視ること（続きを見届けること）の安心で締める。締めの一文に🌙を1つ。"),
+]
+
+
+def generate_tsukiyomi_chapters(name: str, me_birth: str, him_birth: str, worry: str,
+                                kantei_text: str = "", month_label: str = "今月",
+                                today: str | None = None) -> list[dict]:
+    """月詠みの章を生成して [{key,title,body}, ...] を返す。"""
+    today = today or datetime.now().strftime("%Y-%m-%d")
+    brief = _internal_brief(name, me_birth, him_birth, today)
+    toc = "\n".join(f"・{t}" for _, t, _, _ in TSUKIYOMI_CHAPTERS)
+    done: list[dict] = []
+    for key, title, chars, instruction in TSUKIYOMI_CHAPTERS:
+        prev = "\n".join(f"【{d['title']}】{d['body'][:120]}…" for d in done) or "（まだ無い。これが最初の章）"
+        user = (
+            f"=== 内部参考（本文には翻訳して出す。用語・数字は出さない） ===\n{brief}\n\n"
+            f"=== 対象月 ===\n{month_label}の月詠み鑑定書\n\n"
+            f"=== 会員の近況・今の悩み ===\n{worry.strip() or '（特に届いていない。二人の全体の流れで視る）'}\n\n"
+            + (f"=== この会員に納品済みの個別鑑定書（抜粋。読みと処方箋を一貫させる） ===\n{kantei_text.strip()[:6000]}\n\n"
+               if kantei_text.strip() else "")
+            + f"=== 月詠みの全体構成 ===\n{toc}\n\n"
+            f"=== ここまでに書いた章の冒頭 ===\n{prev}\n\n"
+            f"=== 今回書く章 ===\n章タイトル: {title}\n目安の分量: {chars}字（±2割）\n"
+            f"この章で書くこと: {instruction}\n\n本文だけを出力してください。"
+        )
+        body = complete(TSUKIYOMI_SYSTEM, user, max_tokens=1500, temperature=0.8).strip()
+        done.append({"key": key, "title": title, "body": body})
+        print(f"  ✓ {title}（{len(body)}字）")
+    return done
+
+
+def make_tsukiyomi(name: str, me_birth: str, him_birth: str, worry: str = "",
+                   kantei_text: str = "", month_label: str | None = None,
+                   today: str | None = None) -> dict:
+    """月詠み鑑定書（月次ミニPDF）を生成して出力。{html, pdf, chars, month_label, body} を返す。"""
+    today = today or datetime.now().strftime("%Y-%m-%d")
+    d = datetime.strptime(today, "%Y-%m-%d")
+    month_label = month_label or f"{d.year}年{d.month}月"
+    OUT_DIR.mkdir(exist_ok=True)
+    print(f"🖋 {month_label}の月詠みを生成中（{len(TSUKIYOMI_CHAPTERS)}章）…")
+    chapters = generate_tsukiyomi_chapters(name, me_birth, him_birth, worry,
+                                           kantei_text=kantei_text,
+                                           month_label=month_label, today=today)
+    total = sum(len(c["body"]) for c in chapters)
+    stem = f"tsukiyomi_{name}_{d.year}-{d.month:02d}"
+    html_path = OUT_DIR / f"{stem}.html"
+    pdf_path = OUT_DIR / f"{stem}.pdf"
+    html_path.write_text(
+        build_html(name, chapters, today, sub="月詠み鑑定書", title=month_label,
+                   meta_note="この月詠みは、あなたと彼の今月のために視て、書いたものです。"),
+        encoding="utf-8",
+    )
+    html_to_pdf(html_path, pdf_path)
+    body = "\n\n".join(f"【{c['title']}】\n{c['body']}" for c in chapters)
+    print(f"📜 完成: {pdf_path}（本文{total}字）")
+    return {"html": str(html_path), "pdf": str(pdf_path), "chars": total,
+            "month_label": month_label, "body": body}
