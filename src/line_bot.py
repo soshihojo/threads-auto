@@ -33,7 +33,7 @@ LINE_API = "https://api.line.me/v2/bot"
 LINE_BOT_MODEL = env("LINE_BOT_MODEL") or "claude-sonnet-5"
 
 # AIが無料で返す回数の上限。超えたら有料オファーを送って停止（店主にバトンタッチ）
-FREE_REPLY_LIMIT = int(env("LINE_FREE_REPLY_LIMIT") or "5")
+FREE_REPLY_LIMIT = int(env("LINE_FREE_REPLY_LIMIT") or "10")
 
 # 人間らしい「間」：即答するとAI感が出るため、返信前にランダムに待つ秒数の範囲。
 # 生成時間（5〜15秒）と合わせて受信から30〜50秒後の返信になる。
