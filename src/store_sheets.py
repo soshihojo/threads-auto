@@ -53,6 +53,7 @@ TABLES = {
     "line_users": ["user_id", "display_name", "me_birth", "him_birth", "bot", "note", "created_at", "updated_at"],
     "line_chats": ["id", "user_id", "role", "text", "created_at"],
     "web_diag": ["code", "me_birth", "him_birth", "status", "period", "type_name", "used", "created_at", "used_at"],
+    "web_events": ["id", "event", "created_at"],
 }
 
 
@@ -370,6 +371,16 @@ def list_readings(member_id=None, limit: int = 200) -> list[dict]:
     if member_id is not None:
         rows = [r for r in rows if str(r.get("member_id")) == str(member_id)]
     rows.sort(key=lambda r: str(r.get("created_at", "")), reverse=True)
+    return rows[:limit]
+
+
+# ---- Web無料診断（計測イベント） ----
+def add_web_event(event: str) -> None:
+    _append("web_events", {"id": _next_id_for("web_events"), "event": event, "created_at": _now()})
+
+
+def list_web_events(limit: int = 20000) -> list[dict]:
+    rows = sorted(_records("web_events"), key=lambda r: str(r.get("created_at", "")), reverse=True)
     return rows[:limit]
 
 

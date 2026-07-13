@@ -89,6 +89,11 @@ CREATE TABLE IF NOT EXISTS line_chats (
     text       TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS web_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    event      TEXT,   -- view(診断ページ表示) / line_click(LINEボタン押下)
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS web_diag (
     code       TEXT PRIMARY KEY,   -- Web診断で発行する鑑定番号（LINEで送ってもらう合言葉）
     me_birth   TEXT,
@@ -317,6 +322,18 @@ def list_readings(member_id=None, limit: int = 200) -> list[sqlite3.Row]:
                 (member_id, limit),
             ).fetchall()
         return c.execute("SELECT * FROM readings ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+
+
+# ---- Web無料診断（計測イベント） ----
+def add_web_event(event: str) -> None:
+    with conn() as c:
+        c.execute("INSERT INTO web_events(event) VALUES (?)", (event,))
+
+
+def list_web_events(limit: int = 20000) -> list[dict]:
+    with conn() as c:
+        rows = c.execute("SELECT * FROM web_events ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ---- Web無料診断（鑑定番号） ----

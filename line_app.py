@@ -51,6 +51,14 @@ def shindan_page() -> str:
     return web_diag.page_html()
 
 
+@app.post("/shindan/track")
+def shindan_track(e: str, background_tasks: BackgroundTasks) -> dict:
+    """診断ページの計測ビーコン（view=表示 / line_click=LINEボタン押下）。"""
+    if e in ("view", "line_click"):
+        background_tasks.add_task(store.add_web_event, e)
+    return {"ok": True}
+
+
 @app.post("/shindan/api")
 async def shindan_api(request: Request) -> JSONResponse:
     try:

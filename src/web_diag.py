@@ -204,6 +204,10 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
 <footer>椿｜彼の本音しか視ん</footer>
 </main>
 <script>
+// 計測ビーコン（流入・LINEボタン押下。失敗しても画面には影響させない）
+function track(e){ try{ navigator.sendBeacon("/shindan/track?e="+e); }catch(_){} }
+track("view");
+document.getElementById("lbtn").addEventListener("click", ()=>track("line_click"));
 const STATUS = ["音信不通","既読スルー","急に冷められた","別れ話の後","片思いで進展なし","復縁したい","その他・複雑"];
 const PERIOD = ["今日〜昨日（ごく最近）","〜3日","〜2週間","1ヶ月以上","片思い・まだこれから"];
 function opts(sel, from, to, suffix, ph){
