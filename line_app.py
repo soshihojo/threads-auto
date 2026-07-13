@@ -68,7 +68,8 @@ def _forward(body: bytes, signature: str) -> None:
 
 @app.get("/")
 def health() -> dict:
-    return {"ok": True}
+    # rev: Renderが自動設定するデプロイ中コミット（デプロイが反映されたかの確認用）
+    return {"ok": True, "rev": (env("RENDER_GIT_COMMIT") or "")[:7]}
 
 
 @app.get("/shindan", response_class=HTMLResponse)
