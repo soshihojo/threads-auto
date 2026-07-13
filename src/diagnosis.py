@@ -222,9 +222,12 @@ CONSULT_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば
 - 装飾記号(マークダウン)は使わない。絵文字は締めに🌙を0〜1個。出力は返信本文のみ"""
 
 
-def generate_consult(me_birth: str, him_birth: str, message: str, history: str = "") -> dict:
+def generate_consult(me_birth: str, him_birth: str, message: str, history: str = "",
+                     kantei: str = "") -> dict:
     """相談し放題の会員から届いた相談への、椿の返信を生成する。
-    history は直近のやりとり要約（継続感を出す用）。返り値: {me_shuku, him_shuku, reply}
+    history は直近のやりとり要約（継続感を出す用）。
+    kantei は納品済みの個別鑑定書の全文（あれば。返信は鑑定の内容と矛盾させない）。
+    返り値: {me_shuku, him_shuku, reply}
     """
     me_s = honmei_shuku(me_birth)
     him_s = honmei_shuku(him_birth)
@@ -232,6 +235,12 @@ def generate_consult(me_birth: str, him_birth: str, message: str, history: str =
         "月額会員から届いた相談に、椿として返信してください。\n\n"
         f"【会員から届いた相談】{message.strip()}\n"
         + (f"\n【前回までのやりとり（継続の参考）】\n{history.strip()}\n" if history.strip() else "")
+        + (
+            "\n【この会員に納品済みの個別鑑定書（全文）】\n"
+            "この会員は個別鑑定を購入済み。以下の鑑定で伝えた性質の読み・時期・処方箋と矛盾しない、"
+            "続きとして一貫した返信にすること。鑑定の内容に触れるときは「鑑定書にも書いたけどな」のように自然に参照してよい。\n"
+            f"{kantei.strip()[:12000]}\n" if kantei.strip() else ""
+        )
         + "\n--- 内部参考（宿曜の算出結果。専門用語なので本文に出さず、中身だけ日常語に翻訳） ---\n"
         f"・会員の本命宿: {me_s}\n"
         f"・彼の本命宿: {him_s}\n"

@@ -227,7 +227,13 @@ if view == VIEW_CONSULT:
     else:
         cpick = st.selectbox("会員を選ぶ", list(_cmap.keys()), key="con_pick")
         cmem = _cmap[cpick]
-        chist = store.list_readings(cmem["id"], limit=5)
+        _all_hist = store.list_readings(cmem["id"], limit=50)
+        # 納品済みの個別鑑定書（👥会員でPDF登録したもの）は、履歴とは別に返信生成の参照資料にする
+        _kantei_rows = [h for h in _all_hist if h["month"] == "個別鑑定書"]
+        kantei_text = str(_kantei_rows[0]["reading"]) if _kantei_rows else ""
+        chist = [h for h in _all_hist if h["month"] != "個別鑑定書"][:5]
+        if kantei_text:
+            st.caption("📎 個別鑑定書 登録済み — 返信はこの鑑定の内容（性質の読み・時期・処方箋）と矛盾しない形で生成されます")
         if chist:
             with st.expander(f"📜 この子との直近のやりとり（{len(chist)}件）"):
                 for h in chist:
@@ -245,7 +251,8 @@ if view == VIEW_CONSULT:
                         f"- 相談: {h['worry']} / 返信: {str(h['reading'])[:60]}…" for h in chist[:3]
                     )
                     with st.spinner("椿が視てます…"):
-                        res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str)
+                        res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str,
+                                                         kantei=kantei_text)
                     st.session_state["con_result"] = {"reply": res["reply"], "member_id": cmem["id"], "msg": incoming}
                 except Exception as e:
                     st.error(f"生成に失敗しました（{e}）。少し待って再度お試しください。")
@@ -301,9 +308,28 @@ if view == VIEW_MEMBERS:
                 if m["note"]:
                     st.caption(f"メモ: {m['note']}")
                 hist = store.list_readings(m["id"])
-                if hist:
-                    with st.expander(f"📜 鑑定の控え（{len(hist)}件）"):
-                        for h in hist:
+                _kantei = [h for h in hist if h["month"] == "個別鑑定書"]
+                _normal = [h for h in hist if h["month"] != "個別鑑定書"]
+                # 個別鑑定PDFの登録（会員相談の返信生成が全文を参照する）
+                if _kantei:
+                    st.caption(f"📎 個別鑑定書 登録済み（{len(str(_kantei[0]['reading']))}字・{_kantei[0]['created_at']}）")
+                up = st.file_uploader("個別鑑定書PDFを登録（💬会員相談の返信生成が内容を参照します）",
+                                      type=["pdf"], key=f"mem_pdf_{m['id']}")
+                if up is not None and st.button("📎 この鑑定書を登録する", key=f"mem_pdf_btn_{m['id']}"):
+                    try:
+                        from pypdf import PdfReader
+                        text = "\n".join((pg.extract_text() or "") for pg in PdfReader(up).pages).strip()
+                        if len(text) < 200:
+                            st.error("PDFから本文を読み取れませんでした（画像化されたPDFの可能性）")
+                        else:
+                            store.add_reading(m["id"], "個別鑑定書", "（納品済み個別鑑定PDFの全文）", text[:15000])
+                            st.success(f"鑑定書を登録しました（{len(text)}字）")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"登録に失敗しました（{e}）")
+                if _normal:
+                    with st.expander(f"📜 鑑定の控え（{len(_normal)}件）"):
+                        for h in _normal:
                             st.markdown(f"**{h['month']}**　{h['created_at']}")
                             if h["worry"]:
                                 st.caption(f"悩み: {h['worry']}")
