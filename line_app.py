@@ -11,6 +11,7 @@ LINEのWebhook URLは1つしか設定できないため、このサーバーを�
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
 import requests
@@ -22,6 +23,26 @@ from src.config import env
 
 app = FastAPI()
 store.init_db()
+
+# 未返信スイープ：生成失敗等で返信が落ちた会話を10分ごとに拾い直す安全網
+SWEEP_INTERVAL_SEC = int(env("LINE_SWEEP_INTERVAL_SEC") or "600")
+
+
+@app.on_event("startup")
+async def _start_sweeper() -> None:
+    async def _loop() -> None:
+        loop = asyncio.get_running_loop()
+        while True:
+            await asyncio.sleep(SWEEP_INTERVAL_SEC)
+            try:
+                n = await loop.run_in_executor(None, line_bot.sweep_unanswered)
+                if n:
+                    print(f"[sweep] {n}件の未返信に対応した")
+            except Exception as e:
+                print(f"[sweep] 実行失敗（次周期で再試行）: {e}")
+
+    if SWEEP_INTERVAL_SEC > 0:
+        asyncio.create_task(_loop())
 
 
 def _forward(body: bytes, signature: str) -> None:
