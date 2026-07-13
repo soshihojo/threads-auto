@@ -122,6 +122,11 @@ if view == VIEW_GEN:
         with st.container(border=True):
             st.markdown(f"**候補 #{cand['id']}**")
             text = st.text_area("本文（編集可）", value=cand["text"], key=f"text_{cand['id']}", height=150)
+            if "===続き===" in text:
+                _parts = text.count("===続き===") + 1
+                st.caption(f"🧵 ツリー投稿（{_parts}分割）：「===続き===」は区切りの印で、投稿には出ません。"
+                           f"承認・投稿すると自動で{_parts}本のぶら下がり投稿（75秒間隔）として配信されます。"
+                           "手動でThreadsに貼る場合だけ、区切りごとに分けて返信でぶら下げてください。")
             c1, c2, c3, c4 = st.columns([1.2, 1, 1.1, 1])
             d = c1.date_input("投稿日", value=now_jst().date(), key=f"date_{cand['id']}")
             # 投稿時間帯は7時〜24時のみ（24時=その日の深夜0時として翌日0:00に予約）
