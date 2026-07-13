@@ -32,8 +32,13 @@ SWEEP_INTERVAL_SEC = int(env("LINE_SWEEP_INTERVAL_SEC") or "600")
 async def _start_sweeper() -> None:
     async def _loop() -> None:
         loop = asyncio.get_running_loop()
+        # 初回は起動60秒後に実行：デプロイの再起動で処理中の返信が切られた場合、
+        # 旧インスタンスの取りこぼしを新インスタンスがすぐ拾えるようにする
+        #（スイープ自体はmin_age=10分より新しい会話には触らないので二重返信はしない）
+        delay = 60
         while True:
-            await asyncio.sleep(SWEEP_INTERVAL_SEC)
+            await asyncio.sleep(delay)
+            delay = SWEEP_INTERVAL_SEC
             try:
                 n = await loop.run_in_executor(None, line_bot.sweep_unanswered)
                 if n:
