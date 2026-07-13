@@ -4,9 +4,10 @@ Messaging APIのWebhookで届いた相談に、椿の声で「共感→洞察ひ
 返信を自動生成して返す（応答メッセージ＝reply APIは無料・無制限）。
 
 役割分担（重要）:
-- AI: 会話を深める（ナーチャリング）だけ。料金・商品・リンクの話は絶対にしない
-- 店主: 購入サイン/危険サイン/無料上限のオファー送付が起きると line_users.bot が
-  hold になりAIは黙る。以降はLINE公式アプリのチャット画面から手動でクローズする
+- AI: 会話を深める（ナーチャリング）と、オファーの自動送付まで。
+  オファーは「購入サイン検知（料金・どうしたらいい等）」または「無料返信が上限到達」で送る
+- 店主: オファー送付後・危険サイン後は line_users.bot が hold になりAIは黙る。
+  納期・支払い等の続きはLINE公式アプリのチャット画面から手動でクローズする
   （bot列を on に戻すと再開。off で常時停止）
 """
 from __future__ import annotations
@@ -148,10 +149,6 @@ ASK_DETAILS = (
     "・今日\n・昨日\n・〜3日\n・〜2週間\n・1ヶ月以上"
 )
 
-HOLDING_REPLY = (
-    "その話な、ウチがちゃんと自分の言葉で返したいから、少しだけ待っててな。"
-    "適当に答えたない、大事なとこやから🌙"
-)
 DANGER_REPLY = (
     "あんた、それは占いでどうこうする話やない。しんどい気持ち、ひとりで抱えんといて。"
     "いのちの電話（0120-783-556）みたいに、ちゃんと聞いてくれる場所もある。"
@@ -467,8 +464,10 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
             return
 
     if detect_signal(incoming) == "purchase":
-        snd(HOLDING_REPLY)
-        store.upsert_line_user(user_id, bot="hold")
+        # 購入サイン＝買う瞬間。10通の上限を待たず、その場で個別鑑定オファーを自動送付
+        #（送付後はhold＝納期・支払い等の続きの質問は店主がLINEアプリから手動で返す）
+        if snd(generate_offer(user, history, incoming)):
+            store.upsert_line_user(user_id, bot="hold")
         return
 
     if live:
