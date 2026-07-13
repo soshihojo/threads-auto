@@ -91,7 +91,8 @@ CREATE TABLE IF NOT EXISTS line_chats (
 );
 CREATE TABLE IF NOT EXISTS web_events (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    event      TEXT,   -- view(診断ページ表示) / line_click(LINEボタン押下)
+    event      TEXT,   -- view(診断ページ表示) / submit(診断完了) / line_click(ボタン押下) / line_follow(友だち追加)
+    vid        TEXT,   -- 訪問者の匿名ID（localStorage由来。人数のユニーク化に使う）
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS web_diag (
@@ -122,6 +123,10 @@ def conn():
 def init_db() -> None:
     with conn() as c:
         c.executescript(SCHEMA)
+        try:  # 旧スキーマ（vid列なし）からの移行
+            c.execute("ALTER TABLE web_events ADD COLUMN vid TEXT")
+        except sqlite3.OperationalError:
+            pass
 
 
 # ---- posts ----
@@ -325,9 +330,9 @@ def list_readings(member_id=None, limit: int = 200) -> list[sqlite3.Row]:
 
 
 # ---- Web無料診断（計測イベント） ----
-def add_web_event(event: str) -> None:
+def add_web_event(event: str, vid: str = "") -> None:
     with conn() as c:
-        c.execute("INSERT INTO web_events(event) VALUES (?)", (event,))
+        c.execute("INSERT INTO web_events(event, vid) VALUES (?,?)", (event, vid))
 
 
 def list_web_events(limit: int = 20000) -> list[dict]:

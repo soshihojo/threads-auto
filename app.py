@@ -171,9 +171,24 @@ def _in_range(ts: str, lo: str, hi: str) -> bool:
     return bool(t) and lo <= t <= hi
 
 
+def _uniq_people(events: list[dict], name: str, lo: str, hi: str) -> int:
+    """期間内のイベントを「人数」で数える（vid=訪問者の匿名IDでユニーク化。
+    vidが取れなかった端末は1イベント=1人として加算）。"""
+    vids, anon = set(), 0
+    for r in events:
+        if r.get("event") != name or not _in_range(r.get("created_at"), lo, hi):
+            continue
+        v = str(r.get("vid") or "").strip()
+        if v:
+            vids.add(v)
+        else:
+            anon += 1
+    return len(vids) + anon
+
+
 if view == VIEW_DIAG:
     # Web診断「椿の縁視」のファネル計測（固定投稿・プロフのA/Bテストの判定材料）
-    with st.expander("🌐 縁視ファネル計測（流入 → 診断完了 → LINEボタン → 番号使用）", expanded=True):
+    with st.expander("🌐 縁視ファネル計測（訪問した人 → 診断した人 → LINE追加した人）", expanded=True):
         fc1, fc2 = st.columns(2)
         _f_from = fc1.date_input("開始", value=now_jst().date() - timedelta(days=13), key="wf_from")
         _f_to = fc2.date_input("終了", value=now_jst().date(), key="wf_to")
@@ -181,21 +196,28 @@ if view == VIEW_DIAG:
         try:
             _ev = store.list_web_events()
             _wd = store.list_web_diag()
-            views_n = sum(1 for r in _ev if r.get("event") == "view" and _in_range(r.get("created_at"), _lo, _hi))
-            clicks_n = sum(1 for r in _ev if r.get("event") == "line_click" and _in_range(r.get("created_at"), _lo, _hi))
-            subs_n = sum(1 for r in _wd if _in_range(r.get("created_at"), _lo, _hi))
+            visitors_n = _uniq_people(_ev, "view", _lo, _hi)
+            diagnosed_n = _uniq_people(_ev, "submit", _lo, _hi)
+            follows_n = sum(1 for r in _ev if r.get("event") == "line_follow"
+                            and _in_range(r.get("created_at"), _lo, _hi))
+            clicks_n = _uniq_people(_ev, "line_click", _lo, _hi)
             redeems_n = sum(1 for r in _wd if str(r.get("used") or "0").lower() in ("1", "true")
                             and _in_range(r.get("used_at"), _lo, _hi))
 
             def _pct(a: int, b: int) -> str:
                 return f"{a * 100 // b}%" if b else "—"
 
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("流入（ページ表示）", views_n)
-            m2.metric("診断完了（番号発行）", subs_n, _pct(subs_n, views_n) + " ←流入から", delta_color="off")
-            m3.metric("LINEボタン押下", clicks_n, _pct(clicks_n, subs_n) + " ←診断から", delta_color="off")
-            m4.metric("LINEで番号使用", redeems_n, _pct(redeems_n, subs_n) + " ←診断から", delta_color="off")
-            st.caption("※流入・ボタン押下は2026-07-13の計測開始以降のみ。番号使用は「使用した日」が期間内のもの。")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("診断ページを訪問した人", visitors_n)
+            m2.metric("診断を実行した人", diagnosed_n,
+                      _pct(diagnosed_n, visitors_n) + " ←訪問から", delta_color="off")
+            m3.metric("LINEを追加した人", follows_n,
+                      _pct(follows_n, diagnosed_n) + " ←診断から", delta_color="off")
+            st.caption(
+                f"補助指標：LINEボタン押下 {clicks_n}人 ／ LINEで番号使用 {redeems_n}件"
+                "　※人数計測は2026-07-13夜の計測開始以降。LINE追加は友だち追加の実イベント"
+                "（診断以外の経路の追加も含む）。"
+            )
         except Exception as e:
             st.warning(f"計測データの読み込みに失敗しました（{e}）")
     st.caption("DMやLINEで届いた文章をそのまま貼るだけ。生年月日（1つ目=相談者、2つ目=彼）・状況・期間は自動で読み取ります。")

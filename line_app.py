@@ -73,10 +73,10 @@ def shindan_page() -> str:
 
 
 @app.post("/shindan/track")
-def shindan_track(e: str, background_tasks: BackgroundTasks) -> dict:
-    """診断ページの計測ビーコン（view=表示 / line_click=LINEボタン押下）。"""
+def shindan_track(e: str, background_tasks: BackgroundTasks, vid: str = "") -> dict:
+    """診断ページの計測ビーコン（view=表示 / line_click=LINEボタン押下。vid=訪問者の匿名ID）。"""
     if e in ("view", "line_click"):
-        background_tasks.add_task(store.add_web_event, e)
+        background_tasks.add_task(store.add_web_event, e, vid[:64])
     return {"ok": True}
 
 

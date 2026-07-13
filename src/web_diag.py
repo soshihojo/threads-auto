@@ -85,6 +85,11 @@ def submit(data: dict) -> dict:
     t = en_type(me, him)
     code = _issue_code()
     store.add_web_diag(code, me, him, status, period, t["name"])
+    # 「診断を実行した人数」の計測（vid=訪問者の匿名ID。同じ人の複数回をユニーク化する）
+    try:
+        store.add_web_event("submit", str(data.get("vid", ""))[:64])
+    except Exception as e:
+        print(f"[shindan] submit計測失敗（診断は継続）: {e}")
     return {"ok": True, "code": code, "type": t,
             "line_url": active_profile().get("line_url", "")}
 
@@ -204,8 +209,14 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
 <footer>椿｜彼の本音しか視ん</footer>
 </main>
 <script>
-// 計測ビーコン（流入・LINEボタン押下。失敗しても画面には影響させない）
-function track(e){ try{ navigator.sendBeacon("/shindan/track?e="+e); }catch(_){} }
+// 計測（訪問者の匿名ID＋ビーコン。失敗しても画面には影響させない）
+const VID=(()=>{try{
+  let v=localStorage.getItem("tsubaki_vid");
+  if(!v){ v=(crypto.randomUUID?crypto.randomUUID():Date.now()+"-"+Math.random().toString(36).slice(2));
+          localStorage.setItem("tsubaki_vid",v); }
+  return v;
+}catch(_){ return ""; }})();
+function track(e){ try{ navigator.sendBeacon("/shindan/track?e="+e+"&vid="+encodeURIComponent(VID)); }catch(_){} }
 track("view");
 document.getElementById("lbtn").addEventListener("click", ()=>track("line_click"));
 const STATUS = ["音信不通","既読スルー","急に冷められた","別れ話の後","片思いで進展なし","復縁したい","その他・複雑"];
@@ -241,7 +252,7 @@ document.getElementById("f").addEventListener("submit", async (e)=>{
   const go=document.getElementById("go"); go.disabled=true; go.textContent="視てる……";
   try{
     const r=await fetch("/shindan/api",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({me, him, status:st.value, period:pe?pe.value:""})});
+      body:JSON.stringify({me, him, status:st.value, period:pe?pe.value:"", vid:VID})});
     const j=await r.json();
     if(!j.ok) throw new Error(j.error||"failed");
     document.getElementById("tname").textContent=j.type.name;

@@ -320,6 +320,10 @@ def handle_event(ev: dict) -> None:
 
     if etype == "follow":  # 友だち追加（挨拶はLINE側のあいさつメッセージが送る）
         store.upsert_line_user(user_id, display_name=get_display_name(user_id))
+        try:  # 実際の友だち追加数をファネル計測に記録（ボタン押下でなく本当の追加）
+            store.add_web_event("line_follow")
+        except Exception as e:
+            print(f"[line_bot] follow計測失敗（処理は継続）: {e}")
         return
     if etype != "message":
         return
