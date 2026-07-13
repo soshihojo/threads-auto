@@ -424,18 +424,29 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
             return
         # 長文中の数字は番号ではなかったとみなし、通常の会話フローへ落とす
 
+    # 会話の状態は「全履歴」で判定する。
+    # 直近12件だけで見ると、会話が長い人は診断済みの記録が窓から流れて
+    # 「未診断」と誤判定（③④を変なタイミングで再送）し、無料返信のカウントも
+    # 窓から溢れて永遠にオファーに達しない、という実バグがあった
+    history = store.recent_line_chats(user_id, limit=200)
+    diag_sent = any(len(h["text"]) > _DIAG_LEN for h in history if h["role"] == "assistant")
+    bot_replies = sum(1 for h in history
+                      if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN
+                      and ASK_MARKER not in h["text"])
+    over_limit = bot_replies >= FREE_REPLY_LIMIT
+
     # 生年月日が二人分揃っていて、まだ無料診断を送っていなければ、自動で無料診断を返す
-    #（「鑑定してほしい」等の購入ワードが同時に入っていても、診断が先）
+    #（「鑑定してほしい」等の購入ワードが同時に入っていても、診断が先。
+    #  ただし無料上限に達した人は下のオファーへ。また、診断フローの合図
+    #  ＝今のメッセージに生年月日がある／状況が読み取れる／③④を質問済み、が
+    #  無い雑談には発火させない＝会話の途中で急に③④を送る事故を防ぐ）
     me_b = (user.get("me_birth") or "").strip()
     him_b = (user.get("him_birth") or "").strip()
-    if me_b and him_b:
-        history = store.recent_line_chats(user_id, limit=12)
-        diag_sent = any(len(h["text"]) > _DIAG_LEN for h in history if h["role"] == "assistant")
-        if not diag_sent:
-            # 状況・期間は直近のやりとり全体から読み取る（③④の回答が別メッセージでも拾える）
-            recent_user = "\n".join(h["text"] for h in history if h["role"] == "user")[-800:]
-            parsed = parse_free_input(recent_user)
-            asked = any(ASK_MARKER in h["text"] for h in history if h["role"] == "assistant")
+    if me_b and him_b and not diag_sent and not over_limit:
+        recent_user = "\n".join(h["text"] for h in history[-12:] if h["role"] == "user")[-800:]
+        parsed = parse_free_input(recent_user)
+        asked = any(ASK_MARKER in h["text"] for h in history if h["role"] == "assistant")
+        if find_birthdates(incoming) or parsed["status"] or asked:
             if not parsed["status"] and not asked:
                 # 状況がまだ分からない → まず③④の定型ヒアリングを返す
                 snd(ASK_DETAILS)
@@ -462,24 +473,26 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
 
     if live:
         _human_pause()  # 人間らしい「間」を置いてから返信する
-    history = store.recent_line_chats(user_id, limit=12)
-    # 待っている間に次のメッセージが届いていたら、この返信はスキップ
-    #（新しいメッセージ側の処理が全履歴を見て返す＝二重返信・順番の乱れを防ぐ）
-    last_user = next((h["text"] for h in reversed(history) if h["role"] == "user"), None)
-    if last_user != incoming:
-        return
+        # 待っている間に次のメッセージが届いていたら、この返信はスキップ
+        #（新しいメッセージ側の処理が全履歴を見て返す＝二重返信・順番の乱れを防ぐ）
+        history = store.recent_line_chats(user_id, limit=200)  # 「間」の後に読み直す
+        last_user = next((h["text"] for h in reversed(history) if h["role"] == "user"), None)
+        if last_user != incoming:
+            return
+        bot_replies = sum(1 for h in history
+                          if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN
+                          and ASK_MARKER not in h["text"])
+        over_limit = bot_replies >= FREE_REPLY_LIMIT
 
-    # 無料返信の上限チェック：診断（長文）と③④の定型ヒアリングは数えず、
-    # ナーチャリング返信がFREE_REPLY_LIMIT通に達していたら有料オファーを送って停止
-    bot_replies = sum(1 for h in history
-                      if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN
-                      and ASK_MARKER not in h["text"])
-    if bot_replies >= FREE_REPLY_LIMIT and allow_offer:
+    # 無料返信の上限：ナーチャリング返信（全履歴・診断と③④は数えない）が
+    # FREE_REPLY_LIMIT通に達していたら有料オファーを送って停止
+    if over_limit and allow_offer:
         if snd(generate_offer(user, history, incoming)):
             store.upsert_line_user(user_id, bot="hold")
         return
 
-    text = _retry(lambda: generate_nurture(user, history[:-1], incoming), "返信の生成")
+    transcript = history[-13:]  # 会話プロンプトには直近だけ渡す（最後の1件=今回のメッセージ）
+    text = _retry(lambda: generate_nurture(user, transcript[:-1], incoming), "返信の生成")
     if text is None:
         return
     snd(text)
