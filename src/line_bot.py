@@ -53,7 +53,7 @@ OFFER_MENU = (
     "→ 今だけ80%OFF 3,960円\n"
     "https://1aksbkdokn31q1trp81e.stores.jp/items/685edb3caf1f4a03c43a0aa4\n\n"
     "②これからも、彼のこと何度でもウチに相談したい\n"
-    "→ 相談し放題の月額会員（月990円）\n"
+    "→ 相談し放題の月額会員（月999円）\n"
     "https://buy.stripe.com/fZu00ibsO4yD3MEeqC53O00\n\n"
     "「実際どんな鑑定が届くん？」て子は、中身と受けた子の感想をここにまとめてあるから、読んでから決めてくれてええで。\n"
     "▼\n"
