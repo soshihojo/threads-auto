@@ -146,8 +146,22 @@ DANGER_REPLY = (
 IMAGE_REPLY = "ごめんな、画像はウチ視られへんのよ。文字で教えてくれるか🌙"
 
 # ---- Web診断（椿の縁視）の鑑定番号 ----
-# /shindan で発行した4桁番号（3000〜9999）だけのメッセージを合言葉として受け付ける
-_CODE_RE = re.compile(r"^[#＃]?\s*([3-9]\d{3})\s*$")
+# /shindan で発行した4桁番号（3000〜9999）を合言葉として受け付ける。
+# 「8365\nよろしくお願いします🙏」のように挨拶が添えられても取りこぼさないよう、
+# 行単位で判定する（番号の後ろに短い非数字の添え書きは許容）
+_CODE_LINE_RE = re.compile(r"^[#＃]?\s*(?:鑑定番号|番号)?[:：]?\s*([3-9]\d{3})\s*\D{0,8}$")
+
+
+def _find_code(text: str) -> tuple[str | None, bool]:
+    """メッセージから鑑定番号らしき4桁を探す。(番号, ほぼ番号だけの短文か) を返す。
+    番号が実在するかは呼び出し側が store で照合する（実在しない場合、短文なら
+    案内文を返し、長文なら通常の会話として扱う＝誤検知しても壊れない設計）。"""
+    z = text.translate(_Z2H)
+    for ln in z.splitlines():
+        m = _CODE_LINE_RE.match(ln.strip())
+        if m:
+            return m.group(1), len(z.strip()) <= 30
+    return None, False
 # 本診断の前置き。番号経由の診断が _DIAG_LEN(220字) を確実に超えるための固定文でもある
 #（超えないと「診断送付済み」の判定に乗らず、次のメッセージで診断が二重生成されるため）
 WEB_DIAG_INTRO = (
@@ -309,31 +323,34 @@ def handle_event(ev: dict) -> None:
         store.upsert_line_user(user_id, bot="hold")
         return
 
-    # Web診断（/shindan）の鑑定番号だけが届いたら、保存済みの入力で本診断を自動返信
-    code_m = _CODE_RE.match(incoming.translate(_Z2H))
-    if code_m:
-        row = web_diag.redeem(code_m.group(1))
-        if not row:
+    # Web診断（/shindan）の鑑定番号が届いたら、保存済みの入力で本診断を自動返信
+    code, code_only = _find_code(incoming)
+    if code:
+        row = web_diag.redeem(code)
+        if row:
+            store.upsert_line_user(user_id, me_birth=row["me_birth"], him_birth=row["him_birth"])
+            try:
+                res = generate_reading(
+                    row["me_birth"], row["him_birth"],
+                    row.get("status") or "（不明。性質と縁を中心に視る）",
+                    row.get("period") or "（不明）",
+                    "", for_line=True,
+                )
+            except Exception as e:
+                print(f"[line_bot] 番号診断の生成失敗: {e}")
+                return  # 次のメッセージで再挑戦（番号は未使用のまま残る）
+            store.mark_web_diag_used(code)
+            # 生成中に並行処理が先に診断を送っていたら二重送信しない
+            latest = store.recent_line_chats(user_id, limit=12)
+            if any(len(h["text"]) > _DIAG_LEN for h in latest if h["role"] == "assistant"):
+                return
+            _send(user_id, reply_token, WEB_DIAG_INTRO + res["reading"])
+            return
+        if code_only:
+            # ほぼ番号だけの短文なのに照合できない＝番号違いか期限切れ。案内を返す
             _send(user_id, reply_token, CODE_NOT_FOUND)
             return
-        store.upsert_line_user(user_id, me_birth=row["me_birth"], him_birth=row["him_birth"])
-        try:
-            res = generate_reading(
-                row["me_birth"], row["him_birth"],
-                row.get("status") or "（不明。性質と縁を中心に視る）",
-                row.get("period") or "（不明）",
-                "", for_line=True,
-            )
-        except Exception as e:
-            print(f"[line_bot] 番号診断の生成失敗: {e}")
-            return  # 次のメッセージで再挑戦（番号は未使用のまま残る）
-        store.mark_web_diag_used(code_m.group(1))
-        # 生成中に並行処理が先に診断を送っていたら二重送信しない
-        latest = store.recent_line_chats(user_id, limit=12)
-        if any(len(h["text"]) > _DIAG_LEN for h in latest if h["role"] == "assistant"):
-            return
-        _send(user_id, reply_token, WEB_DIAG_INTRO + res["reading"])
-        return
+        # 長文中の数字は番号ではなかったとみなし、通常の会話フローへ落とす
 
     # 生年月日が二人分揃っていて、まだ無料診断を送っていなければ、自動で無料診断を返す
     #（Threadsの投稿から「LINEで生年月日を送って」で来た人への一通目。
