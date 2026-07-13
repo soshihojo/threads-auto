@@ -489,9 +489,10 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
 LATE_PREFIX = "遅うなってごめんな、順番に視てたんや。\n\n"
 
 
-def sweep_unanswered(min_age_min: int = 10, max_age_hours: int = 48) -> int:
+def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
     """最後が相談者の発言のまま止まっている会話（bot=onのみ）に自動返信する。
-    直近min_age_min分は通常のWebhook処理に任せて触らない。返信した件数を返す。"""
+    直近min_age_min分は通常のWebhook処理に任せて触らない（Webhook処理は間20〜35秒＋
+    生成リトライ込みで最長約2分のため、3分あれば追い越さない）。返信した件数を返す。"""
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
     now = datetime.now(ZoneInfo("Asia/Tokyo")).replace(tzinfo=None)

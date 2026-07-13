@@ -280,7 +280,7 @@ def main() -> None:
     p_tsu.add_argument("--month", default="", help="対象月ラベル（例: 2026年8月。省略時は今月）")
     p_tsu.set_defaults(func=cmd_tsukiyomi)
     p_ls = sub.add_parser("line-sweep")
-    p_ls.add_argument("--min-age", type=int, default=10, help="この分数より新しい未返信は触らない")
+    p_ls.add_argument("--min-age", type=int, default=3, help="この分数より新しい未返信は触らない")
     p_ls.add_argument("--max-age", type=int, default=48, help="この時間より古い未返信は触らない")
     p_ls.set_defaults(func=cmd_line_sweep)
     sub.add_parser("refresh-token").set_defaults(func=cmd_refresh_token)

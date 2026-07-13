@@ -25,7 +25,7 @@ app = FastAPI()
 store.init_db()
 
 # 未返信スイープ：生成失敗等で返信が落ちた会話を10分ごとに拾い直す安全網
-SWEEP_INTERVAL_SEC = int(env("LINE_SWEEP_INTERVAL_SEC") or "600")
+SWEEP_INTERVAL_SEC = int(env("LINE_SWEEP_INTERVAL_SEC") or "300")
 
 
 @app.on_event("startup")
