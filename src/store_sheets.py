@@ -366,6 +366,13 @@ def add_reading(member_id, month: str, worry: str, reading: str) -> int:
     return new_id
 
 
+def update_reading(reading_id, reading: str) -> None:
+    """控えの本文を上書きする（同じ相談で返信を作り直したときの重複防止）。"""
+    idx = _find_row("readings", "id", reading_id)
+    if idx:
+        _update_cells("readings", idx, {"reading": reading})
+
+
 def list_readings(member_id=None, limit: int = 200) -> list[dict]:
     rows = _records("readings")
     if member_id is not None:

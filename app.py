@@ -312,7 +312,21 @@ if view == VIEW_CONSULT:
                     with st.spinner("椿が視てます…"):
                         res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str,
                                                          kantei=kantei_text)
-                    st.session_state["con_result"] = {"reply": res["reply"], "member_id": cmem["id"], "msg": incoming}
+                    # 相談と返信を自動で控えに保存（次回の返信生成が「前回までのやりとり」として参照する）。
+                    # 同じ相談文で作り直した場合は前の控えを上書き＝重複させない
+                    try:
+                        _dup = next((h for h in _all_hist if h["month"] == "相談"
+                                     and str(h["worry"]).strip() == incoming.strip()), None)
+                        if _dup:
+                            store.update_reading(_dup["id"], res["reply"])
+                        else:
+                            store.add_reading(cmem["id"], "相談", incoming.strip(), res["reply"])
+                        saved = True
+                    except Exception as e:
+                        saved = False
+                        st.warning(f"控えの自動保存に失敗しました（返信自体は下に表示されています）: {e}")
+                    st.session_state["con_result"] = {"reply": res["reply"], "member_id": cmem["id"],
+                                                      "msg": incoming, "saved": saved}
                 except Exception as e:
                     st.error(f"生成に失敗しました（{e}）。少し待って再度お試しください。")
         cr = st.session_state.get("con_result")
@@ -320,12 +334,9 @@ if view == VIEW_CONSULT:
             # keyを返信内容から作る＝2回目以降の生成で古い表示が残るのを防ぐ
             st.text_area("返信（コピーして送れます）", value=cr["reply"], height=300,
                          key=f"con_out_{abs(hash(cr['reply'])) % 10**8}")
-            if st.button("✅ この相談と返信を控えに保存", key="con_save"):
-                try:
-                    store.add_reading(cmem["id"], "相談", cr["msg"], cr["reply"])
-                    st.success("控えに保存しました（👥会員の履歴にも残ります）")
-                except Exception as e:
-                    st.error(f"保存に失敗しました（{e}）")
+            if cr.get("saved"):
+                st.caption("📝 この相談と返信は自動で控えに保存されました（同じ相談文で作り直すと上書きされます）。"
+                           "送らなかった返信を消したい場合は、スプレッドシートの readings シートから該当行を削除してください。")
 
 
 # ---------------- 会員リスト ----------------

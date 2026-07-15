@@ -319,6 +319,12 @@ def add_reading(member_id, month: str, worry: str, reading: str) -> int:
         return cur.lastrowid
 
 
+def update_reading(reading_id, reading: str) -> None:
+    """控えの本文を上書きする（同じ相談で返信を作り直したときの重複防止）。"""
+    with conn() as c:
+        c.execute("UPDATE readings SET reading=? WHERE id=?", (reading, reading_id))
+
+
 def list_readings(member_id=None, limit: int = 200) -> list[sqlite3.Row]:
     with conn() as c:
         if member_id is not None:

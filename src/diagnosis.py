@@ -200,7 +200,7 @@ def generate_monthly(me_birth: str, him_birth: str, worry: str = "",
         f"{month_label}の二人の運気の流れ、動いてええ時期/控える時期の目安、{month_label}の開運アクション、"
         "最後に寄り添いの一言、の順で。会員向けやから出し惜しみせず、安心と前進感を渡しきること。"
     )
-    reading = complete(MONTHLY_SYSTEM, user, max_tokens=700, temperature=0.9).strip()
+    reading = complete(MONTHLY_SYSTEM, user, max_tokens=2000, temperature=0.9).strip()
     return {"me_shuku": me_s, "him_shuku": him_s, "reading": reading}
 
 
@@ -219,6 +219,7 @@ CONSULT_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば
 - 『宿曜』という占術名や、宿の名前・距離・関係名は本文に出さない。中身は日常語に翻訳する
 - 復縁・結果を保証しない／過度に不安を煽らない／病気・健康・金運の断定はしない
 - 会員やから、無料診断のように「続きはLINEで」と引っ張らない。ここでちゃんと応えきる
+- 長さは相談の重さに合わせる（目安300〜700字。LINEで読み切れる範囲）。必ず最後まで言い切って終える（文の途中で止めない）
 - 装飾記号(マークダウン)は使わない。絵文字は締めに🌙を0〜1個。出力は返信本文のみ"""
 
 
@@ -247,7 +248,8 @@ def generate_consult(me_birth: str, him_birth: str, message: str, history: str =
         "----------------------------------------------------------------\n\n"
         "相談に正面から答え、前回の流れがあれば踏まえ、具体的な一歩を渡して、あたたかく締めてください。"
     )
-    reply = complete(CONSULT_SYSTEM, user, max_tokens=700, temperature=0.9).strip()
+    # 鑑定書参照で返信が長くなるため上限は余裕を持たせる（上限なので未使用分は課金されない）
+    reply = complete(CONSULT_SYSTEM, user, max_tokens=2500, temperature=0.9).strip()
     return {"me_shuku": me_s, "him_shuku": him_s, "reply": reply}
 
 
