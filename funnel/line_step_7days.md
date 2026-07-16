@@ -72,7 +72,8 @@ Threads投稿（CTA=①いいね ②フォロー ③**プロフィールのリ�
 https://1aksbkdokn31q1trp81e.stores.jp/items/685edb3caf1f4a03c43a0aa4
 
 「実際どんな鑑定が届くん？」て思うやろ。中身と受けた子の感想、ここにまとめてあるから読んでみ。
-▼
+
+▼お客様の感想
 https://note.com/tsubaki_honne/n/n24b6aed96bf2
 
 急がんでええ。あんたのタイミングでおいで🌙

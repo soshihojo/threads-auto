@@ -58,8 +58,8 @@ OFFER_MENU = (
     "“今動くべきか・いつ・どう一言を送るか”まで、あんた専用に視て、鑑定書にまとめて返す\n"
     "→ 今だけ75%OFF 4,950円\n"
     "https://1aksbkdokn31q1trp81e.stores.jp/items/685edb3caf1f4a03c43a0aa4\n\n"
-    "「実際どんな鑑定が届くん？」て子は、中身と受けた子の感想をここにまとめてあるから、読んでから決めてくれてええで。\n"
-    "▼\n"
+    "「実際どんな鑑定が届くん？」て子は、中身と受けた子の感想をここにまとめてあるから、読んでから決めてくれてええで。\n\n"
+    "▼お客様の感想\n"
     "https://note.com/tsubaki_honne/n/n24b6aed96bf2\n\n"
     "急がんでええ、あんたのタイミングでおいで🌙"
 )
@@ -193,6 +193,19 @@ CODE_NOT_FOUND = (
 # 無料診断（長文）とナーチャリング返信（60〜160字）を見分ける文字数のしきい値。
 # 「診断を送ったか」「無料返信が何通目か」の判定に使う
 _DIAG_LEN = 220
+
+
+def _is_offer_text(text: str) -> bool:
+    """有料オファー（商品リンク入り）か。オファーも長文のため、診断済み判定から除外する。
+    （オファーを診断と誤認して、番号診断の送信をスキップした実バグへの対策）"""
+    return "stores.jp" in text
+
+
+def _diag_count(history: list[dict]) -> int:
+    """履歴中の「無料診断（長文・オファー以外）」の件数。"""
+    return sum(1 for h in history
+               if h["role"] == "assistant" and len(h["text"]) > _DIAG_LEN
+               and not _is_offer_text(h["text"]))
 
 
 # ---------- LINE API ----------
@@ -398,6 +411,7 @@ def _handle_code(user_id: str, incoming: str, snd) -> bool:
     row = web_diag.redeem(code)
     if row:
         store.upsert_line_user(user_id, me_birth=row["me_birth"], him_birth=row["him_birth"])
+        base = _diag_count(store.recent_line_chats(user_id, limit=12))  # 生成前の診断数
         res = _retry(lambda: generate_reading(
             row["me_birth"], row["him_birth"],
             row.get("status") or "（不明。性質と縁を中心に視る）",
@@ -407,9 +421,9 @@ def _handle_code(user_id: str, incoming: str, snd) -> bool:
         if res is None:
             return True  # 番号は未使用のまま残る＝スイープ/再送で再挑戦できる
         store.mark_web_diag_used(code)
-        # 生成中に並行処理が先に診断を送っていたら二重送信しない
-        latest = store.recent_line_chats(user_id, limit=12)
-        if any(len(h["text"]) > _DIAG_LEN for h in latest if h["role"] == "assistant"):
+        # 生成中に並行処理が「新たに」診断を送っていたら二重送信しない
+        #（件数の増加で判定する。過去のオファー等の長文を診断と誤認しないため）
+        if _diag_count(store.recent_line_chats(user_id, limit=12)) > base:
             return True
         snd(WEB_DIAG_INTRO + res["reading"])
         return True
@@ -453,7 +467,7 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
     # 「未診断」と誤判定（③④を変なタイミングで再送）し、無料返信のカウントも
     # 窓から溢れて永遠にオファーに達しない、という実バグがあった
     history = store.recent_line_chats(user_id, limit=200)
-    diag_sent = any(len(h["text"]) > _DIAG_LEN for h in history if h["role"] == "assistant")
+    diag_sent = _diag_count(history) > 0  # オファー等の長文は診断とみなさない
     bot_replies = sum(1 for h in history
                       if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN
                       and ASK_MARKER not in h["text"])
@@ -483,9 +497,8 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
             ), "無料診断の生成")
             if res is None:
                 return
-            # 生成中に並行処理が先に診断を送っていたら二重送信しない
-            latest = store.recent_line_chats(user_id, limit=12)
-            if any(len(h["text"]) > _DIAG_LEN for h in latest if h["role"] == "assistant"):
+            # 生成中に並行処理が「新たに」診断を送っていたら二重送信しない
+            if _diag_count(store.recent_line_chats(user_id, limit=12)) > 0:
                 return
             snd(res["reading"])
             return
