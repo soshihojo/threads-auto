@@ -389,10 +389,18 @@ def handle_event(ev: dict) -> None:
 
     bot_state = (user.get("bot") or "on").strip() or "on"
     if bot_state in ("off", "hold"):
-        # hold（店主対応中）でも、Web診断の鑑定番号だけは自動で応える。
-        #（番号は独立した納品物。無視すると診断が永遠に届かない実害があった）
+        # hold（店主対応中）でも「無料診断の依頼」には自動で応える：
+        # ①Web診断の鑑定番号 ②未診断の人が生年月日・①〜④テンプレを送ってきた場合。
+        #（無視すると診断が永遠に届かない実害があった。番号=恵美、テンプレ=kaorin）
         if bot_state == "hold":
-            _handle_code(user_id, incoming, lambda t: _send(user_id, reply_token, t))
+            snd = lambda t: _send(user_id, reply_token, t)
+            history = store.recent_line_chats(user_id, limit=200)
+            base = _diag_count(history)
+            if not _handle_code(user_id, incoming, snd) and base == 0:
+                _try_free_diagnosis(user_id, user, incoming, snd, history)
+            # 診断が新たに届いた＝再来訪の明確な意思表示なので、AI会話を再開する
+            if _diag_count(store.recent_line_chats(user_id, limit=200)) > base:
+                store.upsert_line_user(user_id, bot="on")
         return
 
     if detect_signal(incoming) == "danger":  # 危険サインは待たせず即返す
@@ -432,6 +440,38 @@ def _handle_code(user_id: str, incoming: str, snd) -> bool:
         snd(CODE_NOT_FOUND)
         return True
     return False  # 長文中の数字は番号ではなかったとみなし、通常の会話フローへ
+
+
+def _try_free_diagnosis(user_id: str, user: dict, incoming: str, snd, history: list[dict]) -> bool:
+    """無料診断のトリガー処理。③④ヒアリングか診断を送ったらTrue。
+    診断フローの合図（今のメッセージに生年月日がある／状況が読み取れる／③④を質問済み）が
+    無い雑談には発火しない＝会話の途中で急に③④を送る事故を防ぐ。"""
+    me_b = (user.get("me_birth") or "").strip()
+    him_b = (user.get("him_birth") or "").strip()
+    if not (me_b and him_b):
+        return False
+    recent_user = "\n".join(h["text"] for h in history[-12:] if h["role"] == "user")[-800:]
+    parsed = parse_free_input(recent_user)
+    asked = any(ASK_MARKER in h["text"] for h in history if h["role"] == "assistant")
+    if not (find_birthdates(incoming) or parsed["status"] or asked):
+        return False
+    if not parsed["status"] and not asked:
+        # 状況がまだ分からない → まず③④の定型ヒアリングを返す
+        snd(ASK_DETAILS)
+        return True
+    res = _retry(lambda: generate_reading(
+        me_b, him_b,
+        parsed["status"] or "（相談文から読み取る）",
+        parsed["period"] or "（相談文から読み取る）",
+        recent_user, for_line=True,
+    ), "無料診断の生成")
+    if res is None:
+        return True  # 送れなかったが、スイープが後で拾い直す
+    # 生成中に並行処理が「新たに」診断を送っていたら二重送信しない
+    if _diag_count(store.recent_line_chats(user_id, limit=12)) > 0:
+        return True
+    snd(res["reading"])
+    return True
 
 
 def _is_minor(user: dict) -> bool:
@@ -475,32 +515,9 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
 
     # 生年月日が二人分揃っていて、まだ無料診断を送っていなければ、自動で無料診断を返す
     #（「鑑定してほしい」等の購入ワードが同時に入っていても、診断が先。
-    #  ただし無料上限に達した人は下のオファーへ。また、診断フローの合図
-    #  ＝今のメッセージに生年月日がある／状況が読み取れる／③④を質問済み、が
-    #  無い雑談には発火させない＝会話の途中で急に③④を送る事故を防ぐ）
-    me_b = (user.get("me_birth") or "").strip()
-    him_b = (user.get("him_birth") or "").strip()
-    if me_b and him_b and not diag_sent and not over_limit:
-        recent_user = "\n".join(h["text"] for h in history[-12:] if h["role"] == "user")[-800:]
-        parsed = parse_free_input(recent_user)
-        asked = any(ASK_MARKER in h["text"] for h in history if h["role"] == "assistant")
-        if find_birthdates(incoming) or parsed["status"] or asked:
-            if not parsed["status"] and not asked:
-                # 状況がまだ分からない → まず③④の定型ヒアリングを返す
-                snd(ASK_DETAILS)
-                return
-            res = _retry(lambda: generate_reading(
-                me_b, him_b,
-                parsed["status"] or "（相談文から読み取る）",
-                parsed["period"] or "（相談文から読み取る）",
-                recent_user, for_line=True,
-            ), "無料診断の生成")
-            if res is None:
-                return
-            # 生成中に並行処理が「新たに」診断を送っていたら二重送信しない
-            if _diag_count(store.recent_line_chats(user_id, limit=12)) > 0:
-                return
-            snd(res["reading"])
+    #  ただし無料上限に達した人は下のオファーへ）
+    if not diag_sent and not over_limit:
+        if _try_free_diagnosis(user_id, user, incoming, snd, history):
             return
 
     if detect_signal(incoming) == "purchase":
