@@ -106,13 +106,23 @@ class ThreadsClient:
         return cid
 
     def _publish_container(self, creation_id: str) -> str:
-        # コンテナ作成直後は処理中のことがあるため少し待つ
-        time.sleep(2)
-        res = self._post(f"{self.user_id}/threads_publish", {"creation_id": creation_id})
-        mid = res.get("id")
-        if not mid:
-            raise ThreadsError(f"publish に失敗: {res}")
-        return mid
+        # コンテナ作成直後は処理中のことがある＋Threads側の一時的な500が出ることがあるため、
+        # 間隔を空けてリトライする（同じcreation_idの再公開なので重複投稿にはならない）
+        last: Exception | None = None
+        for wait in (2, 8, 20):
+            time.sleep(wait)
+            try:
+                res = self._post(f"{self.user_id}/threads_publish", {"creation_id": creation_id})
+            except ThreadsError as e:
+                if "-> 5" in str(e):  # 5xx＝Threads側の一時エラーは再試行
+                    last = e
+                    continue
+                raise
+            mid = res.get("id")
+            if mid:
+                return mid
+            last = ThreadsError(f"publish に失敗: {res}")
+        raise last
 
     def publish_text(
         self,
