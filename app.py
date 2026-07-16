@@ -102,8 +102,8 @@ except Exception:
 
 # st.tabsは全タブの中身を毎回描画する（遅い・操作後に先頭タブへ戻る）ため、
 # 選んだ画面だけを描画する完全切り替え式にする。選択はセッションに保持される。
-VIEW_GEN, VIEW_DIAG, VIEW_CONSULT, VIEW_MEMBERS = VIEWS = [
-    "✍️ 承認待ちの候補", "🔮 無料診断", "💬 会員相談", "👥 会員"]
+VIEW_GEN, VIEW_REPLIES, VIEW_DIAG, VIEW_CONSULT, VIEW_MEMBERS = VIEWS = [
+    "✍️ 承認待ちの候補", "↩️ コメント返信", "🔮 無料診断", "💬 会員相談", "👥 会員"]
 view = st.radio("画面", VIEWS, horizontal=True, key="view", label_visibility="collapsed")
 st.divider()
 
@@ -179,6 +179,42 @@ if view == VIEW_GEN:
                     st.rerun()
                 except Exception as e:
                     st.error(f"投稿失敗: {e}")
+
+
+# ---------------- コメント返信の承認 ----------------
+if view == VIEW_REPLIES:
+    st.caption("投稿へのコメントに、椿の声で個別に返信します（DMではなく公開リプライ＝BAN安全）。"
+               "手挙げコメントへの招待返信がLINE集客の主エンジンです。上から順に確認して送ってください。")
+    try:
+        _drafts = store.pending_drafts()
+    except Exception as e:
+        st.warning(f"下書きの読み込みに失敗しました（{e}）")
+        _drafts = []
+    _drafts = sorted(_drafts, key=lambda d: str(d["created_at"]), reverse=True)
+    if not _drafts:
+        st.info("承認待ちの返信はありません。コメントが付くと自動で下書きが溜まります（3時間ごとに巡回）。")
+    else:
+        st.write(f"承認待ち {len(_drafts)} 件（新しい順）")
+        for d in _drafts[:40]:
+            with st.container(border=True):
+                st.markdown(f"**@{d['username']}**　<span style='color:gray'>{str(d['created_at'])[:16]}</span>",
+                            unsafe_allow_html=True)
+                st.caption(f"コメント: {d['in_text']}")
+                rtext = st.text_area("返信（編集可）", value=d["draft_text"],
+                                     key=f"rep_{d['reply_id']}", height=80)
+                c1, c2 = st.columns(2)
+                if c1.button("↩️ この内容で返信する", key=f"rep_send_{d['reply_id']}", use_container_width=True):
+                    try:
+                        from src.main import make_client
+                        make_client().reply_to(d["reply_id"], rtext)
+                        store.set_draft_status(d["reply_id"], "sent", sent=True)
+                        st.success("返信しました")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"返信に失敗しました（{e}）")
+                if c2.button("🗑 スキップ", key=f"rep_skip_{d['reply_id']}", use_container_width=True):
+                    store.set_draft_status(d["reply_id"], "skipped")
+                    st.rerun()
 
 
 # ---------------- 無料診断 ----------------
