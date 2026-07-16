@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import date, datetime, time as dtime, timedelta
 
 import streamlit as st
@@ -194,7 +195,32 @@ if view == VIEW_REPLIES:
     if not _drafts:
         st.info("承認待ちの返信はありません。コメントが付くと自動で下書きが溜まります（3時間ごとに巡回）。")
     else:
-        st.write(f"承認待ち {len(_drafts)} 件（新しい順）")
+        top = st.columns([2, 1])
+        top[0].write(f"承認待ち {len(_drafts)} 件（新しい順）")
+        if top[1].button(f"🚀 {min(len(_drafts), 40)}件まとめて送信", type="primary", use_container_width=True):
+            from src.main import make_client
+            _client = make_client()
+            _bar = st.progress(0.0, text="送信中…")
+            _ok = _ng = 0
+            _targets = _drafts[:40]
+            for _i, _d in enumerate(_targets):
+                # 画面で編集済みの文面があればそれを使う
+                _text = st.session_state.get(f"rep_{_d['reply_id']}", _d["draft_text"])
+                try:
+                    _client.reply_to(_d["reply_id"], _text)
+                    store.set_draft_status(_d["reply_id"], "sent", sent=True)
+                    _ok += 1
+                except Exception as _e:
+                    _ng += 1
+                    st.warning(f"@{_d['username']} への返信失敗: {_e}")
+                _bar.progress((_i + 1) / len(_targets),
+                              text=f"送信中… {_i + 1}/{len(_targets)}（成功{_ok}）")
+                if _i + 1 < len(_targets):
+                    time.sleep(8)  # 連投とみなされない間隔（凍結対策）
+            _bar.empty()
+            st.success(f"送信 {_ok}件 / 失敗 {_ng}件")
+            time.sleep(1.5)
+            st.rerun()
         for d in _drafts[:40]:
             with st.container(border=True):
                 st.markdown(f"**@{d['username']}**　<span style='color:gray'>{str(d['created_at'])[:16]}</span>",

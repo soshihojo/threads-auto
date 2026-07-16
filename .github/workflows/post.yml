@@ -1,9 +1,9 @@
 name: threads-generate
-# 6時間ごとに投稿候補を自動生成 → 共有ストア(Sheets)にpending_reviewで溜める。
+# 12時間ごとに投稿候補を自動生成 → 共有ストア(Sheets)にpending_reviewで溜める。
 # 投稿は、ダッシュボードで承認 → scheduler(run-due)が配信する。
 on:
   schedule:
-    - cron: "0 */6 * * *"   # 6時間おき（UTC 0/6/12/18 = JST 9/15/21/3）
+    - cron: "0 */12 * * *"   # 12時間おき（UTC 0/12 = JST 9/21）
   workflow_dispatch: {}
 
 jobs:
