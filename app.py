@@ -72,6 +72,34 @@ profile = active_profile()
 st.title("🧵 Threads運用ダッシュボード")
 st.caption(f"プロファイル: {profile['name']}　|　返信モード: 下書き承認制　|　現在(JST): {now_jst():%Y-%m-%d %H:%M}")
 
+# 手動対応待ち（bot=holdで最後が相談者の発言のまま）を常時表示。返信漏れ防止の最後の砦
+try:
+    _hw_chats = {}
+    for _r in store.all_line_chats(days=7):
+        _hw_chats.setdefault(_r["user_id"], []).append(_r)
+    _hw = []
+    for _uid, _rows in _hw_chats.items():
+        _rows.sort(key=lambda r: str(r.get("created_at", "")))
+        _last = _rows[-1]
+        if _last["role"] != "user":
+            continue
+        _u = store.get_line_user(_uid) or {}
+        if (_u.get("bot") or "on").strip() != "hold":
+            continue
+        try:
+            _t = datetime.fromisoformat(str(_last["created_at"]).replace(" ", "T"))
+            _hours = max(0, int((now_jst().replace(tzinfo=None) - _t).total_seconds() // 3600))
+        except ValueError:
+            _hours = 0
+        _hw.append((_u.get("display_name") or "（名前不明）", _hours))
+    if _hw:
+        _hw.sort(key=lambda x: -x[1])
+        st.error("📥 **手動対応待ちのLINEがあります**（あなたの返信待ち）: "
+                 + "、".join(f"{n}（{h}時間）" for n, h in _hw)
+                 + " → LINE公式アプリから返信してください")
+except Exception:
+    pass
+
 # st.tabsは全タブの中身を毎回描画する（遅い・操作後に先頭タブへ戻る）ため、
 # 選んだ画面だけを描画する完全切り替え式にする。選択はセッションに保持される。
 VIEW_GEN, VIEW_DIAG, VIEW_CONSULT, VIEW_MEMBERS = VIEWS = [

@@ -22,8 +22,10 @@ import time
 
 import requests
 
+from datetime import datetime
+
 from . import store, web_diag
-from .config import env
+from .config import active_profile, env
 from .diagnosis import (SHUKU_27, _Z2H, find_birthdates, generate_reading,
                         honmei_shuku, parse_free_input)
 from .llm import complete
@@ -374,6 +376,10 @@ def handle_event(ev: dict) -> None:
 
     bot_state = (user.get("bot") or "on").strip() or "on"
     if bot_state in ("off", "hold"):
+        # hold（店主対応中）でも、Web診断の鑑定番号だけは自動で応える。
+        #（番号は独立した納品物。無視すると診断が永遠に届かない実害があった）
+        if bot_state == "hold":
+            _handle_code(user_id, incoming, lambda t: _send(user_id, reply_token, t))
         return
 
     if detect_signal(incoming) == "danger":  # 危険サインは待たせず即返す
@@ -382,6 +388,50 @@ def handle_event(ev: dict) -> None:
         return
 
     _auto_reply(user_id, user, incoming, reply_token)
+
+
+def _handle_code(user_id: str, incoming: str, snd) -> bool:
+    """鑑定番号のメッセージを処理する。番号として扱った場合はTrue（bot=holdの人にも使う）。"""
+    code, code_only = _find_code(incoming)
+    if not code:
+        return False
+    row = web_diag.redeem(code)
+    if row:
+        store.upsert_line_user(user_id, me_birth=row["me_birth"], him_birth=row["him_birth"])
+        res = _retry(lambda: generate_reading(
+            row["me_birth"], row["him_birth"],
+            row.get("status") or "（不明。性質と縁を中心に視る）",
+            row.get("period") or "（不明）",
+            "", for_line=True,
+        ), "番号診断の生成")
+        if res is None:
+            return True  # 番号は未使用のまま残る＝スイープ/再送で再挑戦できる
+        store.mark_web_diag_used(code)
+        # 生成中に並行処理が先に診断を送っていたら二重送信しない
+        latest = store.recent_line_chats(user_id, limit=12)
+        if any(len(h["text"]) > _DIAG_LEN for h in latest if h["role"] == "assistant"):
+            return True
+        snd(WEB_DIAG_INTRO + res["reading"])
+        return True
+    if code_only:
+        # ほぼ番号だけの短文なのに照合できない＝番号違いか期限切れ。案内を返す
+        snd(CODE_NOT_FOUND)
+        return True
+    return False  # 長文中の数字は番号ではなかったとみなし、通常の会話フローへ
+
+
+def _is_minor(user: dict) -> bool:
+    """相談者が未成年（18歳未満）か。未成年には有料オファーを自動送付しない。"""
+    b = (user.get("me_birth") or "").strip()
+    if not b:
+        return False
+    try:
+        birth = datetime.strptime(b, "%Y-%m-%d")
+    except ValueError:
+        return False
+    today = datetime.now()
+    age = today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
+    return age < 18
 
 
 def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", *,
@@ -395,31 +445,8 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
         return _send(user_id, reply_token, f"{prefix}{text}" if prefix else text)
 
     # Web診断（/shindan）の鑑定番号が届いたら、保存済みの入力で本診断を自動返信
-    code, code_only = _find_code(incoming)
-    if code:
-        row = web_diag.redeem(code)
-        if row:
-            store.upsert_line_user(user_id, me_birth=row["me_birth"], him_birth=row["him_birth"])
-            res = _retry(lambda: generate_reading(
-                row["me_birth"], row["him_birth"],
-                row.get("status") or "（不明。性質と縁を中心に視る）",
-                row.get("period") or "（不明）",
-                "", for_line=True,
-            ), "番号診断の生成")
-            if res is None:
-                return  # 番号は未使用のまま残る＝スイープ/再送で再挑戦できる
-            store.mark_web_diag_used(code)
-            # 生成中に並行処理が先に診断を送っていたら二重送信しない
-            latest = store.recent_line_chats(user_id, limit=12)
-            if any(len(h["text"]) > _DIAG_LEN for h in latest if h["role"] == "assistant"):
-                return
-            snd(WEB_DIAG_INTRO + res["reading"])
-            return
-        if code_only:
-            # ほぼ番号だけの短文なのに照合できない＝番号違いか期限切れ。案内を返す
-            snd(CODE_NOT_FOUND)
-            return
-        # 長文中の数字は番号ではなかったとみなし、通常の会話フローへ落とす
+    if _handle_code(user_id, incoming, snd):
+        return
 
     # 会話の状態は「全履歴」で判定する。
     # 直近12件だけで見ると、会話が長い人は診断済みの記録が窓から流れて
@@ -464,6 +491,11 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
             return
 
     if detect_signal(incoming) == "purchase":
+        if _is_minor(user):
+            # 未成年に有料オファーは自動送付しない（未成年者契約の取消リスク＋倫理）。
+            # holdにして店主へ（手動対応待ち通知・ダッシュボードのバナーに出る）
+            store.upsert_line_user(user_id, bot="hold")
+            return
         # 購入サイン＝買う瞬間。10通の上限を待たず、その場で個別鑑定オファーを自動送付
         #（送付後はhold＝納期・支払い等の続きの質問は店主がLINEアプリから手動で返す）
         if snd(generate_offer(user, history, incoming)):
@@ -484,8 +516,8 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
         over_limit = bot_replies >= FREE_REPLY_LIMIT
 
     # 無料返信の上限：ナーチャリング返信（全履歴・診断と③④は数えない）が
-    # FREE_REPLY_LIMIT通に達していたら有料オファーを送って停止
-    if over_limit and allow_offer:
+    # FREE_REPLY_LIMIT通に達していたら有料オファーを送って停止（未成年には送らず会話を続ける）
+    if over_limit and allow_offer and not _is_minor(user):
         if snd(generate_offer(user, history, incoming)):
             store.upsert_line_user(user_id, bot="hold")
         return
@@ -517,6 +549,7 @@ def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
         by_user.setdefault(r["user_id"], []).append(r)
 
     replied = 0
+    hold_waiting: list[tuple[str, str, int]] = []  # (uid, 表示名, 待ち時間h)
     for uid, rows in by_user.items():
         rows.sort(key=lambda r: str(r.get("created_at", "")))
         last = rows[-1]
@@ -530,8 +563,16 @@ def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
         if age < timedelta(minutes=min_age_min) or age > timedelta(hours=max_age_hours):
             continue
         user = store.get_line_user(uid)
-        if not user or (user.get("bot") or "on").strip() not in ("", "on"):
-            continue  # hold/offは店主の手動対応域なので触らない
+        if not user:
+            continue
+        state = (user.get("bot") or "on").strip() or "on"
+        if state != "on":
+            # hold/offは店主の手動対応域＝自動返信はしないが、1時間以上待たせている
+            # holdの相談者は「手動対応待ち」としてオーナーへLINE通知する（下のダイジェスト）
+            if state == "hold" and age > timedelta(hours=1):
+                hold_waiting.append((uid, user.get("display_name") or "（名前不明）",
+                                     int(age.total_seconds() // 3600)))
+            continue
         incoming = str(last["text"])
         print(f"[sweep] 未返信を検知: {uid}（{last['created_at']}）")
         if any(w in incoming for w in DANGER_WORDS):
@@ -544,4 +585,27 @@ def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
                     prefix=LATE_PREFIX if stale else "",
                     allow_offer=not stale)  # 掘り起こしでいきなり売らない
         replied += 1
+
+    _notify_owner_of_holds(hold_waiting)
     return replied
+
+
+def _notify_owner_of_holds(waiting: list[tuple[str, str, int]]) -> None:
+    """手動対応待ち（hold・1時間以上未返信）をオーナーのLINEへダイジェスト通知する。
+    同じ顔ぶれのままなら再通知しない（対象が変わった時だけ届く＝push枠の節約）。"""
+    owner = (active_profile().get("owner_line_user_id") or "").strip()
+    if not owner or not waiting:
+        return
+    digest = hashlib.sha1(",".join(sorted(uid for uid, _, _ in waiting)).encode()).hexdigest()[:16]
+    try:
+        last = next((r for r in store.list_web_events(limit=300)
+                     if r.get("event") == "owner_notify"), None)
+        if last and str(last.get("vid") or "") == digest:
+            return  # 顔ぶれが変わっていない＝通知済み
+        lines = "\n".join(f"・{name}（{hours}時間待ち）" for _, name, hours in waiting)
+        text = (f"📥 椿LINE：手動対応待ちが{len(waiting)}件あります\n{lines}\n"
+                "→ LINE公式アプリから返信してください（この通知は対象の顔ぶれが変わった時だけ届きます）")
+        if push_text(owner, text):
+            store.add_web_event("owner_notify", digest)
+    except Exception as e:
+        print(f"[sweep] オーナー通知失敗（処理は継続）: {e}")

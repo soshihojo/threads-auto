@@ -31,6 +31,8 @@ profiles:
     offer: "あんたの彼の本音、無料で視たる。この投稿にいいねとフォロー、ほんでプロフィールのリンクから無料診断や。二人の生年月日を入れるだけ、30秒で視られる。"
     # 公式LINE登録リンク（Web診断の結果画面の友だち追加ボタン等で使用）
     line_url: "https://lin.ee/XfqbBK2"
+    # 店主のLINE user_id（手動対応待ちのダイジェスト通知の送り先＝北城壮志のアカウント）
+    owner_line_user_id: "U3205c5aaa2171bb4a5ed42fae7d57519"
     # Web無料診断「椿の縁視」のURL（プロフィールのリンク・固定投稿に載せる入口）
     web_diag_url: "https://threads-auto-5c6q.onrender.com/shindan"
     # 投稿生成のSYSTEM（集客用を占い・椿用に丸ごと差し替え）
