@@ -113,31 +113,33 @@ NURTURE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば
 
 声: 一人称「ウチ」、相手は「あんた」。関西弁・タメ口。毒舌7・愛3の姉御。慰め役やない、本音を言うてくれる味方や。
 
-返信の作り方:
-1. まず椿としての「見立て・本音」をぶつける。相手に賛成できんときは、はっきりそう言う——彼に都合ようとらえすぎてる、それは彼やのうて自分の不安のためやろ、その動きは逆効果や、等。指摘したあとに愛を一滴残す（突き放しっぱなしにはしない）
-2. 生年月日が分かっていれば、内部参考の性質を日常語に翻訳して「彼はこういう男や」と断定的に語る
-3. 最後は会話が続く一言。基本は質問やが、あえて言い切りで止めて相手の反応を待つ回があってもよい
+【最重要】人間がスマホで打つLINEとして書く:
+- 長さは相手に合わせて大きく変える。相手が一言なら、こっちも短く（15〜60字）。しっかりした相談の時だけしっかり返す（〜160字）。毎回同じボリュームで返さない
+- 毎回分析しない。彼の性質を語るのは2〜3回に1回でええ。それ以外の回は、反応・ツッコミ・質問だけで会話を転がす。「ふーん、ほんで？」で終わる回があってもええ
+- ときどき（3回に1回くらい）メッセージを2つに分ける。1つ目は短い反応だけ（「いや待て待て」「あー、それな」「出たわ、それ」）、2つ目で中身。分ける時は「---」だけの行で区切る
+- 文章を整えすぎない。「。」で几帳面に締めんでええ、改行で切ってええ。「ん？」「いや、」「てか」「あのな、」みたいな書き出しも使う。体言止め、言いさし（「〜やけどな」で終わる）もあり
+- 同じ言い回しを繰り返さない。特に「〜なタイプや」を毎回使わない（前の返信で使うてたら別の言い方にする）
+- 絵文字🌙は3回に1回くらいでええ。無い方が自然な時は付けない
 
-AI感を消すために（最重要）:
-- 共感やオウム返しから入らない。「〜やったんやね」「しんどかったやろ」で始まる返信を続けない。共感で受け止めてええのは、相手がほんまに打ちのめされてる時だけ
-- 相手の発言の要約を返さない。ちゃんと読んだことは、返しの中身の鋭さで示す
-- 毎回同じ型にしない。ツッコミで始まる回・断定で始まる回・質問から入る回を混ぜる
-- 「大事」「素敵」「えらい」などの承認を安売りしない。褒めるのは本当にええ動きをした時だけ。そのかわり、その時は全力で褒める
+中身の方針:
+- 椿としての「見立て・本音」をぶつける。賛成できんときは、はっきりそう言う——彼に都合ようとらえすぎてる、それは自分の不安のためやろ、その動きは逆効果や、等。指摘のあとに愛を一滴残す
+- 共感やオウム返しから入らない。相手の発言の要約を返さない。共感で受け止めるのは、相手がほんまに打ちのめされてる時だけ
+- 「大事」「素敵」「えらい」の安売りをしない。褒めるのは本当にええ動きの時だけ、その時は全力で
 - 相手が聞きたそうな答えに寄せない。前に言うた見立てと矛盾させない
+- 締めは質問が基本やが、毎回杓子定規に質問で終えない。言い切りで止めて相手の出方を待つ回も作る
 
-口調の例（この温度感。コピーはしない）:
-「それ、彼のためやのうて、あんたの不安を消すためやろ。」
-「待った待った。既読スルーに『忙しいんかな』は、あんたの優しさやのうて逃げやで。」
-「そやろ。ウチ、適当なこと言わんからな。ほんで、そのLINEどっちから送ったん？」
+温度感の例（コピーはしない）:
+「いや待て待て。\n---\n既読スルーに『忙しいんかな』て、それあんたの優しさやのうて逃げやで」
+「ふーん。ほんでそのLINE、どっちから送ったん」
+「それな、彼のためちゃう。あんたの不安消したいだけや」
 
 厳守:
-- 全体で60〜160字。LINEの会話として自然な短さにする
 - 処方箋の核心（いつ・何を・どう動くか）は渡さない。聞かれたら「そこはちゃんと視なあかんとこや」と留める
 - 料金・商品・リンク・会員の話を自分からしない（それは店主が直接やる）
 - 『宿曜』の語・宿の名前・占い専門用語は出さない。「ウチが視たら」でよい
 - 復縁や結果を保証しない。過度に不安を煽らない。病気・健康・金運の断定をしない
 - 危険な行動（突撃・監視・自傷等）だけは毒舌でなく真剣に止める
-- 鑑定の納期を約束しない。絵文字は🌙を0〜1個。出力は返信本文のみ"""
+- 鑑定の納期を約束しない。誤字は書かない。出力は返信本文のみ（説明や注釈は不要）"""
 
 # 生年月日は届いたが状況が分からないときの定型ヒアリング（生成なし・トークン消費ゼロ）
 # 番号はあいさつメッセージ（①②=生年月日）の続き＝③④で揃えている
@@ -220,19 +222,25 @@ def _headers() -> dict:
             "Content-Type": "application/json"}
 
 
+def _split_bubbles(text: str) -> list[str]:
+    """「---」だけの行で吹き出しを分割（最大3つ）。人間らしい複数メッセージ送信用。"""
+    parts = [p.strip() for p in re.split(r"\n\s*---\s*\n", text) if p.strip()]
+    return parts[:3] if parts else [text]
+
+
 def reply_text(reply_token: str, text: str) -> bool:
+    msgs = [{"type": "text", "text": t} for t in _split_bubbles(text)]
     r = requests.post(f"{LINE_API}/message/reply", headers=_headers(),
-                      data=json.dumps({"replyToken": reply_token,
-                                       "messages": [{"type": "text", "text": text}]}),
+                      data=json.dumps({"replyToken": reply_token, "messages": msgs}),
                       timeout=15)
     return r.ok
 
 
 def push_text(user_id: str, text: str) -> bool:
     """replyトークン失効時のフォールバック（月200通の無料枠を消費する点に注意）。"""
+    msgs = [{"type": "text", "text": t} for t in _split_bubbles(text)]
     r = requests.post(f"{LINE_API}/message/push", headers=_headers(),
-                      data=json.dumps({"to": user_id,
-                                       "messages": [{"type": "text", "text": text}]}),
+                      data=json.dumps({"to": user_id, "messages": msgs}),
                       timeout=15)
     return r.ok
 
@@ -297,9 +305,15 @@ def generate_nurture(user: dict, history: list[dict], incoming: str) -> str:
         "椿として返信を1つ書いてください。"
     )
     text = complete(NURTURE_SYSTEM, prompt, model=LINE_BOT_MODEL, max_tokens=400, temperature=0.9)
-    if any(w in text for w in _JARGON):  # 宿名等が漏れたら一度だけ作り直し、それでも残れば置換
-        print("[line_bot] 専門用語の漏れを検知、作り直し")
-        text = complete(NURTURE_SYSTEM + "\n\n【厳重注意】直前の生成で宿の名前が本文に漏れた。宿名・占術名は絶対に書かないこと。",
+    # 作り直しが必要なケース: ①宿名等の漏れ ②長すぎ（200字超は診断長文の判定220字と衝突する）
+    problems = []
+    if any(w in text for w in _JARGON):
+        problems.append("宿の名前・占術名が本文に漏れた。絶対に書かないこと")
+    if len(text.replace("---", "")) > 200:
+        problems.append("長すぎた。どんなに重い相談でも吹き出し合計170字以内に収めること")
+    if problems:
+        print(f"[line_bot] 返信を作り直し: {problems}")
+        text = complete(NURTURE_SYSTEM + "\n\n【厳重注意】" + "。".join(problems) + "。",
                         prompt, model=LINE_BOT_MODEL, max_tokens=400, temperature=0.9)
         if any(w in text for w in _JARGON):
             text = _strip_jargon(text)
@@ -321,7 +335,8 @@ def _send(user_id: str, reply_token: str, text: str) -> bool:
         except requests.RequestException as e:
             print(f"[line_bot] push送信失敗: {e}")
     if ok:
-        store.add_line_chat(user_id, "assistant", text)
+        # 履歴には吹き出し区切り（---）を除いた本文で残す
+        store.add_line_chat(user_id, "assistant", "\n".join(_split_bubbles(text)))
     return ok
 
 
