@@ -396,8 +396,12 @@ if view == VIEW_CONSULT:
                 st.error("相談内容を貼ってください。")
             else:
                 try:
-                    hist_str = "\n".join(
-                        f"- 相談: {h['worry']} / 返信: {str(h['reading'])[:60]}…" for h in chist[:3]
+                    # 直近5件を「古い順・フル文脈」で渡す（60字要約だと過去の指示が見えず
+                    # 矛盾や事実の取り違えが起きた実害があった）
+                    hist_str = "\n\n".join(
+                        f"◆{str(h['created_at'])[:10]} 会員の相談: {str(h['worry'])[:300]}\n"
+                        f"　椿の返信: {str(h['reading'])[:800]}"
+                        for h in reversed(chist[:5])
                     )
                     with st.spinner("椿が視てます…"):
                         res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str,
