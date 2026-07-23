@@ -383,6 +383,17 @@ if view == VIEW_CONSULT:
         chist = [h for h in _all_hist if h["month"] != "個別鑑定書"][:5]
         if kantei_text:
             st.caption("📎 個別鑑定書 登録済み — 返信はこの鑑定の内容（性質の読み・時期・処方箋）と矛盾しない形で生成されます")
+        # 会員のLINE（生年月日一致で自動リンク）から、直近のメッセージ＝画像の読み取り内容も参照する
+        _line_recent = ""
+        try:
+            _lu = store.find_line_user_by_births(cmem["me_birth"], cmem["him_birth"])
+            if _lu:
+                _lmsgs = [h for h in store.recent_line_chats(_lu["user_id"], limit=30) if h["role"] == "user"][-8:]
+                if _lmsgs:
+                    _line_recent = "\n".join(f"・{str(h['created_at'])[:16]} {str(h['text'])[:250]}" for h in _lmsgs)
+                    st.caption("📱 LINEを自動リンク済み — 会員から最近LINEに届いた内容（画像の読み取り含む）も返信生成が参照します")
+        except Exception:
+            pass
         if chist:
             with st.expander(f"📜 この子との直近のやりとり（{len(chist)}件）"):
                 for h in chist:
@@ -403,6 +414,9 @@ if view == VIEW_CONSULT:
                         f"　椿の返信: {str(h['reading'])[:800]}"
                         for h in reversed(chist[:5])
                     )
+                    if _line_recent:
+                        hist_str += ("\n\n◆会員から最近LINEに届いたメッセージ（新しい順ではなく時系列。"
+                                     "[画像を送付]は画像の自動読み取り内容）:\n" + _line_recent)
                     with st.spinner("椿が視てます…"):
                         res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str,
                                                          kantei=kantei_text)

@@ -24,6 +24,25 @@ def client() -> Anthropic:
     return _client
 
 
+def complete_vision(system: str, user: str, image_b64: str, media_type: str, *,
+                    model: str | None = None, max_tokens: int = 1500) -> str:
+    """画像つきの生成（会員から届くスクリーンショットの読み取り等）。"""
+    model = model or DEFAULT_MODEL
+    kwargs: dict = dict(
+        model=model,
+        max_tokens=max_tokens,
+        system=system,
+        messages=[{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_b64}},
+            {"type": "text", "text": user},
+        ]}],
+    )
+    if model.startswith(_THINKING_ON) and max_tokens < 4000:
+        kwargs["max_tokens"] = 4000
+    msg = client().messages.create(**kwargs)
+    return "".join(block.text for block in msg.content if block.type == "text").strip()
+
+
 def complete(system: str, user: str, *, model: str | None = None, max_tokens: int = 1024, temperature: float = 1.0) -> str:
     model = model or DEFAULT_MODEL
     kwargs: dict = dict(

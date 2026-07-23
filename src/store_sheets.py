@@ -419,6 +419,15 @@ def list_web_diag(limit: int = 1000) -> list[dict]:
 
 
 # ---- LINEボット（ユーザー・会話履歴） ----
+def find_line_user_by_births(me_birth: str, him_birth: str) -> dict | None:
+    """生年月日2つの一致でLINEユーザーを探す（👥会員とLINEの自動リンク用）。"""
+    me, him = str(me_birth).strip(), str(him_birth).strip()
+    for r in _records("line_users"):
+        if str(r.get("me_birth", "")).strip() == me and str(r.get("him_birth", "")).strip() == him:
+            return r
+    return None
+
+
 def get_line_user(user_id: str) -> dict | None:
     for r in _records("line_users"):
         if r.get("user_id") == user_id:

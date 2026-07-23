@@ -28,7 +28,7 @@ from . import store, web_diag
 from .config import active_profile, env
 from .diagnosis import (SHUKU_27, _Z2H, find_birthdates, generate_reading,
                         honmei_shuku, parse_free_input)
-from .llm import complete
+from .llm import complete, complete_vision
 
 LINE_API = "https://api.line.me/v2/bot"
 
@@ -162,6 +162,19 @@ IMAGE_REPLY = (
     "ごめんな、いま相談がぎょうさん来てて、無料の相談では画像は見ぃひんルールにしてるんよ。\n"
     "そのぶん文字はちゃんと視るから、状況を言葉で教えてくれるか🌙"
 )
+# 有料会員（👥会員に登録済み）が画像を送ってきたときの受領返信
+MEMBER_IMAGE_ACK = "画像、受け取ったで。ちゃんと見るから、ちょっと待っててな🌙"
+
+# 会員から届いた画像（LINEトークのスクショ等）を相談対応用のテキストに起こすプロンプト
+IMAGE_READ_SYSTEM = """恋愛相談の月額会員から届いた画像を、相談対応に使えるように文字へ起こす係。
+画像は多くの場合、彼とのLINEトーク画面のスクリーンショット。
+
+書き起こすこと:
+- 誰の発言か（会員側/相手側）を区別して、メッセージを順番にそのまま書き起こす
+- 見えるなら日時・既読/未読・スタンプや写真の有無も
+- トーク画面以外の画像なら、何の画像で何が写っているかを具体的に
+
+厳守: 解釈や助言は書かない（読み取った事実だけ）。個人名はそのまま書いてよい。出力は書き起こしのみ"""
 
 # ---- Web診断（椿の縁視）の鑑定番号 ----
 # /shindan で発行した4桁番号（3000〜9999）を合言葉として受け付ける。
@@ -380,7 +393,11 @@ def handle_event(ev: dict) -> None:
         user = store.get_line_user(user_id) or {"user_id": user_id}
 
     if msg.get("type") == "image":
-        _send(user_id, reply_token, IMAGE_REPLY)
+        if _is_member(user):
+            # 有料会員の画像は読み取って履歴に残す（💬会員相談の返信生成が参照する）
+            _handle_member_image(user_id, reply_token, msg.get("id", ""))
+        else:
+            _send(user_id, reply_token, IMAGE_REPLY)
         return
     if msg.get("type") != "text":
         return  # スタンプ等は無視（既読の代わりに次のテキストで拾う）
@@ -487,6 +504,50 @@ def _try_free_diagnosis(user_id: str, user: dict, incoming: str, snd, history: l
         return True
     snd(res["reading"])
     return True
+
+
+def _is_member(user: dict) -> bool:
+    """有料会員か。LINEに保存済みの生年月日2つが👥会員の登録と一致したら会員とみなす
+    （新しい紐付け作業なしで判定できる。会員登録はダッシュボードの👥会員で行う）。"""
+    me_b = (user.get("me_birth") or "").strip()
+    him_b = (user.get("him_birth") or "").strip()
+    if not (me_b and him_b):
+        return False
+    try:
+        return any(str(m["me_birth"]).strip() == me_b and str(m["him_birth"]).strip() == him_b
+                   for m in store.list_members())
+    except Exception as e:
+        print(f"[line_bot] 会員判定失敗: {e}")
+        return False
+
+
+def fetch_message_content(message_id: str) -> tuple[bytes, str]:
+    """LINEに届いた画像等のバイナリを取得する。(bytes, content_type) を返す。"""
+    r = requests.get(f"https://api-data.line.me/v2/bot/message/{message_id}/content",
+                     headers={"Authorization": f"Bearer {env('LINE_CHANNEL_ACCESS_TOKEN', required=True)}"},
+                     timeout=30)
+    r.raise_for_status()
+    return r.content, r.headers.get("Content-Type", "image/jpeg")
+
+
+def _handle_member_image(user_id: str, reply_token: str, message_id: str) -> None:
+    """会員から届いた画像を読み取り、内容を履歴に保存して受領を返す。
+    読み取り結果は💬会員相談の返信生成が「最近のLINE」として参照する。"""
+    note = "[画像を送付]"
+    try:
+        data, mime = fetch_message_content(message_id)
+        if len(data) <= 4_500_000:  # APIの画像上限（5MB）内のみ読み取り
+            b64 = base64.b64encode(data).decode()
+            text = complete_vision(IMAGE_READ_SYSTEM, "この画像を書き起こしてください。",
+                                   b64, mime.split(";")[0].strip())
+            note = f"[画像を送付] 読み取り内容:\n{text[:1800]}"
+        else:
+            note = "[画像を送付（サイズが大きく自動読み取り不可。LINEアプリで直接確認）]"
+    except Exception as e:
+        print(f"[line_bot] 会員画像の読み取り失敗: {e}")
+        note = "[画像を送付（自動読み取り失敗。LINEアプリで直接確認）]"
+    store.add_line_chat(user_id, "user", note)
+    _send(user_id, reply_token, MEMBER_IMAGE_ACK)
 
 
 def _is_minor(user: dict) -> bool:
