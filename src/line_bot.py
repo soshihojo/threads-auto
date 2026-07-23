@@ -393,11 +393,12 @@ def handle_event(ev: dict) -> None:
         user = store.get_line_user(user_id) or {"user_id": user_id}
 
     if msg.get("type") == "image":
-        if _is_member(user):
-            # 有料会員の画像は読み取って履歴に残す（💬会員相談の返信生成が参照する）
-            _handle_member_image(user_id, reply_token, msg.get("id", ""))
-        else:
+        # 有料会員の画像は読み取って履歴に残す（💬会員相談の返信生成が参照する）。
+        # 判定不能（unknown）は会員側に倒す＝断り文で有料客を傷つけない
+        if _member_status(user) == "free":
             _send(user_id, reply_token, IMAGE_REPLY)
+        else:
+            _handle_member_image(user_id, reply_token, msg.get("id", ""))
         return
     if msg.get("type") != "text":
         return  # スタンプ等は無視（既読の代わりに次のテキストで拾う）
@@ -506,19 +507,27 @@ def _try_free_diagnosis(user_id: str, user: dict, incoming: str, snd, history: l
     return True
 
 
-def _is_member(user: dict) -> bool:
-    """有料会員か。LINEに保存済みの生年月日2つが👥会員の登録と一致したら会員とみなす
-    （新しい紐付け作業なしで判定できる。会員登録はダッシュボードの👥会員で行う）。"""
+def _member_status(user: dict) -> str:
+    """有料会員かの判定: "member" / "free" / "unknown"（照合に失敗）。
+    LINEに保存済みの生年月日2つが👥会員の登録と一致したら会員とみなす（紐付け作業不要）。
+    unknownの扱いは呼び出し側で「会員側に倒す」こと（一時的なSheets障害で
+    有料会員に断り文を送った実害があったため、疑わしきは会員扱い）。"""
     me_b = (user.get("me_birth") or "").strip()
     him_b = (user.get("him_birth") or "").strip()
     if not (me_b and him_b):
-        return False
-    try:
-        return any(str(m["me_birth"]).strip() == me_b and str(m["him_birth"]).strip() == him_b
-                   for m in store.list_members())
-    except Exception as e:
-        print(f"[line_bot] 会員判定失敗: {e}")
-        return False
+        return "free"
+    for attempt in (1, 2):
+        try:
+            members = store.list_members()
+            return "member" if any(
+                str(m["me_birth"]).strip() == me_b and str(m["him_birth"]).strip() == him_b
+                for m in members) else "free"
+        except Exception as e:
+            import traceback
+            print(f"[line_bot] 会員判定失敗（{attempt}/2）: {e}\n{traceback.format_exc()}")
+            if attempt == 1:
+                time.sleep(3)
+    return "unknown"
 
 
 def fetch_message_content(message_id: str) -> tuple[bytes, str]:
