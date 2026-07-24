@@ -57,6 +57,7 @@ OFFER_MENU = (
     "あんたと彼のことを、一回限りで深く視る「個別鑑定書」や。\n"
     "“今動くべきか・いつ・どう一言を送るか”まで、あんた専用に視て、鑑定書にまとめて返す\n"
     "→ 今だけ75%OFF 4,950円\n"
+    "（申し込みから数日以内に、PDFの鑑定書で届く）\n"
     "https://1aksbkdokn31q1trp81e.stores.jp/items/685edb3caf1f4a03c43a0aa4\n\n"
     "「実際どんな鑑定が届くん？」て子は、中身と受けた子の感想をここにまとめてあるから、読んでから決めてくれてええで。\n\n"
     "▼お客様の感想\n"
@@ -83,8 +84,50 @@ OFFER_INTRO_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（�
 厳守: 価格・リンク・商品名は書かない（後ろに続くメニューに任せる）。共感・承認の安売りをしない。専門用語・絵文字なし。出力は本文のみ"""
 
 
+# 鑑定書の目次プレビューに載せる章タイトル（商品構成として固定。リードだけ個別化する）
+KANTEI_TOC_TITLES = ["あんたという人", "彼という人", "二人の縁",
+                     "彼の今の本音", "いつ、何を、どう動くか", "やったらあかんこと"]
+
+OFFER_TOC_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿」。有料の個別鑑定書（全8章・約10,000字のPDF）のオファーに載せる「この人専用の目次プレビュー」を書く。
+これまでの相談内容を踏まえて、次の6つの章タイトルそれぞれに、その人の状況に触れた短いリード（15〜28字）を付ける。
+
+出力形式（この6行だけ・この順番・各行「タイトル——リード」）:
+あんたという人——…
+彼という人——…
+二人の縁——…
+彼の今の本音——…
+いつ、何を、どう動くか——…
+やったらあかんこと——…
+
+ルール:
+- 関西弁の椿の声。相談で出た具体（期間・彼の言葉・状況）をリードに織り込んで「自分のための鑑定書」と分からせる
+- 中身の答えは書かない（読みたくなる入口だけ。「〜の正体」「〜をここで視る」のような形）
+- 復縁や結果の保証・煽り・『宿曜』等の専門用語は書かない。出力は6行のみ"""
+
+
+def _offer_toc(transcript: str) -> str:
+    """その人の相談内容に合わせた鑑定書の目次プレビューを組み立てる（失敗時は空＝目次なし）。"""
+    try:
+        raw = complete(OFFER_TOC_SYSTEM,
+                       f"【これまでの会話】\n{transcript}\n\n目次プレビューを書いてください。",
+                       model=LINE_BOT_MODEL, max_tokens=500, temperature=0.8).strip()
+        if any(w in raw for w in _JARGON):
+            raw = _strip_jargon(raw)
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        good = [ln for ln in lines if any(ln.startswith(t) for t in KANTEI_TOC_TITLES)]
+        if len(good) < 4:  # 形式が崩れていたら載せない（オファー自体は送る）
+            return ""
+        return ("あんたの場合の鑑定書、中身はもう組んである👇\n\n"
+                "📜 あんた専用・個別鑑定書（全8章・約10,000字）\n"
+                + "\n".join(f"・{ln}" for ln in good[:6])
+                + "\n（ほか、まえがき・むすびに を含む全8章）\n\n")
+    except Exception as e:
+        print(f"[line_bot] 目次プレビュー生成失敗（目次なしでオファー送付）: {e}")
+        return ""
+
+
 def generate_offer(user: dict, history: list[dict], incoming: str) -> str:
-    """相手の相談内容に合わせた冒頭＋固定メニューでオファー文を組み立てる。"""
+    """相手の相談内容に合わせた冒頭＋専用目次＋固定メニューでオファー文を組み立てる。"""
     transcript = "\n".join(
         f"{'相談者' if h['role'] == 'user' else '椿'}: {h['text'][:80]}" for h in history[-8:]
     )
@@ -97,7 +140,7 @@ def generate_offer(user: dict, history: list[dict], incoming: str) -> str:
     except Exception as e:
         print(f"[line_bot] オファー冒頭の生成失敗、固定文を使用: {e}")
         intro = OFFER_INTRO_FALLBACK
-    return f"{intro}\n\n{OFFER_MENU}"
+    return f"{intro}\n\n{_offer_toc(transcript)}{OFFER_MENU}"
 
 # 購入サイン（＝買う瞬間。AIは売らず、店主がクローズする）
 PURCHASE_WORDS = [
@@ -650,6 +693,12 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
 
 LATE_PREFIX = "遅うなってごめんな、順番に視てたんや。\n\n"
 
+# オファー送付後24時間反応が無い人への、1回だけの声かけ（売り込まない・急かさない）
+OFFER_FOLLOWUP = (
+    "この前渡した話、見てくれたか？\n"
+    "分からんことや引っかかっとることがあったら、遠慮せんと聞いてな。急かす気はないで🌙"
+)
+
 
 def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
     """最後が相談者の発言のまま止まっている会話（bot=onのみ）に自動返信する。
@@ -668,13 +717,22 @@ def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
     for uid, rows in by_user.items():
         rows.sort(key=lambda r: str(r.get("created_at", "")))
         last = rows[-1]
-        if last["role"] != "user":
-            continue
         try:
             t = datetime.fromisoformat(str(last["created_at"]).replace(" ", "T"))
         except ValueError:
             continue
         age = now - t
+        if last["role"] != "user":
+            # 最後がこちらのオファーのまま24〜72時間反応なし → 1回だけ声かけ
+            #（声かけ後は最後の発言がフォロー文に変わるので、二度は送られない）
+            if (_is_offer_text(str(last["text"]))
+                    and timedelta(hours=24) <= age <= timedelta(hours=72)):
+                user = store.get_line_user(uid)
+                if user and (user.get("bot") or "on").strip() == "hold":
+                    print(f"[sweep] オファー24hフォロー: {uid}")
+                    _send(uid, "", OFFER_FOLLOWUP)
+                    replied += 1
+            continue
         if age < timedelta(minutes=min_age_min) or age > timedelta(hours=max_age_hours):
             continue
         user = store.get_line_user(uid)
