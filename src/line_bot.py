@@ -278,10 +278,20 @@ def _headers() -> dict:
             "Content-Type": "application/json"}
 
 
+def _plain_text(text: str) -> str:
+    """LINE送信前の最終ガード：Markdown記号・アスタリスクを完全に除去する
+    （LINEは装飾を解釈しないため、記号がそのまま見えてしまう）。"""
+    text = text.replace("**", "").replace("__", "")
+    text = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", text)      # 見出し記号
+    text = re.sub(r"(?m)^\s{0,3}[*\-]\s+", "・", text)     # 箇条書き記号→・
+    return text.replace("*", "").replace("＊", "")          # 残ったアスタリスクは全除去
+
+
 def _split_bubbles(text: str) -> list[str]:
     """「---」だけの行で吹き出しを分割（最大3つ）。人間らしい複数メッセージ送信用。"""
-    parts = [p.strip() for p in re.split(r"\n\s*---\s*\n", text) if p.strip()]
-    return parts[:3] if parts else [text]
+    parts = [_plain_text(p).strip() for p in re.split(r"\n\s*---\s*\n", text) if p.strip()]
+    parts = [p for p in parts if p]
+    return parts[:3] if parts else [_plain_text(text)]
 
 
 def reply_text(reply_token: str, text: str) -> bool:
