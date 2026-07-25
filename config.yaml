@@ -35,8 +35,8 @@ profiles:
     owner_line_user_id: "U3205c5aaa2171bb4a5ed42fae7d57519"
     # Web無料診断「椿の縁視」のURL（プロフィールのリンク・固定投稿に載せる入口）
     web_diag_url: "https://threads-auto-5c6q.onrender.com/shindan"
-    # 一問鑑定（499円）の決済リンク（STORES/Stripeで作成後にここへ。空なら文面に差し替えメモが入る）
-    oneq_url: ""
+    # 一問鑑定（199円）の決済リンク（STORES）
+    oneq_url: "https://1aksbkdokn31q1trp81e.stores.jp/items/6a649ff8401c3194f0a7e0eb"
     # 投稿生成のSYSTEM（集客用を占い・椿用に丸ごと差し替え）
     system_prompt: |
       あなたは恋愛・復縁専門の占い師「椿（つばき）」として、Threads向けの日本語投稿を1つだけ作成します。
