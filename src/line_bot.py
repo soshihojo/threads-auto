@@ -269,6 +269,15 @@ def _diag_count(history: list[dict]) -> int:
                and not _is_offer_text(h["text"]))
 
 
+def _offer_already_sent(user_id: str) -> bool:
+    """この人に有料オファーを送った履歴があるか。送信の直前に必ずDBを読み直して判定する。
+    連投（数秒間隔の複数メッセージ）をWebhookが並行処理すると、それぞれが独立に
+    上限判定→オファー送信してしまい、同じ人にオファーが2連続で届いた実バグ（田中麻衣さん）
+    への対策。オファーは自動では一人一回きり。"""
+    history = store.recent_line_chats(user_id, limit=200)
+    return any(h["role"] == "assistant" and _is_offer_text(str(h["text"])) for h in history)
+
+
 # ---------- LINE API ----------
 def verify_signature(body: bytes, signature: str) -> bool:
     secret = env("LINE_CHANNEL_SECRET", required=True)
@@ -676,6 +685,10 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
             return
         # 購入サイン＝買う瞬間。10通の上限を待たず、その場で個別鑑定オファーを自動送付
         #（送付後はhold＝納期・支払い等の続きの質問は店主がLINEアプリから手動で返す）
+        if _offer_already_sent(user_id):
+            # すでにオファー済みなら二度は送らない（続きは店主が手動で）
+            store.upsert_line_user(user_id, bot="hold")
+            return
         if snd(generate_offer(user, history, incoming)):
             store.upsert_line_user(user_id, bot="hold")
         return
@@ -696,6 +709,10 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
     # 無料返信の上限：ナーチャリング返信（全履歴・診断と③④は数えない）が
     # FREE_REPLY_LIMIT通に達していたら有料オファーを送って停止（未成年には送らず会話を続ける）
     if over_limit and allow_offer and not _is_minor(user):
+        if _offer_already_sent(user_id):
+            # すでにオファー済みなら二度は送らない（続きは店主が手動で）
+            store.upsert_line_user(user_id, bot="hold")
+            return
         if snd(generate_offer(user, history, incoming)):
             store.upsert_line_user(user_id, bot="hold")
         return
