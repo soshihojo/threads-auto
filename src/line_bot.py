@@ -290,9 +290,18 @@ def _headers() -> dict:
             "Content-Type": "application/json"}
 
 
+# 生成モデルが稀に吐くシステム由来の異物行（コード断片など）。
+# 実害: 2026-07-25、麻衣さんへの返信末尾に「diff --git a/style.css b/style.css」が
+# 付いたまま送信された（AI感の露呈）。行単位で検知して落とす。
+_ARTIFACT_LINE_RE = re.compile(
+    r"^\s*(diff --git|@@ |\+\+\+ |--- a/|index [0-9a-f]{7,}|```|<\/?[a-z]+[ >]|def |function\s*\(|import )",
+)
+
+
 def _plain_text(text: str) -> str:
-    """LINE送信前の最終ガード：Markdown記号・アスタリスクを完全に除去する
+    """LINE送信前の最終ガード：Markdown記号・アスタリスク・コード風の異物行を完全に除去する
     （LINEは装飾を解釈しないため、記号がそのまま見えてしまう）。"""
+    text = "\n".join(ln for ln in text.splitlines() if not _ARTIFACT_LINE_RE.match(ln))
     text = text.replace("**", "").replace("__", "")
     text = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", text)      # 見出し記号
     text = re.sub(r"(?m)^\s{0,3}[*\-]\s+", "・", text)     # 箇条書き記号→・
