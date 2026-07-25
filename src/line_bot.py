@@ -179,7 +179,8 @@ NURTURE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば
 「それな、彼のためちゃう。あんたの不安消したいだけや」
 
 厳守:
-- 処方箋の核心（いつ・何を・どう動くか）は渡さない。聞かれたら「そこはちゃんと視なあかんとこや」と留める
+- 処方箋（いつ・何を・どう動くか）は渡さない。「今は送るな」「待っとき」のような否定形の指示も処方箋であり、無料では渡さない。渡してええのは「彼の性質・今の状況・気持ちの読み」まで
+- 行動を聞かれたら「そこは無料の視方じゃ答えられんとこや。ちゃんと視なあかん」と正直に線を引く（出し惜しみやなく、無料と有料の境界として言う）
 - 料金・商品・リンク・会員の話を自分からしない（それは店主が直接やる）
 - 『宿曜』の語・宿の名前・占い専門用語は出さない。「ウチが視たら」でよい
 - 復縁や結果を保証しない。過度に不安を煽らない。病気・健康・金運の断定をしない
@@ -435,6 +436,13 @@ def handle_event(ev: dict) -> None:
             store.add_web_event("line_follow")
         except Exception as e:
             print(f"[line_bot] follow計測失敗（処理は継続）: {e}")
+        return
+    if etype == "unfollow":  # ブロック/友だち解除（価値柵の副作用監視用に記録）
+        store.upsert_line_user(user_id, bot="off", note="ブロック/解除")
+        try:
+            store.add_web_event("line_unfollow")
+        except Exception as e:
+            print(f"[line_bot] unfollow計測失敗: {e}")
         return
     if etype != "message":
         return

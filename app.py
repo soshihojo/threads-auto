@@ -103,8 +103,8 @@ except Exception:
 
 # st.tabsは全タブの中身を毎回描画する（遅い・操作後に先頭タブへ戻る）ため、
 # 選んだ画面だけを描画する完全切り替え式にする。選択はセッションに保持される。
-VIEW_GEN, VIEW_REPLIES, VIEW_DIAG, VIEW_CONSULT, VIEW_MEMBERS = VIEWS = [
-    "✍️ 承認待ちの候補", "↩️ コメント返信", "🔮 無料診断", "💬 会員相談", "👥 会員"]
+VIEW_GEN, VIEW_REPLIES, VIEW_DIAG, VIEW_ONEQ, VIEW_CONSULT, VIEW_MEMBERS = VIEWS = [
+    "✍️ 承認待ちの候補", "↩️ コメント返信", "🔮 無料診断", "💴 一問鑑定", "💬 会員相談", "👥 会員"]
 view = st.radio("画面", VIEWS, horizontal=True, key="view", label_visibility="collapsed")
 st.divider()
 
@@ -360,6 +360,54 @@ if view == VIEW_DIAG:
         # keyを鑑定文の内容から作る＝古い表示が新しい結果を上書きする事故を構造的に防ぐ
         st.text_area("鑑定文（コピーして相談者に送れます）", value=res["reading"], height=320,
                      key=f"diag_out_{abs(hash(res['reading'])) % 10**8}")
+
+
+# ---------------- 一問鑑定（499円・手動送付のAI支援） ----------------
+if view == VIEW_ONEQ:
+    st.caption("499円の一問鑑定はボットは自動で売りません。ここで文面を作り、LINE公式アプリからあなたが手動で送ります。"
+               "使いどころ：購入サインが出た人・4,950円のオファーに反応が無い人・「聞きたいことが一つだけありそう」な人。")
+    if not (profile.get("oneq_url") or "").strip():
+        st.warning("⚠️ 決済リンク（oneq_url）が未設定です。STORES等で499円商品を作り、config.yaml の oneq_url に貼ってください。"
+                   "それまで文面には差し替えメモが入ります。")
+
+    st.subheader("① オファー文を作る（案内を送るとき）")
+    oq_conv = st.text_area("その人とのやりとりを貼り付け（直近だけでOK）", key="oq_conv", height=160,
+                           placeholder="例：\n相手: 彼と3ヶ月音信不通で…\n椿: 彼は追われると引くタイプや…\n相手: いつ動いたらいいですか？")
+    if st.button("💴 オファー文を生成", type="primary", key="oq_offer_run"):
+        if not oq_conv.strip():
+            st.error("やりとりを貼ってください。")
+        else:
+            try:
+                with st.spinner("作成中…"):
+                    st.session_state["oq_offer"] = diagnosis.generate_oneq_offer(oq_conv)
+            except Exception as e:
+                st.error(f"生成に失敗しました（{e}）")
+    if st.session_state.get("oq_offer"):
+        st.text_area("オファー文（コピーしてLINEで送る）", value=st.session_state["oq_offer"], height=260,
+                     key=f"oq_offer_out_{abs(hash(st.session_state['oq_offer'])) % 10**8}")
+
+    st.divider()
+    st.subheader("② 納品テキストを作る（購入されたら）")
+    st.caption("生年月日2つ（相談者→彼の順）と「一問」を含めて貼れば自動で読み取ります。回答は“直近の一手”に全力・"
+               "鑑定書との区分と499円充当・感想のお願いまで入ります。")
+    oq_q = st.text_area("一問＋生年月日＋経緯を貼り付け", key="oq_q", height=160,
+                        placeholder="例：\n私 1992年5月3日／彼 1990年11月21日\n一問：明日、私からLINEを送ってもいいですか？\n経緯：2週間前に喧嘩して私が「もういい」と言ってから既読スルー…")
+    if st.button("📜 納品テキストを生成", type="primary", key="oq_ans_run"):
+        p = diagnosis.parse_free_input(oq_q)
+        if not p["me"] or not p["him"]:
+            st.error("生年月日が2つ見つかりませんでした（相談者→彼の順で含めてください）。")
+        elif not oq_q.strip():
+            st.error("内容を貼ってください。")
+        else:
+            try:
+                with st.spinner("椿が視てます…"):
+                    res = diagnosis.generate_oneq_answer(p["me"], p["him"], oq_q, oq_q)
+                st.session_state["oq_ans"] = res["answer"]
+            except Exception as e:
+                st.error(f"生成に失敗しました（{e}）")
+    if st.session_state.get("oq_ans"):
+        st.text_area("納品テキスト（コピーしてLINEで送る）", value=st.session_state["oq_ans"], height=340,
+                     key=f"oq_ans_out_{abs(hash(st.session_state['oq_ans'])) % 10**8}")
 
 
 # ---------------- 会員相談（相談し放題の返信生成＋履歴） ----------------
