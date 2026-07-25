@@ -26,8 +26,9 @@ from datetime import datetime
 
 from . import store, web_diag
 from .config import active_profile, env
-from .diagnosis import (SHUKU_27, _Z2H, find_birthdates, generate_reading,
-                        honmei_shuku, parse_free_input)
+from .diagnosis import (ONEQ_KOTEI, SHUKU_27, _Z2H, find_birthdates,
+                        generate_oneq_offer, generate_reading, honmei_shuku,
+                        parse_free_input)
 from .llm import complete, complete_vision
 
 LINE_API = "https://api.line.me/v2/bot"
@@ -128,20 +129,18 @@ def _offer_toc(transcript: str) -> str:
 
 
 def generate_offer(user: dict, history: list[dict], incoming: str) -> str:
-    """相手の相談内容に合わせた冒頭＋専用目次＋固定メニューでオファー文を組み立てる。"""
+    """フロントの自動オファー＝一問鑑定199円（★2026-07-25改定）。
+    本鑑定（3,180円）はここでは出さない。一問の納品文とその後のフォローで初めて案内する。
+    （OFFER_MENU/_offer_toc/OFFER_INTRO_SYSTEMは本鑑定を手動で出す時のために温存）"""
     transcript = "\n".join(
         f"{'相談者' if h['role'] == 'user' else '椿'}: {h['text'][:80]}" for h in history[-8:]
     )
     try:
-        intro = complete(
-            OFFER_INTRO_SYSTEM,
-            f"【これまでの会話】\n{transcript}\n【いま届いたメッセージ】{incoming}\n\n冒頭の一言を書いてください。",
-            model=LINE_BOT_MODEL, max_tokens=300, temperature=0.9,
-        ).strip()
+        return generate_oneq_offer(transcript)
     except Exception as e:
-        print(f"[line_bot] オファー冒頭の生成失敗、固定文を使用: {e}")
-        intro = OFFER_INTRO_FALLBACK
-    return f"{intro}\n\n{_offer_toc(transcript)}{OFFER_MENU}"
+        print(f"[line_bot] 一問オファーの生成失敗、固定文を使用: {e}")
+        url = (active_profile().get("oneq_url") or "").strip() or "（199円の決済リンク）"
+        return f"{OFFER_INTRO_FALLBACK}\n\n{ONEQ_KOTEI.format(url=url)}"
 
 # 購入サイン（＝買う瞬間。検知したら自動オファー→hold）
 # 「いつ動」は「いつ動けば/いつ動いたら/いつ動くのが」等の言い回し揺れをまとめて拾う
