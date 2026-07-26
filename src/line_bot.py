@@ -814,7 +814,11 @@ def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
 
 def _notify_owner_of_holds(waiting: list[tuple[str, str, int]]) -> None:
     """手動対応待ち（hold・1時間以上未返信）をオーナーのLINEへダイジェスト通知する。
-    同じ顔ぶれのままなら再通知しない（対象が変わった時だけ届く＝push枠の節約）。"""
+    同じ顔ぶれのままなら再通知しない（対象が変わった時だけ届く＝push枠の節約）。
+
+    ★2026-07-26 ユーザー指示でLINE通知は停止（ダッシュボードの📥バナーで確認する運用）。
+    再開したいときは下の early return を外す。"""
+    return  # LINE通知オフ（バナーのみで運用）
     owner = (active_profile().get("owner_line_user_id") or "").strip()
     if not owner or not waiting:
         return
