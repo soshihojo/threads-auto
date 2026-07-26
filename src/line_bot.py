@@ -299,15 +299,28 @@ _ARTIFACT_LINE_RE = re.compile(
     r"^\s*(diff --git|@@ |\+\+\+ |--- a/|index [0-9a-f]{7,}|```|<\/?[a-z]+[ >]|def |function\s*\(|import )",
 )
 
+# 文の途中に紛れ込むシステム由来の英単語（プロンプトの語彙が漏れる事故）。
+# 実害: 2026-07-26、倉西さんへの返信に「meta質問と行動、迷いになってる部分あるか？」と
+# metaが混入した。椿の返信は関西弁の日本語だけのはずで、これらの英単語は出てはいけない。
+# 前後がASCII英字でない時だけ（＝日本語や文頭文末・空白に接する時だけ）落とす＝URLや
+# 長い英単語の一部は壊さない。
+_META_LEAK_RE = re.compile(
+    r"(?i)(?<![A-Za-z])(?:meta|system|assistant|prompt|StructuredOutput|"
+    r"tool_call|tool_use|markdown|role:|<\|[a-z_]*\|>)(?![A-Za-z])"
+)
+
 
 def _plain_text(text: str) -> str:
-    """LINE送信前の最終ガード：Markdown記号・アスタリスク・コード風の異物行を完全に除去する
-    （LINEは装飾を解釈しないため、記号がそのまま見えてしまう）。"""
+    """LINE送信前の最終ガード：Markdown記号・アスタリスク・コード風の異物・
+    システム由来の英単語（meta等）を完全に除去する
+    （LINEは装飾を解釈しないため、記号や異物がそのまま見えてしまう）。"""
     text = "\n".join(ln for ln in text.splitlines() if not _ARTIFACT_LINE_RE.match(ln))
+    text = _META_LEAK_RE.sub("", text)                     # 文中に紛れたmeta等を除去
     text = text.replace("**", "").replace("__", "")
     text = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", text)      # 見出し記号
     text = re.sub(r"(?m)^\s{0,3}[*\-]\s+", "・", text)     # 箇条書き記号→・
-    return text.replace("*", "").replace("＊", "")          # 残ったアスタリスクは全除去
+    text = text.replace("*", "").replace("＊", "")          # 残ったアスタリスクは全除去
+    return re.sub(r"[ \t]{2,}", " ", text)                 # 除去で生じた連続スペースを詰める
 
 
 def _split_bubbles(text: str) -> list[str]:
@@ -400,12 +413,16 @@ def generate_nurture(user: dict, history: list[dict], incoming: str) -> str:
         problems.append("宿の名前・占術名が本文に漏れた。絶対に書かないこと")
     if len(text.replace("---", "")) > 200:
         problems.append("長すぎた。どんなに重い相談でも吹き出し合計170字以内に収めること")
+    if _META_LEAK_RE.search(text):
+        problems.append("meta・system等の英単語やシステム由来の文字列が混入した。"
+                        "椿の返信は関西弁の日本語だけで書き、英単語やコード片を一切混ぜないこと")
     if problems:
         print(f"[line_bot] 返信を作り直し: {problems}")
         text = complete(NURTURE_SYSTEM + "\n\n【厳重注意】" + "。".join(problems) + "。",
                         prompt, model=LINE_BOT_MODEL, max_tokens=400, temperature=0.9)
         if any(w in text for w in _JARGON):
             text = _strip_jargon(text)
+        text = _META_LEAK_RE.sub("", text)  # 作り直しでも残ったら最終除去
     return text
 
 
