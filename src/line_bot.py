@@ -772,6 +772,7 @@ def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
             # 最後がこちらのオファーのまま24〜72時間反応なし → 1回だけ声かけ
             #（声かけ後は最後の発言がフォロー文に変わるので、二度は送られない）
             if (_is_offer_text(str(last["text"]))
+                    and "これで最後" not in str(last["text"])  # 「案内はこれで最後」と書いた再オファーには追いフォローしない
                     and timedelta(hours=24) <= age <= timedelta(hours=72)):
                 user = store.get_line_user(uid)
                 if user and (user.get("bot") or "on").strip() == "hold":
