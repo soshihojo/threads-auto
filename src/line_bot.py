@@ -471,7 +471,10 @@ def handle_event(ev: dict) -> None:
         return
 
     if etype == "follow":  # 友だち追加（挨拶はLINE側のあいさつメッセージが送る）
-        store.upsert_line_user(user_id, display_name=get_display_name(user_id))
+        # bot="on"で必ず復帰させる。ブロック→再追加した人はunfollowでbot="off"に
+        # なったままで、followが表示名しか更新せず、再追加後のメッセージが自動返信
+        # されない実害があった（yumichin・2026-07-28）。再追加＝仕切り直しなのでonに戻す
+        store.upsert_line_user(user_id, display_name=get_display_name(user_id), bot="on")
         try:  # 実際の友だち追加数をファネル計測に記録（ボタン押下でなく本当の追加）
             store.add_web_event("line_follow")
         except Exception as e:
