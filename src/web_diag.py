@@ -65,6 +65,52 @@ def en_type(me_birth: str, him_birth: str) -> dict:
     return {**EN_TYPES[-1][1], "distance": dist}
 
 
+# ---------------- 単体の「恋愛タイプ」バッジ（シェア用・本人の生年月日だけで決まる） ----------------
+# 悩みを一切出さない“自己紹介バッジ”。MBTI/動物占いのように貼っても恥ずかしくない設計。
+# 本人の本命宿(27種)を12タイプに決定的にマッピングする（同じ生年月日なら必ず同じタイプ）。
+LOVE_TYPES = {
+    "tsukushi_ookami": {"name": "尽くし過ぎ狼", "yomi": "つくしすぎおおかみ", "catch": "好きになったら一直線",
+        "line": "惚れたら一直線。健気なんは長所やけど、その全力さ、相手にはちょっと重いで😌"},
+    "tsundere": {"name": "ツンデレ女王", "yomi": "つんでれじょおう", "catch": "好きほど、素っ気ない",
+        "line": "好きな相手ほどキツう当たってまう。それ、向こうには『嫌われてる』としか伝わってへんで。"},
+    "seibo": {"name": "尽くし系聖母", "yomi": "つくしけいせいぼ", "catch": "与えて、つい甘やかす",
+        "line": "尽くすんが愛や思てるやろ。せやからあんた、都合よう扱われがちなんや。気づいてる？"},
+    "neko": {"name": "きまぐれ猫", "yomi": "きまぐれねこ", "catch": "追うと逃げ、放つと拗ねる",
+        "line": "追われたら冷める、放っとかれたら寂しい。あんた自分でもめんどくさい自覚、あるやろ😏"},
+    "romantic": {"name": "ロマンチスト脚本家", "yomi": "ろまんちすときゃくほんか", "catch": "頭の中で恋を完成させる",
+        "line": "妄想の中で相手はいつも完璧。ほんで現実の相手に勝手にがっかりする。あるあるやろ。"},
+    "hunter": {"name": "小悪魔ハンター", "yomi": "こあくまはんたー", "catch": "惚れさせるまでが好き",
+        "line": "落とすまでは全力、落とした途端に興味半減。ほんまは追われるより、追いたい人や。"},
+    "chototsu": {"name": "猪突猛進タイプ", "yomi": "ちょとつもうしんたいぷ", "catch": "好き＝即・行動",
+        "line": "好きになったら止まられへん。勢いは武器やけど、その速さで何回か引かれてきたやろ😅"},
+    "bannin": {"name": "慎重すぎる番人", "yomi": "しんちょうすぎるばんにん", "catch": "好きでも、動けん",
+        "line": "石橋叩きすぎて渡らへんタイプ。慎重なんはええけど、それで何回チャンス見逃してきた？"},
+    "gaman": {"name": "我慢の限界タイプ", "yomi": "がまんのげんかいたいぷ", "catch": "溜めて、溜めて、爆発",
+        "line": "言いたいこと飲み込んで、限界で一気に爆発する癖。相手はいっつも『急に⁉︎』ってなってるで。"},
+    "kamatte": {"name": "かまってちゃん", "yomi": "かまってちゃん", "catch": "愛は、確かめ続けたい",
+        "line": "好き？ねえ好き？を確かめたい人。愛情深いんやけど、その確認、相手にはちょい重い時あるで。"},
+    "joou": {"name": "孤高の女王", "yomi": "ここうのじょおう", "catch": "弱み、絶対見せへん",
+        "line": "プライド高うて、自分から折れられへん。強がってる間に、ええ縁いくつか逃してへんか？"},
+    "hime": {"name": "受け身の姫", "yomi": "うけみのひめ", "catch": "好きって言われるまで動かん",
+        "line": "自分からは絶対いかへん、待つ女。奥ゆかしいけど、待ちすぎて他の子に取られる典型やで。"},
+}
+# 27宿 → 12タイプ（性質メモがある宿は寄せて、残りは重複なく散らして割当）
+_LOVE_ASSIGN = {
+    "昴宿": "seibo", "畢宿": "tsukushi_ookami", "觜宿": "romantic", "参宿": "chototsu",
+    "井宿": "tsundere", "鬼宿": "neko", "柳宿": "hunter", "星宿": "bannin", "張宿": "joou",
+    "翼宿": "hunter", "軫宿": "romantic", "角宿": "kamatte", "亢宿": "chototsu", "氐宿": "bannin",
+    "房宿": "seibo", "心宿": "gaman", "尾宿": "tsundere", "箕宿": "neko", "斗宿": "gaman",
+    "女宿": "hime", "虚宿": "neko", "危宿": "romantic", "室宿": "joou", "壁宿": "bannin",
+    "奎宿": "kamatte", "婁宿": "hime", "胃宿": "tsukushi_ookami",
+}
+
+
+def love_type(me_birth: str) -> dict:
+    """本人の生年月日だけで決まる『恋愛タイプ』を返す（シェア用バッジ。悩みは出さない）。"""
+    key = _LOVE_ASSIGN.get(honmei_shuku(me_birth), "tsukushi_ookami")
+    return {"key": key, **LOVE_TYPES[key]}
+
+
 def _issue_code() -> str:
     """未使用の4桁鑑定番号を発行する（3000〜9999＝生年月日の年と紛れない帯）。"""
     for _ in range(30):
@@ -83,6 +129,7 @@ def submit(data: dict) -> dict:
     status = str(data.get("status", "")).strip()[:30]
     period = str(data.get("period", "")).strip()[:30]
     t = en_type(me, him)
+    love = love_type(me)  # 本人だけの恋愛タイプ（シェア用バッジ）
     code = _issue_code()
     store.add_web_diag(code, me, him, status, period, t["name"])
     # 「診断を実行した人数」の計測（vid=訪問者の匿名ID。同じ人の複数回をユニーク化する）
@@ -90,7 +137,7 @@ def submit(data: dict) -> dict:
         store.add_web_event("submit", str(data.get("vid", ""))[:64])
     except Exception as e:
         print(f"[shindan] submit計測失敗（診断は継続）: {e}")
-    return {"ok": True, "code": code, "type": t,
+    return {"ok": True, "code": code, "type": t, "love": love,
             "line_url": active_profile().get("line_url", "")}
 
 
@@ -152,6 +199,23 @@ button:disabled { opacity:.5; }
 .err { color:#e88; font-size:13px; text-align:center; margin-top:10px; min-height:1em; }
 .note { font-size:11.5px; color:#8d8177; text-align:center; margin-top:14px; }
 #result { display:none; }
+/* シェア用バッジ（スクショ映え・悩みは出さない自己紹介カード） */
+.badge { border:1px solid #d9a441; border-radius:16px; padding:30px 22px 26px; text-align:center;
+  background:radial-gradient(120% 90% at 50% 0%, #33232b 0%, #1c1318 70%); margin-bottom:14px; position:relative; overflow:hidden; }
+.badge .btag { font-size:11px; letter-spacing:.42em; color:#d9a441; }
+.badge .blbl { font-size:12px; letter-spacing:.3em; color:#cdbfae; margin-top:16px; }
+.badge .bname { font-size:33px; font-weight:600; letter-spacing:.1em; margin:8px 0 2px; color:#fff; line-height:1.3; }
+.badge .byomi { font-size:10.5px; letter-spacing:.35em; color:#8d8177; }
+.badge .bcatch { font-size:14px; color:#d9a441; margin:12px 0 14px; }
+.badge .bline { font-size:14px; text-align:left; color:#efe6da; line-height:1.95; }
+.badge .bsig { font-size:11px; letter-spacing:.3em; color:#8d8177; text-align:right; margin-top:12px; }
+.sharelead { text-align:center; font-size:13.5px; color:#cdbfae; margin:0 0 10px; }
+.share { display:flex; gap:8px; margin-bottom:26px; }
+.share button { flex:1 1 0; padding:12px 4px; margin:0; font-size:13px; letter-spacing:.05em;
+  background:#241a20; color:#efe6da; border:1px solid #443037; border-radius:9px; }
+.share button.x { background:#111; border-color:#333; }
+.share button.th { background:#101010; border-color:#333; }
+.share .done { color:#06C755; }
 .card { border:1px solid #b08d3e; border-radius:12px; padding:26px 20px; text-align:center;
   background:linear-gradient(160deg,#241a20,#1c1318); margin-bottom:22px; }
 .card .lbl { font-size:11px; letter-spacing:.5em; color:#b08d3e; }
@@ -193,6 +257,22 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
 </form>
 
 <section id="result">
+  <div class="badge" id="badge">
+    <div class="btag">#椿の縁視</div>
+    <div class="blbl">あんたの恋愛タイプ</div>
+    <div class="bname" id="bname"></div>
+    <div class="byomi" id="byomi"></div>
+    <div class="bcatch" id="bcatch"></div>
+    <div class="bline" id="bline"></div>
+    <div class="bsig">—— 椿</div>
+  </div>
+  <p class="sharelead">当たってたら、友達にも当てて回してみ👇</p>
+  <div class="share">
+    <button type="button" class="x" id="shX">Xでシェア</button>
+    <button type="button" class="th" id="shT">スレッズ</button>
+    <button type="button" id="shC">リンクをコピー</button>
+  </div>
+
   <div class="card">
     <div class="lbl">二人の縁</div>
     <h2 id="tname"></h2>
@@ -219,6 +299,25 @@ const VID=(()=>{try{
 function track(e){ try{ navigator.sendBeacon("/shindan/track?e="+e+"&vid="+encodeURIComponent(VID)); }catch(_){} }
 track("view");
 document.getElementById("lbtn").addEventListener("click", ()=>track("line_click"));
+// 恋愛タイプ・バッジのシェア導線（友達が自分のタイプを視に来る＝新規流入の複利ループ）
+function setupShare(name){
+  const url = location.origin + "/shindan";
+  const text = "私の恋愛タイプ、【"+name+"】やった…当たりすぎて笑う😇\nあんたのタイプも30秒で視てみ→ #椿の縁視";
+  const full = text + "\n" + url;
+  const X = document.getElementById("shX"), T = document.getElementById("shT"), C = document.getElementById("shC");
+  X.onclick = ()=>{ track("share_x");
+    window.open("https://twitter.com/intent/tweet?text="+encodeURIComponent(text)+"&url="+encodeURIComponent(url),"_blank"); };
+  T.onclick = ()=>{ track("share_threads");
+    window.open("https://www.threads.net/intent/post?text="+encodeURIComponent(full),"_blank"); };
+  C.onclick = async ()=>{ track("share_copy");
+    try{
+      if(navigator.share){ await navigator.share({text, url}); return; }
+      await navigator.clipboard.writeText(full);
+      C.textContent="コピーした！貼ってな"; C.classList.add("done");
+      setTimeout(()=>{ C.textContent="リンクをコピー"; C.classList.remove("done"); }, 2200);
+    }catch(_){}
+  };
+}
 const STATUS = ["音信不通","既読スルー","急に冷められた","別れ話の後","片思いで進展なし","復縁したい","その他・複雑"];
 const PERIOD = ["今日〜昨日（ごく最近）","〜3日","〜2週間","1ヶ月以上","片思い・まだこれから"];
 function opts(sel, from, to, suffix, ph){
@@ -255,6 +354,14 @@ document.getElementById("f").addEventListener("submit", async (e)=>{
       body:JSON.stringify({me, him, status:st.value, period:pe?pe.value:"", vid:VID})});
     const j=await r.json();
     if(!j.ok) throw new Error(j.error||"failed");
+    // 恋愛タイプ・バッジ（シェア用・悩みは出さない）
+    if(j.love){
+      document.getElementById("bname").textContent="【"+j.love.name+"】";
+      document.getElementById("byomi").textContent=j.love.yomi;
+      document.getElementById("bcatch").textContent="——"+j.love.catch+"——";
+      document.getElementById("bline").textContent=j.love.line;
+      setupShare(j.love.name);
+    }
     document.getElementById("tname").textContent=j.type.name;
     document.getElementById("tyomi").textContent=j.type.yomi;
     document.getElementById("tcatch").textContent="——"+j.type.catch+"——";
