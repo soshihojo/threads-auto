@@ -55,19 +55,18 @@ def _human_pause() -> None:
 # 1回目のオファーは個別鑑定のみ。月額会員（椿の月詠み）は個別鑑定の納品後にだけ案内する
 #（案内文は funnel/line_step_7days.md の「月詠み案内」参照。ボットからは送らない）
 OFFER_MENU = (
-    "あんたと彼のことを、一回限りで深く視る「個別鑑定書」や。\n"
-    "“今動くべきか・いつ・どう一言を送るか”まで、あんた専用に視て、鑑定書にまとめて返す\n"
-    "→ 今だけ80%OFF 3,180円\n"
-    "（申し込みから数日以内に、PDFの鑑定書で届く）\n"
+    "この鑑定書はな、あんた専用に「今どう動くべきか・いつ・どう一言を送るか」まで視て、\n"
+    "PDFにまとめて返すもんや。申し込みから数日以内に、ここ（LINE）に届く。\n\n"
+    "→ 縁ができたあんただけの数量限定 2,980円（通常9,980円・7,000円引き）\n"
     "https://1aksbkdokn31q1trp81e.stores.jp/items/685edb3caf1f4a03c43a0aa4\n\n"
-    "「ほんまに当たるん？ 3,180円の価値あるん？」——そう思うのが普通や。\n"
+    "「ほんまに当たるん？ 2,980円の価値あるん？」——そう思うのが普通や。\n"
     "せやから、実際に鑑定を受けた子が“どんな鑑定書が届いて、読んで心がどう動いたか”を、"
     "自分の言葉で正直に綴ってくれてる。ウチが百回ええ言うより、受けた子のひとことが早いで。\n"
     "騙されたと思て、これだけ読んでから決めてくれてええからな↓\n\n"
     "▼実際に鑑定を受けたお客様の声\n"
     "https://note.com/tsubaki_honne/n/n24b6aed96bf2\n\n"
-    "ひとつだけ正直に言うとく。この割引は先着の枠が埋まり次第、通常の15,900円に戻す。"
-    "いつ埋まるかはウチにも分からん。急かす気はないけど、それだけは知っといてな🌙"
+    "ひとつ正直に言うとくな。この値段は、こうして相談に乗る縁ができたあんただけの、数量限定の割引や。"
+    "数に限りがある分やから、埋まったら通常の9,980円に戻す。急かす気はないけど、それだけ知っといてな🌙"
 )
 
 # 冒頭生成に失敗したときのフォールバック
@@ -132,18 +131,21 @@ def _offer_toc(transcript: str) -> str:
 
 
 def generate_offer(user: dict, history: list[dict], incoming: str) -> str:
-    """フロントの自動オファー＝一問鑑定199円（★2026-07-25改定）。
-    本鑑定（3,180円）はここでは出さない。一問の納品文とその後のフォローで初めて案内する。
-    （OFFER_MENU/_offer_toc/OFFER_INTRO_SYSTEMは本鑑定を手動で出す時のために温存）"""
+    """フロントの自動オファー＝個別鑑定書（本鑑定・2,980円）。
+    ★2026-07-28、199円一問から本鑑定に戻した（199円の方が売れなかったため）。
+    199円は自動では出さず、💴ダッシュボードから手動で出す時のために温存。
+    その人の状況に触れる冒頭の一言＋目次プレビュー＋商品メニュー（価格・リンク・数量限定）を組んで返す。"""
     transcript = "\n".join(
         f"{'相談者' if h['role'] == 'user' else '椿'}: {h['text'][:80]}" for h in history[-8:]
     )
     try:
-        return generate_oneq_offer(transcript)
+        intro = complete(OFFER_INTRO_SYSTEM,
+                         f"【これまでの会話】\n{transcript}\n\n冒頭の一言を書いてください。",
+                         model=LINE_BOT_MODEL, max_tokens=300, temperature=0.9).strip()
     except Exception as e:
-        print(f"[line_bot] 一問オファーの生成失敗、固定文を使用: {e}")
-        url = (active_profile().get("oneq_url") or "").strip() or "（199円の決済リンク）"
-        return f"{OFFER_INTRO_FALLBACK}\n\n{ONEQ_KOTEI.format(url=url)}"
+        print(f"[line_bot] オファー冒頭の生成失敗、固定文を使用: {e}")
+        intro = OFFER_INTRO_FALLBACK
+    return f"{intro}\n\n{_offer_toc(transcript)}{OFFER_MENU}"
 
 # 購入サイン（＝買う瞬間。検知したら自動オファー→hold）
 # 「いつ動」は「いつ動けば/いつ動いたら/いつ動くのが」等の言い回し揺れをまとめて拾う
