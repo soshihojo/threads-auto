@@ -302,8 +302,8 @@ document.getElementById("lbtn").addEventListener("click", ()=>track("line_click"
 // 恋愛タイプ・バッジのシェア導線（友達が自分のタイプを視に来る＝新規流入の複利ループ）
 function setupShare(name){
   const url = location.origin + "/shindan";
-  const text = "私の恋愛タイプ、【"+name+"】やった…当たりすぎて笑う😇\nあんたのタイプも30秒で視てみ→ #椿の縁視";
-  const full = text + "\n" + url;
+  const text = "私の恋愛タイプ、【"+name+"】やった…当たりすぎて笑う😇\\nあんたのタイプも30秒で視てみ→ #椿の縁視";
+  const full = text + "\\n" + url;
   const X = document.getElementById("shX"), T = document.getElementById("shT"), C = document.getElementById("shC");
   X.onclick = ()=>{ track("share_x");
     window.open("https://twitter.com/intent/tweet?text="+encodeURIComponent(text)+"&url="+encodeURIComponent(url),"_blank"); };
