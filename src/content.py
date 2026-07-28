@@ -109,10 +109,53 @@ def _has_placeholder(text: str) -> bool:
     return bool(_PLACEHOLDER_RE.search(text))
 
 
+# ---------------- リプ参加型ループ投稿（流入施策・第6案） ----------------
+# 「リプに生年月日をくれたら椿が一言で視たる。今日は◯人だけ」という参加型投稿。
+# 狙い＝リプ(返信)を大量に集めてThreadsのアルゴリズムに拡散させ、リプした人を見込み客にする。
+# この型だけは"いいね"やのうて"リプ"を主CTAにする（固定投稿への誘導は付けない）。
+REPLY_LOOP_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。関西弁・毒舌・姉御肌。
+Threadsで「リプ（返信）に生年月日をくれたら、椿が一言で本音を視て返す」という参加型の投稿を1つ書く。
+
+狙い: リプを大量に集めて拡散を起こし、リプしてくれた人を見込み客にする。だからこの投稿だけは“いいね”やのうて“リプ”を促す。
+
+必ず入れる要素:
+1. 占い師らしい毒舌の入り（一言で興味を引くフック。共感の枕から入らず図星を突く）
+2. 「今日は◯人だけ」と受付人数を区切る（特別感＆さばける量に絞る。指定された人数を使う）
+3. リプに置いてほしいもの＝「あんたの生年月日（と、気になる彼の生年月日）」。今の状況はひとことでも可
+4. 「一言だけやけど、本音で視たる」と渡す価値を示す
+5. 締めは“リプに置いてってな”“リプで教えて”のように、リプを促して終える
+
+禁止:
+- URLは書かない
+- いいね・フォロー・DM・「固定投稿から診断」を主CTAにしない（今回はリプが主役）
+- 『宿曜』など占いの専門用語を出さない／結果や復縁を保証しない
+- マークダウン記号は使わない。絵文字は0〜1個。全体120〜200字。出力は投稿本文のみ"""
+
+
+def generate_reply_loop_post() -> str:
+    """リプ参加型ループ投稿を1本生成する（生年月日をリプさせる参加型）。"""
+    n = random.choice([5, 7, 8, 10, 12, 15])
+    user = (f"今日の受付人数は「{n}人」。この人数を本文に自然に入れて、"
+            "リプに生年月日を置いてもらう参加型投稿を1つ書いてください。")
+    text = complete(REPLY_LOOP_SYSTEM, user, max_tokens=500, temperature=1.0).strip()
+    # 軽いサニタイズ（markdown除去＋URL行除去。固定投稿CTAは付けない＝リプが主役）
+    text = text.replace("**", "").replace("__", "")
+    text = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", text)
+    text = re.sub(r"(?m)^\s{0,3}[*\-]\s+", "", text)
+    if "http" in text:
+        text = "\n".join(ln for ln in text.splitlines() if "http" not in ln).strip()
+    return text
+
+
 def generate_candidate(force_cta: bool = False) -> tuple[str, str | None]:
     """候補1本を生成し (本文, 地域) を返す。
     実話回はその実話の地域だけを使い、一般論回のみランダム地域を使う（無関係な地域の混入防止）。
     force_cta=True のときは型に関わらず必ずDM/無料鑑定への誘導を入れる。"""
+    # 一定割合（既定30%）でリプ参加型ループ投稿を出す。地域は無し（参加型は地域を使わない）。
+    # config の variation.reply_loop_ratio で調整可（0で無効）。
+    ratio = float((active_profile().get("variation") or {}).get("reply_loop_ratio", 0.30) or 0)
+    if random.random() < ratio:
+        return generate_reply_loop_post(), None
     case = pick_case()
     region = (case or {}).get("region") or pick_region()
     # 分割投稿（ツリー式）の割合は variation.split_ratio で制御（未設定なら常に単発）
