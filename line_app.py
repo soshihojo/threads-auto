@@ -66,7 +66,9 @@ def _forward(body: bytes, signature: str) -> None:
         print(f"[webhook] 転送失敗（処理は継続）: {e}")
 
 
-@app.get("/")
+# GETとHEADの両方を受ける。UptimeRobot等の死活監視は既定でHEADを送るため、
+# GET専用だと405 Method Not Allowedになりスリープ防止のpingが機能しない（実害あり）。
+@app.api_route("/", methods=["GET", "HEAD"])
 def health() -> dict:
     # rev: Renderが自動設定するデプロイ中コミット（デプロイが反映されたかの確認用）
     return {"ok": True, "rev": (env("RENDER_GIT_COMMIT") or "")[:7]}
