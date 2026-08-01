@@ -26,8 +26,8 @@ from datetime import datetime
 
 from . import store, web_diag
 from .config import active_profile, env
-from .diagnosis import (ONEQ_KOTEI, SHUKU_27, _Z2H, find_birthdates,
-                        generate_oneq_offer, generate_reading, honmei_shuku,
+from .diagnosis import (SHUKU_27, _Z2H, find_birthdates,
+                        generate_reading, honmei_shuku,
                         parse_free_input)
 from .llm import complete, complete_vision
 
@@ -59,6 +59,8 @@ OFFER_MENU = (
     "PDFにまとめて返すもんや。申し込みから数日以内に、ここ（LINE）に届く。\n\n"
     "→ 縁ができたあんただけの数量限定 2,980円（通常9,980円・7,000円引き）\n"
     "https://1aksbkdokn31q1trp81e.stores.jp/items/685edb3caf1f4a03c43a0aa4\n\n"
+    "申し込んでくれたら、購入のあとに出てくるオーダー番号（数字だけ）を、ここに送ってな。"
+    "スクショやのうて数字を打ってくれたら、こっちですぐ照合できて、そのまま鑑定に入れるで。\n\n"
     "「ほんまに当たるん？ 2,980円の価値あるん？」——そう思うのが普通や。\n"
     "せやから、実際に鑑定を受けた子が“どんな鑑定書が届いて、読んで心がどう動いたか”を、"
     "自分の言葉で正直に綴ってくれてる。ウチが百回ええ言うより、受けた子のひとことが早いで。\n"
@@ -505,8 +507,14 @@ def handle_event(ev: dict) -> None:
     if msg.get("type") == "image":
         # 有料会員の画像は読み取って履歴に残す（💬会員相談の返信生成が参照する）。
         # 判定不能（unknown）は会員側に倒す＝断り文で有料客を傷つけない
+        #
+        # ★2026-07-31: 会員以外への断り文（IMAGE_REPLY）の自動送信を停止した。
+        #   理由: ①この分岐は下の bot_state 判定より前にあるため、店主が手動対応中
+        #   （bot=hold）の相手にも問答無用で飛んでいた ②会員判定は「月額会員か」なので、
+        #   個別鑑定書を購入したばかりの人も free 扱いになり、断り文を受け取っていた。
+        #   今は画像が来ても黙って履歴に残すだけにして、店主がLINEアプリから手動で対応する。
         if _member_status(user) == "free":
-            _send(user_id, reply_token, IMAGE_REPLY)
+            store.add_line_chat(user_id, "user", "[画像を送付（自動返信なし・店主が手動で確認）]")
         else:
             _handle_member_image(user_id, reply_token, msg.get("id", ""))
         return
@@ -843,9 +851,11 @@ def _notify_owner_of_holds(waiting: list[tuple[str, str, int]]) -> None:
     """手動対応待ち（hold・1時間以上未返信）をオーナーのLINEへダイジェスト通知する。
     同じ顔ぶれのままなら再通知しない（対象が変わった時だけ届く＝push枠の節約）。
 
-    ★2026-07-26 ユーザー指示でLINE通知は停止（ダッシュボードの📥バナーで確認する運用）。
-    再開したいときは下の early return を外す。"""
-    return  # LINE通知オフ（バナーのみで運用）
+    ★2026-07-26 ユーザー指示でLINE通知を停止（当時はダッシュボードの📥バナーで確認する運用）。
+    ★2026-08-01 その📥バナーもユーザー指示で削除。通知は一切出さない運用に確定した。
+      店主がLINE公式アプリを自分で定期的に見て、返信待ちを拾う。
+      → 取りこぼしが起きるようなら、下の early return を外せばLINE通知が復活する。"""
+    return  # 通知オフ（店主がLINE公式アプリを直接見る運用）
     owner = (active_profile().get("owner_line_user_id") or "").strip()
     if not owner or not waiting:
         return
