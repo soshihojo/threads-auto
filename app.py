@@ -24,7 +24,7 @@ try:
 except Exception:
     pass
 
-from src import content, diagnosis, store
+from src import diagnosis, store
 from src.config import active_profile, env
 from src.schedule import JST, now_jst
 
@@ -32,10 +32,63 @@ st.set_page_config(page_title="Threads運用ダッシュボード", page_icon="�
 
 
 # ---------------- 簡易パスワード認証 ----------------
+# 一度ログインすると、同じデバイス・同じブラウザなら30分間パスワード不要。
+# 仕組み: 有効期限を埋め込んだ署名付きチケットをCookieに置き、画面を開くたびに検証＋延長する。
+# サーバ側に保存を持たないので、Render/Streamlit Cloudの再起動でもログイン状態は保たれる。
+LOGIN_TTL_SEC = 30 * 60      # ログイン保持時間（30分・最後の操作から延長される）
+LOGIN_COOKIE = "ta_login"
+
+
 def _auth_token(pw: str) -> str:
-    """URL保持用のログイントークン（パスワード本体はURLに出さない）。"""
+    """旧方式（URL ?k= 保持）のログイントークン。ブックマーク運用の互換のため残す。"""
     import hashlib
     return hashlib.sha256(f"threads-auto:{pw}".encode()).hexdigest()[:20]
+
+
+def _sign(payload: str, pw: str) -> str:
+    import hashlib
+    import hmac
+    return hmac.new(f"threads-auto:{pw}".encode(), payload.encode(), hashlib.sha256).hexdigest()[:24]
+
+
+def _make_ticket(pw: str) -> str:
+    """「期限.署名」形式のチケット。パスワード本体は含まない。"""
+    import time
+    exp = str(int(time.time()) + LOGIN_TTL_SEC)
+    return f"{exp}.{_sign(exp, pw)}"
+
+
+def _ticket_valid(ticket: str, pw: str) -> bool:
+    import hmac
+    import time
+    try:
+        exp, sig = str(ticket).split(".", 1)
+        if not hmac.compare_digest(sig, _sign(exp, pw)):
+            return False           # 署名が合わない＝偽造・パスワード変更済み
+        return int(exp) > int(time.time())   # 期限切れ
+    except Exception:
+        return False
+
+
+def _cookie_ticket() -> str:
+    """ブラウザから送られてきたCookieのチケットを読む（古いStreamlitでは空を返す）。"""
+    try:
+        return (st.context.cookies or {}).get(LOGIN_COOKIE, "") or ""
+    except Exception:
+        return ""
+
+
+def _write_cookie(ticket: str) -> None:
+    """Cookieを書き込む（＝30分の期限を貼り直す）。描画のたびに呼んで期限を延長する。"""
+    if not ticket:
+        return
+    from streamlit.components.v1 import html as _html
+    _html(
+        "<script>document.cookie="
+        f'"{LOGIN_COOKIE}={ticket}; path=/; max-age={LOGIN_TTL_SEC}; SameSite=Lax";'
+        "</script>",
+        height=0,
+    )
 
 
 def _auth() -> bool:
@@ -44,24 +97,35 @@ def _auth() -> bool:
         return True  # 未設定なら認証なし（ローカル用）
     if st.session_state.get("authed"):
         return True
-    # URLの ?k=トークン で自動ログイン（リロード・ブックマークでも再入力不要）
+    # ① Cookieのチケットで自動ログイン（同じデバイスなら30分間パスワード不要）
+    if _ticket_valid(_cookie_ticket(), pw):
+        st.session_state["authed"] = True
+        st.session_state["login_ticket"] = _make_ticket(pw)
+        return True
+    # ② 旧方式：URLの ?k=トークン（ブックマーク運用の互換）
     if st.query_params.get("k") == _auth_token(pw):
         st.session_state["authed"] = True
+        st.session_state["login_ticket"] = _make_ticket(pw)
         return True
     st.title("🔒 ログイン")
     entered = st.text_input("パスワード", type="password")
     if st.button("入る"):
         if entered == pw:
             st.session_state["authed"] = True
-            st.query_params["k"] = _auth_token(pw)  # URLに保持。このURLをブックマークすれば次回から入力不要
+            st.session_state["login_ticket"] = _make_ticket(pw)
+            st.query_params["k"] = _auth_token(pw)
             st.rerun()
         else:
             st.error("パスワードが違います")
+    st.caption("一度入れば、同じ端末・同じブラウザなら30分はパスワード不要です（操作するたびに延長されます）。")
     return False
 
 
 if not _auth():
     st.stop()
+
+# 認証済みの描画ごとにCookieの期限を貼り直す（最後の操作から30分間有効）
+_write_cookie(st.session_state.get("login_ticket", ""))
 
 try:
     store.init_db()
@@ -73,113 +137,12 @@ profile = active_profile()
 st.title("🧵 Threads運用ダッシュボード")
 st.caption(f"プロファイル: {profile['name']}　|　返信モード: 下書き承認制　|　現在(JST): {now_jst():%Y-%m-%d %H:%M}")
 
-# 手動対応待ち（bot=holdで最後が相談者の発言のまま）を常時表示。返信漏れ防止の最後の砦
-try:
-    _hw_chats = {}
-    for _r in store.all_line_chats(days=7):
-        _hw_chats.setdefault(_r["user_id"], []).append(_r)
-    _hw = []
-    for _uid, _rows in _hw_chats.items():
-        _rows.sort(key=lambda r: str(r.get("created_at", "")))
-        _last = _rows[-1]
-        if _last["role"] != "user":
-            continue
-        _u = store.get_line_user(_uid) or {}
-        if (_u.get("bot") or "on").strip() != "hold":
-            continue
-        try:
-            _t = datetime.fromisoformat(str(_last["created_at"]).replace(" ", "T"))
-            _hours = max(0, int((now_jst().replace(tzinfo=None) - _t).total_seconds() // 3600))
-        except ValueError:
-            _hours = 0
-        _hw.append((_u.get("display_name") or "（名前不明）", _hours))
-    if _hw:
-        _hw.sort(key=lambda x: -x[1])
-        st.error("📥 **手動対応待ちのLINEがあります**（あなたの返信待ち）: "
-                 + "、".join(f"{n}（{h}時間）" for n, h in _hw)
-                 + " → LINE公式アプリから返信してください")
-except Exception:
-    pass
-
 # st.tabsは全タブの中身を毎回描画する（遅い・操作後に先頭タブへ戻る）ため、
 # 選んだ画面だけを描画する完全切り替え式にする。選択はセッションに保持される。
-VIEW_GEN, VIEW_REPLIES, VIEW_DIAG, VIEW_ONEQ, VIEW_CONSULT, VIEW_MEMBERS = VIEWS = [
-    "✍️ 承認待ちの候補", "↩️ コメント返信", "🔮 無料診断", "💴 一問鑑定", "💬 会員相談", "👥 会員"]
+VIEW_REPLIES, VIEW_DIAG, VIEW_CONSULT, VIEW_MEMBERS = VIEWS = [
+    "↩️ コメント返信", "🔮 無料診断", "💬 会員相談", "👥 会員"]
 view = st.radio("画面", VIEWS, horizontal=True, key="view", label_visibility="collapsed")
 st.divider()
-
-
-def _post_now(text: str, region: str | None) -> None:
-    from src.main import make_client
-    client = make_client()
-    loc_id = client.first_location_id(region) if (profile.get("tag_location") and region) else None
-    mid = client.publish_thread(text, location_id=loc_id)
-    store.save_post(mid, text, profile["name"])
-
-
-# ---------------- 承認待ちの候補 ----------------
-if view == VIEW_GEN:
-    st.caption("6時間ごとに候補が自動生成され、ここに溜まります。承認したものだけが投稿されます。")
-    n = st.number_input("今すぐ追加生成する数", min_value=1, max_value=8, value=3)
-    if st.button("➕ 今すぐ候補を生成", type="primary"):
-        try:
-            try:
-                base = len(store.list_scheduled(limit=100000))
-            except Exception:
-                base = 0
-            with st.spinner("生成中…"):
-                for i in range(int(n)):
-                    force = ((base + i) % 3 == 0)  # 3本に1本は必ずDM/無料鑑定へ誘導
-                    text, region = content.generate_candidate(force_cta=force)
-                    store.add_candidate(text, region)
-            st.rerun()
-        except Exception as e:
-            st.error(f"生成に失敗しました（{e}）。少し待って再度お試しください。")
-
-    try:
-        pending = store.list_scheduled(status="pending_review")
-    except Exception as e:
-        st.warning(f"候補の読み込みが一時的に失敗しました（{e}）。下のボタンで再読み込みしてください。")
-        if st.button("🔄 再読み込み", key="reload_pending"):
-            st.rerun()
-        pending = []
-    if not pending:
-        st.info("承認待ちの候補はありません。自動生成を待つか、上のボタンで追加生成してください。")
-    else:
-        st.write(f"承認待ち {len(pending)} 件")
-    for cand in pending:
-        with st.container(border=True):
-            st.markdown(f"**候補 #{cand['id']}**")
-            text = st.text_area("本文（編集可）", value=cand["text"], key=f"text_{cand['id']}", height=150)
-            if "===続き===" in text:
-                _parts = text.count("===続き===") + 1
-                st.caption(f"🧵 ツリー投稿（{_parts}分割）：「===続き===」は区切りの印で、投稿には出ません。"
-                           f"承認・投稿すると自動で{_parts}本のぶら下がり投稿（75秒間隔）として配信されます。"
-                           "手動でThreadsに貼る場合だけ、区切りごとに分けて返信でぶら下げてください。")
-            c1, c2, c3, c4 = st.columns([1.2, 1, 1.1, 1])
-            d = c1.date_input("投稿日", value=now_jst().date(), key=f"date_{cand['id']}")
-            # 投稿時間帯は7時〜24時のみ（24時=その日の深夜0時として翌日0:00に予約）
-            _hours = list(range(7, 24)) + [24]
-            _next = (now_jst() + timedelta(hours=1)).hour
-            h = c2.selectbox("時刻", _hours, index=_hours.index(_next) if _next in _hours else 0,
-                             format_func=lambda x: f"{x}:00", key=f"time_{cand['id']}")
-            if c3.button("✅ 承認して予約", key=f"approve_{cand['id']}", use_container_width=True):
-                sched = (datetime.combine(d, dtime(0)) + timedelta(days=1)) if h == 24 else datetime.combine(d, dtime(h))
-                sched_iso = sched.strftime("%Y-%m-%dT%H:%M:%S")
-                store.approve_candidate(cand["id"], sched_iso, text=text)
-                st.success(f"予約しました（{sched_iso}）")
-                st.rerun()
-            if c4.button("🗑 却下", key=f"reject_{cand['id']}", use_container_width=True):
-                store.cancel_scheduled(cand["id"])
-                st.rerun()
-            if st.button("🚀 今すぐ投稿", key=f"now_{cand['id']}"):
-                try:
-                    _post_now(text, cand["region"])
-                    store.mark_scheduled(cand["id"], "posted")
-                    st.success("投稿しました")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"投稿失敗: {e}")
 
 
 # ---------------- コメント返信の承認 ----------------
@@ -360,70 +323,6 @@ if view == VIEW_DIAG:
         # keyを鑑定文の内容から作る＝古い表示が新しい結果を上書きする事故を構造的に防ぐ
         st.text_area("鑑定文（コピーして相談者に送れます）", value=res["reading"], height=320,
                      key=f"diag_out_{abs(hash(res['reading'])) % 10**8}")
-
-
-# ---------------- 一問鑑定（199円・手動送付のAI支援） ----------------
-if view == VIEW_ONEQ:
-    st.caption("199円の一問鑑定はボットは自動で売りません。ここで文面を作り、LINE公式アプリからあなたが手動で送ります。"
-               "使いどころ：購入サインが出た人・本鑑定（2,980円）のオファーに反応が無い人・「聞きたいことが一つだけありそう」な人。")
-    if not (profile.get("oneq_url") or "").strip():
-        st.warning("⚠️ 決済リンク（oneq_url）が未設定です。STORES等で199円商品を作り、config.yaml の oneq_url に貼ってください。"
-                   "それまで文面には差し替えメモが入ります。")
-
-    st.subheader("① オファー文を作る（案内を送るとき）")
-    oq_conv = st.text_area("その人とのやりとりを貼り付け（直近だけでOK）", key="oq_conv", height=160,
-                           placeholder="例：\n相手: 彼と3ヶ月音信不通で…\n椿: 彼は追われると引くタイプや…\n相手: いつ動いたらいいですか？")
-    if st.button("💴 オファー文を生成", type="primary", key="oq_offer_run"):
-        if not oq_conv.strip():
-            st.error("やりとりを貼ってください。")
-        else:
-            try:
-                with st.spinner("作成中…"):
-                    st.session_state["oq_offer"] = diagnosis.generate_oneq_offer(oq_conv)
-            except Exception as e:
-                st.error(f"生成に失敗しました（{e}）")
-    if st.session_state.get("oq_offer"):
-        st.text_area("オファー文（コピーしてLINEで送る）", value=st.session_state["oq_offer"], height=260,
-                     key=f"oq_offer_out_{abs(hash(st.session_state['oq_offer'])) % 10**8}")
-
-    st.divider()
-    st.subheader("② 納品テキストを作る（購入されたら）")
-    st.caption("生年月日2つ（相談者→彼の順）と「一問」を含めて貼れば自動で読み取ります。回答は“直近の一手”に全力・"
-               "鑑定書との区分（縁ができた人だけの数量限定2,980円）・感想のお願いまで入ります。")
-    oq_q = st.text_area("一問＋生年月日＋経緯を貼り付け", key="oq_q", height=160,
-                        placeholder="例：\n私 1992年5月3日／彼 1990年11月21日\n一問：明日、私からLINEを送ってもいいですか？\n経緯：2週間前に喧嘩して私が「もういい」と言ってから既読スルー…")
-    if st.button("📜 納品テキストを生成", type="primary", key="oq_ans_run"):
-        p = diagnosis.parse_free_input(oq_q)
-        if not p["me"] or not p["him"]:
-            st.error("生年月日が2つ見つかりませんでした（相談者→彼の順で含めてください）。")
-        elif not oq_q.strip():
-            st.error("内容を貼ってください。")
-        else:
-            try:
-                with st.spinner("椿が視てます…"):
-                    res = diagnosis.generate_oneq_answer(p["me"], p["him"], oq_q, oq_q)
-                st.session_state["oq_ans"] = res["answer"]
-            except Exception as e:
-                st.error(f"生成に失敗しました（{e}）")
-    if st.session_state.get("oq_ans"):
-        st.text_area("納品テキスト（コピーしてLINEで送る）", value=st.session_state["oq_ans"], height=340,
-                     key=f"oq_ans_out_{abs(hash(st.session_state['oq_ans'])) % 10**8}")
-
-    st.divider()
-    st.subheader("③ 本鑑定への橋（納品の2〜3日後・反応が無ければ1回だけ手動送付）")
-    st.text_area("フォロー文（コピー用の定型。状況に合わせて一言足すと良い）", height=170, key="oq_follow",
-                 value=("この前の一問、どうやった？\n"
-                        "動けたか、まだ迷うてるか、一言でええから聞かせてな。\n\n"
-                        "ほんでな、あの時言うた「ここから先の全体の地図」——個別鑑定書な、"
-                        "一問を買うてくれて縁ができたあんたには、"
-                        "通常9,980円のところ、数量限定で2,980円で視とる。\n\n"
-                        "「ほんまに当たるん？ 価値あるん？」て思うのが普通や。\n"
-                        "実際に鑑定を受けた子が“どんな鑑定書が届いて、読んで心がどう動いたか”を、"
-                        "自分の言葉で正直に綴ってくれてる。ウチが百回ええ言うより、受けた子のひとことが早いで。\n"
-                        "騙されたと思て、これだけ読んでから決めてくれてええからな↓\n"
-                        "▼実際に鑑定を受けたお客様の声\n"
-                        "https://note.com/tsubaki_honne/n/n24b6aed96bf2\n\n"
-                        "急がんでええ、視たくなったら言うてな🌙"))
 
 
 # ---------------- 会員相談（相談し放題の返信生成＋履歴） ----------------

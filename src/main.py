@@ -118,29 +118,6 @@ def cmd_insights(_: argparse.Namespace) -> None:
         print(f"  eng {r['engagement']:.1%} | views {r['views']} | {r['text'][:30]}…")
 
 
-def cmd_generate(_: argparse.Namespace) -> None:
-    """候補を自動生成して未承認(pending_review)で保存し、Chatworkに通知。
-    6時間おきにGitHub Actionsから実行する想定。承認はダッシュボードで行う。"""
-    store.init_db()
-    n = load_config()["posting"].get("candidates_per_batch", 3)
-    try:
-        base = len(store.list_scheduled(limit=100000))  # 既存の総数で3回に1回のDM誘導を判定
-    except Exception:
-        base = 0
-    created = []
-    for i in range(int(n)):
-        force = ((base + i) % 3 == 0)  # 3本に1本は必ずDM/無料鑑定へ誘導
-        text, region = content.generate_candidate(force_cta=force)
-        cid = store.add_candidate(text, region)
-        created.append((cid, region, text))
-    print(f"✍️ 候補を{len(created)}件 生成（未承認）。ダッシュボードで承認してください。")
-    # 通知（任意）
-    body = "[info][title]🧵 新しい投稿候補ができました[/title]" + \
-        "".join(f"\n―― 候補#{cid}（{region}）\n{text[:60]}…" for cid, region, text in created) + \
-        "\n→ ダッシュボードで承認・予約してください[/info]"
-    notify.chatwork(body)
-
-
 def cmd_learn(_: argparse.Namespace) -> None:
     """反応データ（リード/エンゲージ）を分析し、勝ち要素を抽象化して学習ルールを自動更新。"""
     c = make_client()
@@ -167,7 +144,7 @@ def cmd_check_store(_: argparse.Namespace) -> None:
     """保存先（Sheets/SQLite）に接続できるか確認。Sheetsなら必要なシートを作成する。"""
     print(f"保存先バックエンド: {store._backend}")
     store.init_db()
-    cid = store.add_candidate("接続テスト（自動削除されます）", "テスト")
+    cid = store.add_candidate("接続テスト（自動削除されます）")
     found = [r for r in store.list_scheduled(status="pending_review") if str(r["id"]) == str(cid)]
     store.cancel_scheduled(cid)
     print("✅ 読み書きOK" if found else "⚠️ 書けたが読み出せず。権限/共有設定を確認")
@@ -251,7 +228,6 @@ def main() -> None:
     sub.add_parser("insights").set_defaults(func=cmd_insights)
     sub.add_parser("learn").set_defaults(func=cmd_learn)
     sub.add_parser("voice-learn").set_defaults(func=cmd_voice_learn)
-    sub.add_parser("generate").set_defaults(func=cmd_generate)
     sub.add_parser("check-store").set_defaults(func=cmd_check_store)
     sub.add_parser("run-due").set_defaults(func=cmd_run_due)
     p_diag = sub.add_parser("diagnose")

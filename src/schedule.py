@@ -30,10 +30,8 @@ def run_due(client: ThreadsClient) -> dict:
     stats = {"due": len(due), "posted": 0, "failed": 0}
     for row in due:
         text = sanitize(row["text"])  # 投稿直前に装飾記号(**等)を必ず除去
-        region = row["region"]
         try:
-            loc_id = client.first_location_id(region) if (profile.get("tag_location") and region) else None
-            media_id = client.publish_thread(text, location_id=loc_id)
+            media_id = client.publish_thread(text)
             store.mark_scheduled(row["id"], "posted", media_id=media_id)
             store.save_post(media_id, text, profile["name"])
             stats["posted"] += 1

@@ -209,12 +209,12 @@ def recent_leads(limit: int = 50) -> list[sqlite3.Row]:
 
 
 # ---- scheduled posts / candidates ----
-def add_candidate(text: str, region: str | None) -> int:
+def add_candidate(text: str) -> int:
     """未承認の候補として保存（status=pending_review、投稿日時は未定）。"""
     with conn() as c:
         cur = c.execute(
-            "INSERT INTO scheduled_posts(text, region, scheduled_at, status) VALUES (?,?,NULL,'pending_review')",
-            (text, region),
+            "INSERT INTO scheduled_posts(text, scheduled_at, status) VALUES (?,NULL,'pending_review')",
+            (text,),
         )
         return cur.lastrowid
 
@@ -236,11 +236,11 @@ def approve_candidate(post_id: int, scheduled_at: str, text: str | None = None) 
             )
 
 
-def add_scheduled(text: str, region: str | None, scheduled_at: str) -> int:
+def add_scheduled(text: str, scheduled_at: str) -> int:
     with conn() as c:
         cur = c.execute(
-            "INSERT INTO scheduled_posts(text, region, scheduled_at, status) VALUES (?,?,?,'scheduled')",
-            (text, region, scheduled_at),
+            "INSERT INTO scheduled_posts(text, scheduled_at, status) VALUES (?,?,'scheduled')",
+            (text, scheduled_at),
         )
         return cur.lastrowid
 

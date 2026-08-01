@@ -3,7 +3,7 @@
 構成：
 - **共有ストア**：Google Sheets（ダッシュボードとActionsが同じキューを読む）
 - **ダッシュボード**：Streamlit Community Cloud（無料・URLでどこからでも）
-- **裏方**：GitHub Actions（候補生成6h / 返信ポーリング / 予約投稿15分）
+- **裏方**：GitHub Actions（返信ポーリング2h / 予約投稿15分 / 学習3日）
 
 所要：30〜40分。順番にやればOK。
 
@@ -94,15 +94,14 @@ GOOGLE_SERVICE_ACCOUNT_JSON = '''
 | `ANTHROPIC_API_KEY` | Anthropicキー |
 | `CHATWORK_API_TOKEN` / `CHATWORK_ROOM_ID` | 任意 |
 
-→ 登録後、Actionsタブで `threads-generate` を「Run workflow」で手動実行 → シートに候補が追加され、ダッシュボードに「承認待ち」で出れば**全部つながった**。
+→ 登録後、Actionsタブで `threads-scheduler` を「Run workflow」で手動実行 → ログが正常に終われば**全部つながった**。
 
 ---
 
 ## 完成後の運用フロー
 
 ```
-[6hごと]  Actionsが候補生成 → Sheetsに溜まる＋Chatwork通知
-[あなた]  スマホ/PCでダッシュボードを開く → 承認＆投稿日時を指定
+[あなた]  Claudeで投稿を作り、Sheetsのscheduled_postsに直接書き込む
 [15分毎]  Actionsが予約時刻の来たものを自動投稿
 [随時]    返信から手挙げリードを検知 → Chatwork通知 → ダッシュボードのリードタブで確認
 ```

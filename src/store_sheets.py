@@ -47,7 +47,7 @@ TABLES = {
     "processed_replies": ["reply_id", "post_id", "username", "text", "seen_at"],
     "draft_replies": ["reply_id", "post_id", "username", "in_text", "draft_text", "status", "created_at", "sent_at"],
     "leads": ["reply_id", "post_id", "username", "text", "keyword", "notified", "created_at"],
-    "scheduled_posts": ["id", "text", "region", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at"],
+    "scheduled_posts": ["id", "text", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at"],
     "members": ["id", "nickname", "me_birth", "him_birth", "note", "created_at"],
     "readings": ["id", "member_id", "month", "worry", "reading", "created_at"],
     "line_users": ["user_id", "display_name", "me_birth", "him_birth", "bot", "note", "created_at", "updated_at"],
@@ -263,9 +263,9 @@ def _next_id() -> int:
     return (max(ids) + 1) if ids else 1
 
 
-def add_candidate(text: str, region: str | None) -> int:
+def add_candidate(text: str) -> int:
     new_id = _next_id()
-    _append("scheduled_posts", {"id": new_id, "text": text, "region": region or "", "scheduled_at": "",
+    _append("scheduled_posts", {"id": new_id, "text": text, "scheduled_at": "",
                                "status": "pending_review", "created_at": _now()})
     return new_id
 
@@ -280,9 +280,9 @@ def approve_candidate(post_id: int, scheduled_at: str, text: str | None = None) 
     _update_cells("scheduled_posts", idx, updates)
 
 
-def add_scheduled(text: str, region: str | None, scheduled_at: str) -> int:
+def add_scheduled(text: str, scheduled_at: str) -> int:
     new_id = _next_id()
-    _append("scheduled_posts", {"id": new_id, "text": text, "region": region or "",
+    _append("scheduled_posts", {"id": new_id, "text": text, 
                                "scheduled_at": scheduled_at, "status": "scheduled", "created_at": _now()})
     return new_id
 
