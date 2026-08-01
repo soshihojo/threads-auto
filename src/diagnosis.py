@@ -29,6 +29,18 @@ SHUKU_27 = [
 ]
 _SPAN = 360.0 / 27.0  # 1宿あたりの黄経幅（約13.33度）
 
+# 宿名・占術名が本文に漏れたときの最終ガード（ここが唯一の正規版）。
+# ★2026-08-02: 以前は line_bot 側にしか無く、会員相談の返信に「觜宿の彼はな」と
+#   宿名がそのまま出て有料会員に届いていた。生成系は全部ここを通す。
+JARGON = [*SHUKU_27, "宿曜", "本命宿"]
+
+
+def strip_jargon(text: str) -> str:
+    """本文に漏れた専門用語を日常語へ置き換える。プロンプトで禁じても漏れるので最後に必ず通す。"""
+    for w in SHUKU_27:
+        text = text.replace(f"{w}の", "ああいう性質の").replace(w, "ああいう性質")
+    return text.replace("宿曜", "ウチの視方").replace("本命宿", "生まれ持った性質")
+
 # 校正用オフセット（度）。公式宿曜表に合わせてここを調整する。
 SHUKU_OFFSET_DEG = 0.0
 
@@ -100,6 +112,12 @@ _STATUS_PATTERNS = [
     ("音信不通", "音信不通"),
     ("既読スルー", "既読スルー"),
     ("未読スルー", "既読スルー"),
+    ("既読無視", "既読スルー"),
+    ("未読無視", "既読スルー"),
+    ("返信がこない", "既読スルー"),
+    ("返事がこない", "既読スルー"),
+    ("返信が来ない", "既読スルー"),
+    ("返事が来ない", "既読スルー"),
     ("急に冷められた", "急に冷められた"),
     ("冷められた", "急に冷められた"),
     ("冷たくなった", "急に冷められた"),
@@ -200,7 +218,7 @@ def generate_monthly(me_birth: str, him_birth: str, worry: str = "",
         f"{month_label}の二人の運気の流れ、動いてええ時期/控える時期の目安、{month_label}の開運アクション、"
         "最後に寄り添いの一言、の順で。会員向けやから出し惜しみせず、安心と前進感を渡しきること。"
     )
-    reading = complete(MONTHLY_SYSTEM, user, max_tokens=2000, temperature=0.9).strip()
+    reading = strip_jargon(complete(MONTHLY_SYSTEM, user, max_tokens=2000, temperature=0.9).strip())
     return {"me_shuku": me_s, "him_shuku": him_s, "reading": reading}
 
 
@@ -264,7 +282,7 @@ def generate_consult(me_birth: str, him_birth: str, message: str, history: str =
         "相談に正面から答え、前回の流れがあれば踏まえ、具体的な一歩を渡して、あたたかく締めてください。"
     )
     # 鑑定書参照で返信が長くなるため上限は余裕を持たせる（上限なので未使用分は課金されない）
-    reply = complete(CONSULT_SYSTEM, user, max_tokens=2500, temperature=0.9).strip()
+    reply = strip_jargon(complete(CONSULT_SYSTEM, user, max_tokens=2500, temperature=0.9).strip())
     return {"me_shuku": me_s, "him_shuku": him_s, "reply": reply}
 
 
@@ -332,5 +350,5 @@ def generate_reading(me_birth: str, him_birth: str, status: str, period: str,
            if line_url else "")
     )
     system = DIAG_LINE_SYSTEM if for_line else DIAG_SYSTEM
-    reading = complete(system, user, max_tokens=700, temperature=0.9).strip()
+    reading = strip_jargon(complete(system, user, max_tokens=700, temperature=0.9).strip())
     return {"me_shuku": me_s, "him_shuku": him_s, "distance": dist, "reading": reading}

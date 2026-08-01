@@ -26,9 +26,9 @@ from datetime import datetime
 
 from . import store, web_diag
 from .config import active_profile, env
-from .diagnosis import (SHUKU_27, _Z2H, find_birthdates,
+from .diagnosis import (JARGON, _Z2H, find_birthdates,
                         generate_reading, honmei_shuku,
-                        parse_free_input)
+                        parse_free_input, strip_jargon)
 from .llm import complete, complete_vision
 
 LINE_API = "https://api.line.me/v2/bot"
@@ -394,15 +394,9 @@ def _internal_ref(user: dict) -> str:
     return "--- 内部参考（宿曜の算出。専門用語は本文に出さず日常語に翻訳） ---\n" + "\n".join(parts)
 
 
-# 宿名・占術名の漏れ検出（過去の会話に混入した宿名をAIがコピーする事故があった）
-_JARGON = [*SHUKU_27, "宿曜", "本命宿"]
-
-
-def _strip_jargon(text: str) -> str:
-    """本文に漏れた専門用語を日常語へ置き換える最終ガード。"""
-    for w in SHUKU_27:
-        text = text.replace(f"{w}の", "ああいう性質の").replace(w, "ああいう性質")
-    return text.replace("宿曜", "ウチの視方").replace("本命宿", "生まれ持った性質")
+# 宿名・占術名の漏れ検出。実体は diagnosis 側の正規版を使う（二重定義で片方だけ直る事故を防ぐ）
+_JARGON = JARGON
+_strip_jargon = strip_jargon
 
 
 def generate_nurture(user: dict, history: list[dict], incoming: str) -> str:

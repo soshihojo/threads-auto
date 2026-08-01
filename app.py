@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import date, timedelta
 
 import streamlit as st
 
@@ -26,7 +26,7 @@ except Exception:
 
 from src import diagnosis, store
 from src.config import active_profile, env
-from src.schedule import JST, now_jst
+from src.schedule import now_jst
 
 st.set_page_config(page_title="Threads運用ダッシュボード", page_icon="🧵", layout="wide")
 

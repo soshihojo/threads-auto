@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from . import analytics, content, diagnosis, notify, replies as replies_mod, schedule as schedule_mod, store
+from . import analytics, content, diagnosis, replies as replies_mod, schedule as schedule_mod, store
 from .config import DATA_DIR, active_profile, env, load_config
 from .threads_client import ThreadsClient
 

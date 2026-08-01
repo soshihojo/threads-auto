@@ -26,5 +26,8 @@ jobs:
       - name: replies + leads
         run: python -m src.main replies
       - name: insights (once a day at JST 21時)
-        if: github.event.schedule == '0 12 * * *'
+        # ★2026-08-02: cronを2時間おきに変えた際に、この条件が古い cron 文字列のまま
+        # 取り残されて一致せず、7/18以降 insights が一度も実行されていなかった。
+        # 対象は直近25投稿と軽いので、毎回実行する。
+        continue-on-error: true
         run: python -m src.main insights
