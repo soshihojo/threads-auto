@@ -18,7 +18,7 @@ import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from src import line_bot, store, web_diag
+from src import line_bot, tokushoho, store, web_diag
 from src.config import env
 
 app = FastAPI()
@@ -78,6 +78,12 @@ def health() -> dict:
 def shindan_page() -> str:
     """Web無料診断「椿の縁視」（Threadsのプロフィール/固定投稿からの入口）。"""
     return web_diag.page_html()
+
+
+@app.get("/tokushoho", response_class=HTMLResponse)
+def tokushoho_page() -> str:
+    """特定商取引法に基づく表記（月額会員の決済ページから遷移させる法定表記）。"""
+    return tokushoho.page_html()
 
 
 @app.post("/shindan/track")
