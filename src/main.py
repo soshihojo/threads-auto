@@ -180,6 +180,15 @@ def cmd_kantei(args: argparse.Namespace) -> None:
     print(f"→ LINE公式アプリのチャットからPDFを添付して送付: {res['pdf']}")
 
 
+def _clean_member_name(nickname: str) -> str:
+    """会員の登録名から管理用の連番・括弧書きを落として、客に見せる呼び名にする。
+    例: 「美-02(月初ミニ鑑定)」→「美」 / 「03-田中麻衣(月初ミニ鑑定)」→「田中麻衣」"""
+    import re
+    s = re.sub(r"[（(].*?[）)]", "", nickname)
+    s = re.sub(r"^[\d\-_\s]+|[\d\-_\s]+$", "", s)
+    return s.strip() or nickname
+
+
 def cmd_tsukiyomi(args: argparse.Namespace) -> None:
     """月詠み（月額会員の月次ミニ鑑定書PDF）: 登録会員を選び、鑑定書と一貫した今月の鑑定を出力。"""
     from . import kantei, store
@@ -194,7 +203,14 @@ def cmd_tsukiyomi(args: argparse.Namespace) -> None:
     worry = args.worry
     if args.worry_file:
         worry = Path(args.worry_file).read_text(encoding="utf-8")
-    res = kantei.make_tsukiyomi(m["nickname"], m["me_birth"], m["him_birth"], worry,
+    # 表紙と本文の呼びかけに使う名前。★個別鑑定書で渡した呼び名と必ず揃える。
+    # 会員の登録名（例「美-02(月初ミニ鑑定)」）は管理用なので、そのままでは客に見せられない。
+    name = (args.name or "").strip()
+    if not name:
+        name = _clean_member_name(m["nickname"])
+        print(f"⚠️ --name が未指定のため、登録名から推測しました: 「{name}」")
+        print("   個別鑑定書で使った呼び名と違う場合は、--name で指定して作り直してください。")
+    res = kantei.make_tsukiyomi(name, m["me_birth"], m["him_birth"], worry,
                                 kantei_text=kantei_text, month_label=args.month or None)
     # 控えを保存（💬会員相談の返信生成が「今月の月詠み」も踏まえられるように）
     store.add_reading(m["id"], f"月詠み {res['month_label']}", worry, res["body"][:15000])
@@ -250,7 +266,10 @@ def main() -> None:
     p_kan.add_argument("--details-file", required=True, help="悩み詳細のテキストファイル")
     p_kan.set_defaults(func=cmd_kantei)
     p_tsu = sub.add_parser("tsukiyomi")
-    p_tsu.add_argument("--member", required=True, help="👥会員に登録済みのニックネーム")
+    p_tsu.add_argument("--member", required=True, help="👥会員に登録済みのニックネーム（検索用）")
+    p_tsu.add_argument("--name", default="",
+                       help="鑑定書に載る呼び名。★個別鑑定書で使った名前を必ず指定する"
+                            "（会員の登録名には管理用の連番が入るため、そのままだと表紙に出てしまう）")
     p_tsu.add_argument("--worry", default="", help="会員の近況・今月の悩み（任意）")
     p_tsu.add_argument("--worry-file", default="", help="近況・悩みのテキストファイル（任意）")
     p_tsu.add_argument("--month", default="", help="対象月ラベル（例: 2026年8月。省略時は今月）")
