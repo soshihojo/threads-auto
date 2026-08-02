@@ -172,12 +172,29 @@ def cmd_monthly(args: argparse.Namespace) -> None:
     print("--------------------------")
 
 
+# 鑑定書・月詠みを出したあとに必ず表示する注意。PDFだけ渡して終わりにする事故を防ぐ
+_DELIVERY_REMINDER = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️  まだ終わりやない。次を必ずやること
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1) 本文を読んで中身を確かめる（宿名の漏れ・保証表現・相談者を責める書き方）
+2) LINEで送る【納品文】を作る  ← PDFだけ送らない
+   ・その人が一番知りたがっていた問いに、どの章で答えたか
+   ・次に読む章と、そこに何が入っているか
+   ・相談の中でその人が自分でやっていた良い一手への言及
+   ・締めは【感想を聞く】で終える（「遠慮せず聞いてな」で終わらせない）
+     → 感想が返ってこないと月額の案内に進めないため、必ず感想を求めて閉じる
+3) 月額（月詠み）の案内は入れない。感想が返ってきてから、別の文で送る
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+
 def cmd_kantei(args: argparse.Namespace) -> None:
     """個別鑑定（有料）: 章立て約10,000字の鑑定文を生成し、和風デザインのPDFを出力。"""
     from . import kantei
     details = Path(args.details_file).read_text(encoding="utf-8")
     res = kantei.make_kantei(args.name, args.me, args.him, details)
     print(f"→ LINE公式アプリのチャットからPDFを添付して送付: {res['pdf']}")
+    print(_DELIVERY_REMINDER)
 
 
 def _clean_member_name(nickname: str) -> str:
@@ -215,6 +232,7 @@ def cmd_tsukiyomi(args: argparse.Namespace) -> None:
     # 控えを保存（💬会員相談の返信生成が「今月の月詠み」も踏まえられるように）
     store.add_reading(m["id"], f"月詠み {res['month_label']}", worry, res["body"][:15000])
     print(f"→ LINE公式アプリのチャットからPDFを添付して送付: {res['pdf']}")
+    print(_DELIVERY_REMINDER)
 
 
 def cmd_line_sweep(args: argparse.Namespace) -> None:
