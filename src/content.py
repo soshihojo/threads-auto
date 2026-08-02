@@ -72,11 +72,15 @@ def _ensure_line_url(text: str) -> str:
         while lines and lines[-1].strip() in ("", "▼", "▶", "→"):
             lines.pop()
         text = "\n".join(lines).strip()
-    if "生年月日" in text or "無料診断" in text:  # 無料鑑定CTAの回
+    # ★2026-08-02: 以前は「生年月日」の語があると固定投稿への案内を必ず足していたが、
+    #   DM受付の回にも足してしまい「DMに送って＋固定投稿から診断」の多段CTAになっていた。
+    #   多段CTAは実データでリード0が確定している形なので、DM導線の回には足さない。
+    is_dm_cta = "DM" in text or "ＤＭ" in text
+    if not is_dm_cta and ("生年月日" in text or "無料診断" in text):  # 固定投稿導線の回だけ補う
         if "固定投稿" not in text:
             text += "\n診断は固定投稿から30秒やで。"
-        if "無料" not in text:
-            text += f"\n{_NATURAL_FREE}"
+    if "無料" not in text and ("生年月日" in text or "無料診断" in text):
+        text += f"\n{_NATURAL_FREE}"
     return text
 
 
