@@ -319,6 +319,19 @@ _META_LEAK_RE = re.compile(
 )
 
 
+# 生成物の末尾に紛れ込む「数字だけの行」。
+# 実害: 2026-07-13〜08-03に6件、返信の最後に「0」だけの行が付いたまま送信された
+#（eriko・みき他）。椿は数字だけの行で文を終えないので、末尾に来たら必ず異物。
+_TRAILING_NUM_RE = re.compile(r"(?:[\r\n]+[ \t]*[0-9０-９]+[ \t]*)+\s*$")
+
+
+def _strip_trailing_numbers(text: str) -> str:
+    """末尾の「数字だけの行」を落とす。全部消える場合は元の文字列を返す
+    （鑑定番号の再掲など、本文が数字だけのケースを空送信にしないため）。"""
+    stripped = _TRAILING_NUM_RE.sub("", text)
+    return stripped if stripped.strip() else text
+
+
 def _plain_text(text: str) -> str:
     """LINE送信前の最終ガード：Markdown記号・アスタリスク・コード風の異物・
     システム由来の英単語（meta等）を完全に除去する
@@ -329,7 +342,8 @@ def _plain_text(text: str) -> str:
     text = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", text)      # 見出し記号
     text = re.sub(r"(?m)^\s{0,3}[*\-]\s+", "・", text)     # 箇条書き記号→・
     text = text.replace("*", "").replace("＊", "")          # 残ったアスタリスクは全除去
-    return re.sub(r"[ \t]{2,}", " ", text)                 # 除去で生じた連続スペースを詰める
+    text = re.sub(r"[ \t]{2,}", " ", text)                 # 除去で生じた連続スペースを詰める
+    return _strip_trailing_numbers(text)
 
 
 def _split_bubbles(text: str) -> list[str]:
