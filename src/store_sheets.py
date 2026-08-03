@@ -63,9 +63,16 @@ def _now() -> str:
 
 # Sheets APIの「読み取り60回/分・ユーザー」上限(429)対策：
 # ① 429が出たら指数バックオフでリトライ（クォータは分単位で回復する）
-# ② 同一プロセス内でデータ行の読み取りをキャッシュ。書き込みで無効化し、
-#    init_db()（Streamlitは描画ごとに先頭で呼ぶ）で全クリア＝描画ごとに最新化。
-_CACHE: dict[str, list] = {}
+# ② データ行の読み取りをキャッシュ。書き込みで無効化し、
+#    init_db()（Streamlitは描画ごとに先頭で呼ぶ）で全クリア。
+#
+# ★2026-08-03: キャッシュは「自分のプロセスが書いた時」しか無効化されず、
+#   他のプロセス（手元のCLI・ダッシュボード）が書いた変更が永久に見えんかった。
+#   実害: 桃葉さんを bot=hold にしたのに、Render側は古い bot=on を持ったままで
+#   自動返信が続いた（23:01:59にhold → 23:03:21に返信）。
+#   「ボットを止めたのに止まらん」は事故に直結するので、寿命(TTL)を付ける。
+_CACHE_TTL_SEC = int(env("SHEETS_CACHE_TTL_SEC") or "30")
+_CACHE: dict[str, tuple[float, list]] = {}
 _RETRY_DELAYS = (0, 5, 12, 25, 45)  # 秒
 
 
@@ -124,13 +131,15 @@ def _ws(name: str):
 
 
 def _data_rows(name: str) -> list[list]:
-    """データ行（FIRST_DATA_ROW以降・B列〜）の生の値を返す。読み取りはキャッシュ。"""
-    if name in _CACHE:
-        return _CACHE[name]
+    """データ行（FIRST_DATA_ROW以降・B列〜）の生の値を返す。
+    読み取りは _CACHE_TTL_SEC 秒だけキャッシュする（他プロセスの変更を取り込むため）。"""
+    hit = _CACHE.get(name)
+    if hit and (time.monotonic() - hit[0]) < _CACHE_TTL_SEC:
+        return hit[1]
     headers = TABLES[name]
     rng = f"{_col(0)}{FIRST_DATA_ROW}:{_col(len(headers) - 1)}"
     rows = _api(_ws(name).get, rng) or []
-    _CACHE[name] = rows
+    _CACHE[name] = (time.monotonic(), rows)
     return rows
 
 

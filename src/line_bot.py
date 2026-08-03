@@ -157,6 +157,39 @@ PURCHASE_WORDS = [
     "どう動", "いつ動", "いつ送", "何を送れば", "なんて送れば",
     "動くタイミング", "送るタイミング", "会員",
 ]
+# 短文なら、それ単体で購入サインとみなす語（意味が一つしかないものだけ）
+PURCHASE_WORDS_SHORT = [
+    "払えばいい", "払えばええ", "お金払え", "お金を払え", "有料でも", "有料なら",
+    "視てほしい", "視てもらいたい", "鑑定してもらいたい", "受けたい", "頼みたい",
+]
+
+# 椿が「そこは無料では言えん／ちゃんと視なあかん」と線を引いた直後の返事は、
+# 短うても「ほんなら頼むわ」の意味になる。語彙リストだけでは拾えんかった実害：
+#   ・桃葉さん 2026-08-03 22:57「お金払えばいいってことですか？」
+#   ・あやのさん 2026-08-03 11:57「お願いいたします」
+#   どちらもオファーが出ないまま会話が流れ、あやのさんはその3分後にブロックした。
+# 「お願いします」の類は、線を引いた直後でなければただの礼儀なので、必ず文脈で判定する。
+_DECLINE_RE = re.compile(
+    r"無料.{0,10}(?:言えん|言われへん|答えられん|渡せん|出せん|ポンと|ホイホイ)"
+    r"|無料の視方"
+    r"|ちゃんと視(?:な|んと|るわ|たい|てから|てほし)"
+    r"|処方箋の部類"
+    r"|視てから言うこと"
+)
+_ASSENT_RE = re.compile(
+    r"^\s*(?:はい|うん|ぜひ|お願い|おねがい|よろしく|やりたい|やってほし|"
+    r"受けたい|視てほし|見てほし|申し込|それで|わかりました|分かりました|"
+    r"承知|本気|払え|有料|して欲しい|してほしい|頼み)"
+)
+
+# 「お金がない・払えない」は購入サインの正反対。ここでオファーを送ったら最悪や。
+# 金額の心配を買う意思と読み違えんように、先に弾く。
+_MONEY_TROUBLE_RE = re.compile(
+    r"(?:お金|金銭|余裕|金額|予算).{0,8}(?:ない|無い|なくて|なくって|厳しい|きつい|高い|無理)"
+    r"|(?:払え|出せ|買え)(?:ん|ない|へん|ません)"
+    r"|(?:高くて|高いので|高いから)"
+)
+
 # 危険サイン（占いで扱わない。定型で受け止めて店主へ）
 DANGER_WORDS = ["死にたい", "消えたい", "自殺", "自傷", "リスカ", "死のう", "死んだほうが"]
 
@@ -452,11 +485,25 @@ def extract_birthdates(text: str) -> list[str]:
     return find_birthdates(text)
 
 
-def detect_signal(text: str) -> str | None:
+def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
+    """危険サイン／購入サインを判定する。
+
+    history を渡すと、直前に椿が「無料ではここまで」と線を引いた場合に、
+    短い同意（「お願いします」「お金払えばいいの？」）も購入サインとして拾う。
+    """
     if any(w in text for w in DANGER_WORDS):
         return "danger"
+    if _MONEY_TROUBLE_RE.search(text):
+        return None                       # 「お金がない」は買う意思の逆。絶対に売りにいかん
     if any(w in text for w in PURCHASE_WORDS):
         return "purchase"
+    if len(text) <= 40 and any(w in text for w in PURCHASE_WORDS_SHORT):
+        return "purchase"
+    if history and len(text) <= 40 and _ASSENT_RE.match(text):
+        last_bot = next((str(h["text"]) for h in reversed(history)
+                         if h.get("role") == "assistant"), "")
+        if _DECLINE_RE.search(last_bot):
+            return "purchase"
     return None
 
 
@@ -808,7 +855,7 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
         if _try_free_diagnosis(user_id, user, incoming, snd, history):
             return
 
-    if detect_signal(incoming) == "purchase":
+    if detect_signal(incoming, history) == "purchase":
         if _is_minor(user):
             # 未成年に有料オファーは自動送付しない（未成年者契約の取消リスク＋倫理）。
             # holdにして店主へ（手動対応待ち通知・ダッシュボードのバナーに出る）
