@@ -26,9 +26,9 @@ from datetime import datetime
 
 from . import store, web_diag
 from .config import active_profile, env
-from .diagnosis import (JARGON, _Z2H, find_birthdates,
+from .diagnosis import (AI_LEAK_RE, JARGON, _Z2H, find_birthdates,
                         generate_reading, honmei_shuku,
-                        parse_free_input, strip_jargon)
+                        parse_free_input, strip_ai_leak, strip_jargon)
 from .llm import complete, complete_vision
 
 LINE_API = "https://api.line.me/v2/bot"
@@ -191,6 +191,7 @@ NURTURE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば
 - 処方箋（いつ・何を・どう動くか）は渡さない。「今は送るな」「待っとき」のような否定形の指示も処方箋であり、無料では渡さない。渡してええのは「彼の性質・今の状況・気持ちの読み」まで
 - 行動を聞かれたら「そこは無料の視方じゃ答えられんとこや。ちゃんと視なあかん」と正直に線を引く（出し惜しみやなく、無料と有料の境界として言う）
 - 料金・商品・リンク・会員の話を自分から切り出して売り込まない（オファーは別で出す）
+- 【最重要・絶対厳禁】自分がAIであることを匂わせる一切を書かない。モデル名（Claude・Sonnet・GPT等）、開発元の名前、「執筆者」「作成者」「生成」といった署名、英語の署名行を、本文の途中にも末尾にも絶対に付けない。椿は生身の鑑定士であり、名乗るのは「椿」だけ。AIかと聞かれても否定も肯定もせず「ウチは椿や」と流す
 - 【最重要・世界観】「店主」「担当」「運営」など裏方の存在を客に絶対に明かさない。椿は"あんたを視る本人"として振る舞う。「それはウチの担当ちゃう」「店主に聞いて」は禁句
 - 鑑定書の届き方・納期など単純な事実の質問には、椿自身が普通に答えてよい：届き方＝「鑑定書はPDFでこのLINEに届く（郵送やない）」、納期＝「申し込んでくれたら数日以内にここに届ける」。返金や複雑な手続きの相談だけは「そこはちょっと確認して、あとで返すな」と受ける（店主とは言わない）
 - 『宿曜』の語・宿の名前・占い専門用語は出さない。「ウチが視たら」でよい
@@ -343,7 +344,10 @@ def _plain_text(text: str) -> str:
     text = re.sub(r"(?m)^\s{0,3}[*\-]\s+", "・", text)     # 箇条書き記号→・
     text = text.replace("*", "").replace("＊", "")          # 残ったアスタリスクは全除去
     text = re.sub(r"[ \t]{2,}", " ", text)                 # 除去で生じた連続スペースを詰める
-    return _strip_trailing_numbers(text)
+    text = _strip_trailing_numbers(text)
+    # モデル名・署名（「執筆者: Claude Sonnet 4.5」等）は、椿がAIやと露呈する最悪の事故。
+    # 該当行を丸ごと落とす。全部落ちたら空文字＝送信を失敗させ、スイープに作り直させる
+    return strip_ai_leak(text)
 
 
 def _split_bubbles(text: str) -> list[str]:
@@ -433,6 +437,10 @@ def generate_nurture(user: dict, history: list[dict], incoming: str) -> str:
     if _META_LEAK_RE.search(text):
         problems.append("meta・system等の英単語やシステム由来の文字列が混入した。"
                         "椿の返信は関西弁の日本語だけで書き、英単語やコード片を一切混ぜないこと")
+    if AI_LEAK_RE.search(text):
+        problems.append("モデル名や『執筆者』などの署名が混入した。これは最も重大な事故で、"
+                        "椿が生身の人間やないとバレる。返信は椿本人の言葉だけで、"
+                        "署名・作成者名・モデル名を一切書かないこと")
     if problems:
         print(f"[line_bot] 返信を作り直し: {problems}")
         text = complete(NURTURE_SYSTEM + "\n\n【厳重注意】" + "。".join(problems) + "。",

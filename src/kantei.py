@@ -20,7 +20,8 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import ROOT
-from .diagnosis import _shuku_distance, honmei_shuku, strip_jargon
+from .diagnosis import (_shuku_distance, honmei_shuku, strip_ai_leak,
+                        strip_jargon)
 from .llm import complete
 
 OUT_DIR = ROOT / "kantei_out"
@@ -66,6 +67,7 @@ KANTEI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば�
 - 病気・健康・金運の断定はしない。過度に不安を煽らない
 - マークダウン記号（#や*や-）は使わない。プレーンな段落文で書く。段落の区切りは空行
 - 絵文字は使わない（最終章の締めの一文にだけ🌙を1つ）
+- 【絶対厳禁】自分がAIであることを匂わせる一切を書かない。モデル名（Claude・Sonnet・GPT等）、開発元の名前、「執筆者」「作成者」「生成」といった署名や英語の署名行を、本文の途中にも末尾にも絶対に付けない。名乗るのは「椿」だけ
 - 指定された章の内容だけを書く。他の章で扱う内容を先取りしない。章タイトルや見出しは書かず、本文だけを出力する"""
 
 _SAFETY = (
@@ -401,6 +403,13 @@ def generate_chapters(name: str, me_birth: str, him_birth: str, details: str,
         )
         # 宿名が漏れることがあるので、納品物に入る前に必ず最終ガードを通す
         body = strip_jargon(complete(KANTEI_SYSTEM, user, max_tokens=3000, temperature=0.7).strip())
+        # モデル名・署名が混じった行を落とす（納品PDFに入ったら取り返しがつかない）。
+        # 落として空になったら一度だけ書き直させる
+        cleaned = strip_ai_leak(body)
+        if cleaned != body:
+            print(f"  ⚠ {title}: モデル名・署名の混入を除去した")
+        body = cleaned or strip_jargon(strip_ai_leak(
+            complete(KANTEI_SYSTEM, user, max_tokens=3000, temperature=0.7).strip()))
         done.append({"key": key, "title": title, "body": body})
         print(f"  ✓ {title}（{len(body)}字）")
     return done
@@ -525,6 +534,62 @@ def html_to_pdf(html_path: Path, pdf_path: Path) -> None:
         pass
 
 
+DELIVERY_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。
+出来上がった個別鑑定書のPDFを相談者に手渡すとき、LINEに添える【納品文】を書く。
+
+これはPDFの要約やない。相談者が「まず何を読んだらええか」が分かって、
+読む前から「これは自分のために書かれた」と伝わる、椿からの一通や。
+
+声: 一人称「ウチ」、相手は「あんた」。関西弁・タメ口。毒舌7・愛3の姉御。
+LINEで読む文章やから、堅くせず、改行を多めに、段落ごとに一行空ける。
+
+必ず入れる要素（この順で）:
+1. 「待たせたな。鑑定書、仕上がったで」から入る
+2. その人が一番知りたがっていた問いを、本人の言葉で引用し、
+   それに何章で答えたかをはっきり書く
+3. その前に読んでほしい章と、そこに何が書いてあるかを一言で
+4. 処方箋の章に、具体的に何が入っているか（実際に送る文面まで書いた等）
+5. 相談のやりとりの中で、その人が自分でやっていた良い一手を必ず一つ挙げて褒める。
+   ここは具体的に。何をしたから偉いのかを名指しする
+6. 締めは【感想を求める】で終える。
+   「どこが刺さったか、逆に腑に落ちんかったか教えてな。
+   それが分かると次に視るときの精度が変わる」という趣旨で閉じる
+
+厳守:
+- 月額会員・月詠み・料金・リンクの話は一切書かない（感想が返ってきてから別便で送るため）
+- 「分からんことがあったら遠慮せんと聞いて」で終わらせない。必ず感想を求めて閉じる
+- 章の中身を要約しすぎない。読む動機を渡すだけにとどめる
+- 『宿曜』という占術名、宿の名前、専門用語は書かない
+- 結果の保証はしない
+- マークダウン記号（#や*や-）は使わない。プレーンな文章
+- 絵文字は締めの一文に🌙を1つだけ
+- 【絶対厳禁】自分がAIであることを匂わせる一切を書かない。モデル名（Claude・Sonnet・GPT等）、
+  開発元の名前、「執筆者」「作成者」「生成」といった署名や英語の署名行を絶対に付けない
+- 出力は納品文の本文だけ。前置きや説明を付けない"""
+
+
+def generate_delivery_note(name: str, chapters: list[dict], details: str) -> str:
+    """鑑定書と一緒にLINEへ送る【納品文】を生成する。
+
+    鑑定書だけ渡して終わりにすると、感想が返ってこず月詠みの案内に進めない。
+    店主が手で書き起こす運用は実際に抜けたことがあるので、生成と同時に必ず出す。
+    """
+    toc = "\n".join(f"第{_KANJI_NUM[i]}章 {c['title']}" for i, c in enumerate(chapters))
+    digest = "\n\n".join(
+        f"【第{_KANJI_NUM[i]}章 {c['title']}】\n{c['body'][:500]}…" for i, c in enumerate(chapters)
+    )
+    user = (
+        f"=== 相談者の呼び名 ===\n{name}\n\n"
+        f"=== 相談者から届いた相談文（全文。ここから一番知りたかった問いと、"
+        f"この人が自分でやっていた良い一手を拾う） ===\n{details}\n\n"
+        f"=== 出来上がった鑑定書の目次 ===\n{toc}\n\n"
+        f"=== 各章の書き出し（何を書いたかの参考） ===\n{digest}\n\n"
+        "この鑑定書に添える【納品文】を書いてください。本文だけを出力してください。"
+    )
+    text = complete(DELIVERY_SYSTEM, user, max_tokens=1600, temperature=0.7).strip()
+    return strip_ai_leak(strip_jargon(text))
+
+
 def make_kantei(name: str, me_birth: str, him_birth: str, details: str,
                 today: str | None = None) -> dict:
     """鑑定書を生成してPDFまで出力。{html, pdf, chars} を返す。"""
@@ -544,8 +609,14 @@ def make_kantei(name: str, me_birth: str, him_birth: str, details: str,
     shutil.copy2(pdf_path, dl_path)
     print(f"📜 完成: {pdf_path}（本文{total}字）")
     print(f"⬇️ ダウンロードにも配置: {dl_path}")
+    # 納品文は「あとで書く」と必ず抜けるので、鑑定書と同時に必ず出す（2026-08-04ルール化）
+    print("✍️ 納品文を生成中…")
+    note = generate_delivery_note(name, chapters, details)
+    note_path = OUT_DIR / f"納品文_{name}.txt"
+    note_path.write_text(note, encoding="utf-8")
+    print(f"💬 納品文: {note_path}")
     return {"html": str(html_path), "pdf": str(pdf_path), "download": str(dl_path),
-            "chars": total}
+            "chars": total, "note": note, "note_path": str(note_path)}
 
 
 # ---------------- 月詠み（月額会員向けの月次ミニ鑑定書） ----------------
@@ -567,6 +638,7 @@ TSUKIYOMI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つ�
 - 結果の保証はしない。過度に不安を煽らない。病気・健康・金運の断定はしない
 - 「続きはLINEで」のような引っ張りはしない（会員には渡しきる）
 - マークダウン記号は使わない。プレーンな段落文（段落の区切りは空行）。絵文字は最終章の締めの一文にだけ🌙を1つ
+- 【絶対厳禁】自分がAIであることを匂わせる一切を書かない。モデル名（Claude・Sonnet・GPT等）、開発元の名前、「執筆者」「作成者」「生成」といった署名や英語の署名行を、本文の途中にも末尾にも絶対に付けない。名乗るのは「椿」だけ
 - 指定された章の内容だけを書く。章タイトルや見出しは書かず、本文だけを出力する"""
 
 TSUKIYOMI_CHAPTERS = [
