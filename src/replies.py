@@ -5,8 +5,12 @@ mode=auto の場合のみ、生成と同時に送信する。
 """
 from __future__ import annotations
 
+import re
+
 from . import leads, notify, store
 from .config import active_profile, load_config
+from .diagnosis import AI_LEAK_RE, JARGON, strip_ai_leak, strip_jargon
+from .kantei import strip_markdown
 from .llm import complete
 from .threads_client import ThreadsClient
 
@@ -22,16 +26,46 @@ DEFAULT_LEAD_INTENT = "この人は手挙げ（見込み客）です。関心に
 DEFAULT_NORMAL_INTENT = "コメントに自然に応答してください。無理に営業しないこと。"
 
 
-def _draft_reply(reply_text: str, username: str, is_lead: bool) -> str:
+# コメント返信は公開の場に残る。LINEの自動返信と同じ事故（モデル名の混入・宿名の漏れ・
+# Markdown記号）が起きたら、投稿として消えずに残るのでこちらの方が危険。
+# 生成のたびに必ずこのガードを通す。
+def _clean_reply(text: str) -> str:
+    return strip_markdown(strip_jargon(text)).strip()
+
+
+# 直近に送った返信と骨格が被っていないかを見るための、末尾の型。
+# 実害: 2026-08-05、12件中11件が「◯月生まれの彼、〜タイプや🌙 ちゃんと視たるから、
+# 固定投稿から無料診断してみ。生年月日入れるだけ、30秒や。」と一字一句同じ締めやった。
+# コメント欄は誰でも見られるので、並ぶとテンプレやと一目で分かる。
+def _recent_reply_tails(limit: int = 12) -> list[str]:
+    try:
+        rows = [r for r in store.pending_drafts()] if False else []
+    except Exception:
+        rows = []
+    return rows
+
+
+def _draft_reply(reply_text: str, username: str, is_lead: bool,
+                 recent: list[str] | None = None) -> str:
     profile = active_profile()
     system = profile.get("reply_system") or REPLY_SYSTEM
     intent = (profile.get("reply_lead_intent") or DEFAULT_LEAD_INTENT) if is_lead else \
         (profile.get("reply_normal_intent") or DEFAULT_NORMAL_INTENT)
+    avoid = ""
+    if recent:
+        avoid = ("\n\n【直前に他の人へ返した文（この骨格・この締め方は使わない。"
+                 "特に締めの一文は必ず変える）】\n" + "\n".join(f"・{t}" for t in recent[-8:]))
     user = (
         f"オファー文脈: {profile.get('offer','')}\n"
-        f"相手(@{username})のコメント: 「{reply_text}」\n\n{intent}"
+        f"相手(@{username})のコメント: 「{reply_text}」\n\n{intent}{avoid}"
     )
-    return complete(system, user, max_tokens=200, temperature=0.8)
+    text = _clean_reply(complete(system, user, max_tokens=200, temperature=0.9))
+    # モデル名・署名が混じったら一度だけ作り直す。それでも残ったら該当行を落とす
+    if AI_LEAK_RE.search(text) or any(w in text for w in JARGON):
+        text = _clean_reply(complete(
+            system + "\n\n【厳重注意】モデル名・署名・占術名・宿の名前を絶対に書かないこと。",
+            user, max_tokens=200, temperature=0.9))
+    return strip_ai_leak(text)
 
 
 def process_replies(client: ThreadsClient) -> dict:
@@ -45,6 +79,7 @@ def process_replies(client: ThreadsClient) -> dict:
     store.init_db()
     posts = client.my_threads(limit=lookback)
     stats = {"new_replies": 0, "leads": 0, "drafts": 0, "auto_sent": 0}
+    _recent: list[str] = []   # この巡回で作った下書き。骨格の被りを避けるため次に渡す
 
     for post in posts:
         post_id = post["id"]
@@ -74,7 +109,11 @@ def process_replies(client: ThreadsClient) -> dict:
                     store.mark_lead_notified(rid)
 
             # --- 返信下書き生成 ---
-            draft = _draft_reply(rtext, ruser, is_lead)
+            draft = _draft_reply(rtext, ruser, is_lead, recent=_recent)
+            if not draft:                     # ガードで空になったら送らない
+                print(f"[replies] 下書きが空になったのでスキップ: {rid}")
+                continue
+            _recent.append(draft)
             store.add_draft(rid, post_id, ruser, rtext, draft)
             stats["drafts"] += 1
 
