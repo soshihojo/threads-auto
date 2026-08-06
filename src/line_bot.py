@@ -332,6 +332,21 @@ def _diag_count(history: list[dict]) -> int:
                and not _is_offer_text(h["text"]))
 
 
+def _is_established(history: list[dict]) -> bool:
+    """もう「初めて来た相談者」やない人か。初回の無料診断を送ってええのは、浅い人だけ。
+
+    ★2026-08-06の事故：有料会員の田中麻衣さん（履歴203通）に、初回の無料診断が
+      自動送信された。原因は recent_line_chats(limit=200) の窓から古い診断が溢れて
+      「まだ診断してへん」と誤判定したこと。
+      以前このバグで窓を12→200に広げたが、203通の人が出て再発した。
+      窓を広げ続けても、長い人が現れれば必ずまた起きる。
+
+    せやから件数そのもので見る。20通以上やりとりしとる人に
+    「まずはここまでや、ひとつ教えてな」の初回診断を送るのは、どんな状況でも間違い。
+    """
+    return len(history) >= 20
+
+
 def _offer_already_sent(user_id: str) -> bool:
     """この人に有料オファーを送った履歴があるか。送信の直前に必ずDBを読み直して判定する。
     連投（数秒間隔の複数メッセージ）をWebhookが並行処理すると、それぞれが独立に
@@ -676,9 +691,20 @@ def handle_event(ev: dict) -> None:
         # ①Web診断の鑑定番号 ②未診断の人が生年月日・①〜④テンプレを送ってきた場合。
         #（無視すると診断が永遠に届かない実害があった。番号=恵美、テンプレ=kaorin）
         if bot_state == "hold":
+            # ★2026-08-06：月額会員には機械を一切喋らせない。
+            #   会員は店主が手動で継続対応しとる相手で、自動返信は必ず事故になる。
+            #   判定不能（unknown）は会員側に倒す＝疑わしきは黙る
+            if _member_status(user) != "free":
+                print(f"[line_bot] 会員なので自動返信しない: {user_id}")
+                return
             snd = lambda t: _send(user_id, reply_token, t)
             history = store.recent_line_chats(user_id, limit=200)
             base = _diag_count(history)
+            # 履歴が長い人は、窓から古い診断が溢れて base=0 に見えることがある。
+            # 件数でも見て、確立済みの相手には初回診断を送らせない
+            if _is_established(history):
+                _handle_code(user_id, incoming, snd)   # 番号だけは受ける
+                return
             if not _handle_code(user_id, incoming, snd) and base == 0:
                 _try_free_diagnosis(user_id, user, incoming, snd, history)
             # 診断が新たに届いた＝再来訪の明確な意思表示なので、AI会話を再開する
@@ -851,7 +877,7 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
     # 生年月日が二人分揃っていて、まだ無料診断を送っていなければ、自動で無料診断を返す
     #（「鑑定してほしい」等の購入ワードが同時に入っていても、診断が先。
     #  ただし無料上限に達した人は下のオファーへ）
-    if not diag_sent and not over_limit:
+    if not diag_sent and not over_limit and not _is_established(history):
         if _try_free_diagnosis(user_id, user, incoming, snd, history):
             return
 
