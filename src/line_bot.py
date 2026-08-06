@@ -911,8 +911,19 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
         over_limit = bot_replies >= FREE_REPLY_LIMIT
 
     # 無料返信の上限：ナーチャリング返信（全履歴・診断と③④は数えない）が
-    # FREE_REPLY_LIMIT通に達していたら有料オファーを送って停止（未成年には送らず会話を続ける）
-    if over_limit and allow_offer and not _is_minor(user):
+    # FREE_REPLY_LIMIT通に達していたら停止する。未成年にはオファーを出さずに止めるだけ。
+    if over_limit and allow_offer:
+        if _is_minor(user):
+            # 未成年に有料オファーは送らん。せやけど、送らんまま会話だけ無限に続けるんもあかん。
+            # ★2026-08-06：14歳の中学生に、一日で30通返し続けとった（合計62通）。
+            #   オファー自体は未成年ガードで正しく止まっとった。
+            #   問題は、止まる仕組みがこっちの経路に無かったこと。
+            #   購入サインの側は hold にして手動へ渡すのに、上限の側は素通りして
+            #   generate_nurture に落ちるだけやったので、無料の会話が無制限に伸びた。
+            #   上限に達したら、黙って hold にして自動返信を終う。オファーは出さん。
+            store.upsert_line_user(user_id, bot="hold")
+            print(f"[line_bot] 未成年が無料上限に達したので自動返信を止めた: {user_id}")
+            return
         if _offer_already_sent(user_id):
             # すでにオファー済みなら二度は送らない（続きは店主が手動で）
             store.upsert_line_user(user_id, bot="hold")
