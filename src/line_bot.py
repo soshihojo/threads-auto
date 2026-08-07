@@ -751,6 +751,39 @@ def _handle_code(user_id: str, incoming: str, snd) -> bool:
     return False  # 長文中の数字は番号ではなかったとみなし、通常の会話フローへ
 
 
+def _wrote_own_words(text: str, min_chars: int = 40) -> bool:
+    """相談者が、自分の言葉で状況をちゃんと書いとるか。
+
+    ★2026-08-07の実害（mieさん）：
+      「三十年連れ添うたパートナーが、二十年前の女性に惹かれとる。職場が同じで毎日顔を合わす」
+      ——これを二百四十三字で書いて寄越したのに、椿は③④の選択肢を聞き直した。
+      状況の判定が「音信不通／既読スルー／冷められた／別れ話／片思い」の
+      決め打ちしか見てへんので、どの箱にも入らん人が「情報なし」になってまう。
+      せやけど、箱に入らん人ほど、自分の言葉で長う書いてくれとるんや。
+      そこを聞き直したら「読んでへんのか」にしかならん。
+
+      生成側は status が空でも「（相談文から読み取る）」で本文ごと渡す作りになっとる。
+      せやから、本人が書いてくれとるなら、聞き直さんとそのまま視たらええ。
+
+    数字・日付の記号・①②③④に加えて、挨拶と事務連絡も落としてから測る。
+    「朝早くにすいません。鑑定番号は5473です。私は1978/3/23で彼は1982/7/6です。
+    　ごめんなさい、時間はわかりません」——これで四十二字あるが、中身は一つも無い。
+    こういうんを「書いてくれた」と数えたら、状況ゼロで診断を出してまう。
+    """
+    body = _PLEASANTRY_RE.sub("", text or "")
+    body = re.sub(r"[0-9０-９.．/／年月日\-\s　()（）①②③④⑤]", "", body)
+    return len(body) >= min_chars
+
+
+# 挨拶・詫び・事務連絡。ここだけで埋まった文は「状況を書いた」ことにならん
+_PLEASANTRY_RE = re.compile(
+    r"すいません|すみません|ごめんなさい|ごめん|よろしくお願いします|よろしく|"
+    r"ありがとうございます|ありがとう|おはようございます|こんにちは|こんばんは|"
+    r"朝早くに|夜分に|失礼します|お世話になります|はじめまして|"
+    r"鑑定番号|診断番号|番号は|生年月日|時間はわかりません|時間は不明|わかりません|不明です"
+)
+
+
 def _try_free_diagnosis(user_id: str, user: dict, incoming: str, snd, history: list[dict]) -> bool:
     """無料診断のトリガー処理。③④ヒアリングか診断を送ったらTrue。
     診断フローの合図（今のメッセージに生年月日がある／状況が読み取れる／③④を質問済み）が
@@ -764,8 +797,9 @@ def _try_free_diagnosis(user_id: str, user: dict, incoming: str, snd, history: l
     asked = any(ASK_MARKER in h["text"] for h in history if h["role"] == "assistant")
     if not (find_birthdates(incoming) or parsed["status"] or asked):
         return False
-    if not parsed["status"] and not asked:
-        # 状況がまだ分からない → まず③④の定型ヒアリングを返す
+    if not parsed["status"] and not asked and not _wrote_own_words(recent_user):
+        # 状況がまだ分からんし、本人も書いてくれてへん → ③④の定型ヒアリングを返す
+        #（本人が自分の言葉で書いてくれとる時は、聞き直さんと、そのまま下の診断へ進む）
         snd(ASK_DETAILS)
         return True
     res = _retry(lambda: generate_reading(
