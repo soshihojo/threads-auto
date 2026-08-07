@@ -183,6 +183,10 @@ PURCHASE_WORDS = [
 PURCHASE_WORDS_SHORT = [
     "払えばいい", "払えばええ", "お金払え", "お金を払え", "有料でも", "有料なら",
     "視てほしい", "視てもらいたい", "鑑定してもらいたい", "受けたい", "頼みたい",
+    # ★2026-08-07追加。Misakiさんが「椿様に見てもらうにはどうしたら良いですか？」と
+    #   聞いてきたのに拾えんかった。「〜してもらうには」は依頼の形や
+    "視てもらうに", "視てもらえ", "視てもらう方法", "視てもらうこと",
+    "鑑定料", "鑑定を受け", "お願いするに",
 ]
 
 # ★2026-08-07追加。実データを洗って、拾えてへんかった言い回しを型ごとに足した。
@@ -291,6 +295,8 @@ NURTURE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば
 - 料金・商品・リンク・会員の話を自分から切り出して売り込まない（オファーは別で出す）
 - 【最重要・絶対厳禁】自分がAIであることを匂わせる一切を書かない。モデル名（Claude・Sonnet・GPT等）、開発元の名前、「執筆者」「作成者」「生成」といった署名、英語の署名行を、本文の途中にも末尾にも絶対に付けない。椿は生身の鑑定士であり、名乗るのは「椿」だけ。AIかと聞かれても否定も肯定もせず「ウチは椿や」と流す
 - 【最重要・世界観】「店主」「担当」「運営」など裏方の存在を客に絶対に明かさない。椿は"あんたを視る本人"として振る舞う。「それはウチの担当ちゃう」「店主に聞いて」は禁句
+- 【最重要・絶対厳禁】「このあと案内が来る」「料金はあとで送る」「もうちょい待っといて」のように、後から何かを届ける約束を絶対にしない。あなたは案内を送る仕組みを持っていない。約束しても永遠に届かず、相手は待ち続ける（実際にそうなった。三歳と一歳の子を抱えた人が「お待ちしてます」と返して、何も届かんかった）。
+　料金・申し込み方法・「どうしたら視てもらえるか」を聞かれたら、予告して終わらせず、「そこは無料の視方じゃ答えられん」「ちゃんと視なあかんとこや」と線を引いて止める。線を引いた直後の案内は、別の仕組みが自動で出す。あなたはその存在に触れんでよい
 - 鑑定書の届き方・納期など単純な事実の質問には、椿自身が普通に答えてよい：届き方＝「鑑定書はPDFでこのLINEに届く（郵送やない）」、納期＝「申し込んでくれたら数日以内にここに届ける」。返金や複雑な手続きの相談だけは「そこはちょっと確認して、あとで返すな」と受ける（店主とは言わない）
 - 『宿曜』の語・宿の名前・占い専門用語は出さない。「ウチが視たら」でよい
 - 復縁や結果を保証しない。過度に不安を煽らない。病気・健康・金運の断定をしない
@@ -547,6 +553,43 @@ def extract_birthdates(text: str) -> list[str]:
     return find_birthdates(text)
 
 
+# 表記ゆれを吸収してから語彙を当てる。
+# ★2026-08-07の実害（Misakiさん）：три回も聞かれとったのに、一回も検知できんかった。
+#   「この先どうしたら良いでしょうか？」「どうしたら良いですか？」
+#   「椿様に見てもらうにはどうしたら良いですか？」
+#   リストは「どうしたらいい」「視てもらいたい」やったが、本人は
+#   「どうしたら良い」（漢字）「見てもらう」（見／視の違い）で書いとった。
+#   語彙を足し続けても、表記ゆれは無限に湧く。入口で正規化する方が確実や。
+_SIGNAL_NORMALIZE = [
+    ("良い", "いい"), ("良く", "よく"), ("宜しい", "いい"),
+    ("見て", "視て"), ("観て", "視て"),
+    ("出来", "でき"), ("下さい", "ください"), ("頂き", "いただき"),
+]
+
+
+def _normalize_for_signal(text: str) -> str:
+    """購入サインを当てる前に、漢字・かなの揺れを寄せる。"""
+    for a, b in _SIGNAL_NORMALIZE:
+        text = text.replace(a, b)
+    return text
+
+
+# 生成が「このあと案内が来るから待っといて」と書いてまう型。
+# これが出た時点で、生成自身は「この人は買う話をしとる」と分かっとる。
+# せやのにオファーが出んかったら、約束だけして永遠に届かん。実際そうなった。
+_PROMISE_LATER_RE = re.compile(
+    r"(?:案内|料金|申し込み|申込|値段|金額)[^。\n]{0,20}"
+    r"(?:来る|届く|送る|出す|渡す|後で|あとで|そのうち|追って)"
+    # 「楽しみに待っとき」「気長に待ちな」は彼の話であって、椿が何か届ける約束やない
+    r"|(?<!楽しみに)(?<!気長に)(?:ちょい|もうちょい|もう少し|少し)?待っと(?:いて|ってな|き)"
+    r"|後で案内|あとで案内|追って案内|案内(?:する|しとく|出す)(?:わ|な|で)?"
+    r"|今はまだ.{0,10}(?:出せん|渡せん|言えん).{0,14}待"
+    # 「整理してから渡す」「まとめてから届ける」も、後から何かを届ける約束や
+    r"|(?:整理|準備|用意|まとめ)し?て?から.{0,8}(?:渡す|届け|送る|出す)"
+    r"|(?:こっち|ウチ)で.{0,12}(?:から|あと).{0,8}(?:渡す|届け|送る)"
+)
+
+
 def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
     """危険サイン／購入サインを判定する。
 
@@ -557,13 +600,14 @@ def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
         return "danger"
     if _MONEY_TROUBLE_RE.search(text):
         return None                       # 「お金がない」は買う意思の逆。絶対に売りにいかん
-    if any(w in text for w in PURCHASE_WORDS):
+    norm = _normalize_for_signal(text)    # 「どうしたら良い」→「どうしたらいい」等
+    if any(w in norm for w in PURCHASE_WORDS):
         return "purchase"
-    if len(text) <= 40 and any(w in text for w in PURCHASE_WORDS_SHORT):
+    if len(text) <= 40 and any(w in norm for w in PURCHASE_WORDS_SHORT):
         return "purchase"
-    if len(text) <= _PURCHASE_MID_LEN and any(w in text for w in PURCHASE_WORDS_MID):
+    if len(text) <= _PURCHASE_MID_LEN and any(w in norm for w in PURCHASE_WORDS_MID):
         return "purchase"
-    if len(text) <= _PURCHASE_MID_LEN and _DELIVERY_Q_RE.search(text):
+    if len(text) <= _PURCHASE_MID_LEN and _DELIVERY_Q_RE.search(norm):
         return "purchase"
     if history and len(text) <= 40 and _ASSENT_RE.match(text):
         last_bot = next((str(h["text"]) for h in reversed(history)
@@ -1039,6 +1083,25 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
     text = _retry(lambda: generate_nurture(user, transcript[:-1], incoming), "返信の生成")
     if text is None:
         return
+
+    # ★最後の安全網（2026-08-07）。
+    #   生成が「このあと案内が来るから待っといて」と書いた＝生成自身が
+    #   「この人は買う話をしとる」と分かっとる、いうことや。
+    #   せやのに語彙リストが拾えてへんかったせいで、オファーが出んまま
+    #   「待っといて」だけ送って終わる事故が続いた。
+    #   実害（Misakiさん・たけうちももこさん）：どちらも「お待ちしてます」と
+    #   返してきて、案内は永遠に来んかった。三歳と一歳の子を抱えた人を待たせた。
+    #   予告を検知したら、その文は捨てて、代わりにオファーを送る。
+    if _PROMISE_LATER_RE.search(text) and not _is_minor(user):
+        print(f"[line_bot] 生成が『あとで案内』と予告したのでオファーに切り替え: {user_id}")
+        if _offer_already_sent(user_id):
+            store.upsert_line_user(user_id, bot="hold")
+            return
+        if snd(generate_offer(user, history, incoming)):
+            _send_offer_after(user_id, snd)
+            store.upsert_line_user(user_id, bot="hold")
+        return
+
     snd(text)
 
 
