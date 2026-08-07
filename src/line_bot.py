@@ -257,19 +257,28 @@ ASK_DEEPER = (
     "\n"
     "どっちや🌙"
 )
-ASK_DEEPER_MARK = "自分の勘で動くか"
+# ★2026-08-08：文面を改稿した時にマーカーも替えたら、旧文面で聞いた人を
+#   「まだ聞いてへん」と誤判定して二度聞きした（石井希美さんに実害）。
+#   マーカーは増やすだけにして、旧文面のも残す。
+_ASK_DEEPER_MARKS = ("自分の勘で動くか", "もっと深く視てほしいか")
+ASK_DEEPER_MARK = _ASK_DEEPER_MARKS[0]
 
 
 def _asked_deeper(history: list[dict]) -> bool:
-    """もう「深く視てほしいか」を聞いたか。二度は聞かん。"""
-    return any(ASK_DEEPER_MARK in str(h.get("text", ""))
+    """もう「深く視てほしいか」を聞いたか。二度は聞かん。文面の新旧どちらも数える。"""
+    return any(any(m in str(h.get("text", "")) for m in _ASK_DEEPER_MARKS)
                for h in history if h.get("role") == "assistant")
+# ASK_DEEPER への「断り・保留」。これが返ってきたら売らん
+_REFUSAL_RE = re.compile(
+    r"自分で|勘で動|考え|今はいい|今は大丈夫|大丈夫です|いらん|いらない|"
+    r"やめ|結構|けっこうです|また今度|あとで|後で|うーん|迷|むず|悩|わからん|分からん"
+)
 _ASSENT_RE = re.compile(
     r"^\s*(?:はい|うん|ぜひ|お願い|おねがい|よろしく|やりたい|やってほし|"
     r"受けたい|視てほし|見てほし|申し込|それで|わかりました|分かりました|"
     r"承知|本気|払え|有料|して欲しい|してほしい|頼み|"
     # ASK_DEEPER（勘で動くか、視てから動くか）への自然な返事
-    r"視て|見て|後者|ウチに|椿に|勘では動)"
+    r"視て|見て|みて|後者|ウチに|椿に|勘では動)"
 )
 
 # 「お金がない・払えない」は購入サインの正反対。ここでオファーを送ったら最悪や。
@@ -652,6 +661,16 @@ def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
         last_bot = next((str(h["text"]) for h in reversed(history)
                          if h.get("role") == "assistant"), "")
         if _DECLINE_RE.search(last_bot):
+            return "purchase"
+    # ★ASK_DEEPER（二択の意思確認）の直後だけは、受けを逆にする。
+    #   同意の語を数え上げるんやのうて、「断りやなければ視てほしい」で受ける。
+    #   実害（2026-08-08・石井希美さん）：二択に「みて」と答えたのに、
+    #   ひらがなが同意語に無うて拾えず、無言のまま hold になった。
+    #   二択に答えてくれた人を語彙の穴で取りこぼすのは、もう終わりにする。
+    if history and len(text) <= 30:
+        last_bot = next((str(h["text"]) for h in reversed(history)
+                         if h.get("role") == "assistant"), "")
+        if any(m in last_bot for m in _ASK_DEEPER_MARKS) and not _REFUSAL_RE.search(text):
             return "purchase"
     return None
 
