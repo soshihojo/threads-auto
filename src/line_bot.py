@@ -37,7 +37,7 @@ LINE_API = "https://api.line.me/v2/bot"
 LINE_BOT_MODEL = env("LINE_BOT_MODEL") or "claude-sonnet-5"
 
 # AIが無料で返す回数の上限。超えたら有料オファーを送って停止（店主にバトンタッチ）
-FREE_REPLY_LIMIT = int(env("LINE_FREE_REPLY_LIMIT") or "10")
+FREE_REPLY_LIMIT = int(env("LINE_FREE_REPLY_LIMIT") or "7")
 
 # 人間らしい「間」：即答するとAI感が出るため、返信前にランダムに待つ秒数の範囲。
 # 生成時間（5〜15秒）と合わせて受信から30〜50秒後の返信になる。
@@ -162,6 +162,31 @@ PURCHASE_WORDS_SHORT = [
     "払えばいい", "払えばええ", "お金払え", "お金を払え", "有料でも", "有料なら",
     "視てほしい", "視てもらいたい", "鑑定してもらいたい", "受けたい", "頼みたい",
 ]
+
+# ★2026-08-07追加。実データを洗って、拾えてへんかった言い回しを型ごとに足した。
+# 全部「短文でだけ」効かせる。同じ語がヒアリングの長文回答にも出てきて、
+# そこで拾うと誤爆するからや（例「彼が郵送してくれたものに関する話題」）。
+_PURCHASE_MID_LEN = 50
+PURCHASE_WORDS_MID = [
+    # ①「なんて返したらええか分からん」＝処方箋そのものの要求。
+    #    既存は「なんて送れば」しか無うて、「返せば」「言えば」を落としとった。
+    #    実害：ふうさん「金曜日に既読つけて なんて返せばいいかわかなくなってます」
+    "なんて返", "何て返", "どう返せ", "どう返し", "どう伝えれ",
+    "なんて言え", "何て言え", "何て言お", "なんて言お", "なんて伝え", "何て伝え",
+    # ②「もう諦めた方がええんかな」＝白黒つけてくれ、いう問い。無料では答えられん類や
+    "諦めた方が", "諦めたほうが", "諦めるべき", "あきらめた方が", "あきらめるべき",
+    # ③商品の中身を確かめにきとる。ここまで来た人は、ほぼ買う気で聞いとる
+    "視る場合", "視てもらったら", "視てもらうと", "何がわかる", "何が分かる",
+    # ④鑑定書に何を求めとるかを、自分から言うてきた形
+    "そう書いて", "書いて欲し", "書いてほし", "意見が聞きた", "意見を聞きた", "第三者の意見",
+]
+
+# 納品・受け取りの質問は、買う直前か買った直後にしか出えへん。いちばん濃いサインや。
+# ただし「彼が郵送してくれた」みたいな話題と混ざるので、疑問形に限る。
+_DELIVERY_Q_RE = re.compile(
+    r"(?:届く|届き|届け|配送|郵送|送られてく|送られて来|手紙で)"
+    r"[^。\n]{0,24}(?:\?|？|ですか|でしょうか|んか\b|のか\b|かな|感じ)"
+)
 
 # 椿が「そこは無料では言えん／ちゃんと視なあかん」と線を引いた直後の返事は、
 # 短うても「ほんなら頼むわ」の意味になる。語彙リストだけでは拾えんかった実害：
@@ -513,6 +538,10 @@ def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
     if any(w in text for w in PURCHASE_WORDS):
         return "purchase"
     if len(text) <= 40 and any(w in text for w in PURCHASE_WORDS_SHORT):
+        return "purchase"
+    if len(text) <= _PURCHASE_MID_LEN and any(w in text for w in PURCHASE_WORDS_MID):
+        return "purchase"
+    if len(text) <= _PURCHASE_MID_LEN and _DELIVERY_Q_RE.search(text):
         return "purchase"
     if history and len(text) <= 40 and _ASSENT_RE.match(text):
         last_bot = next((str(h["text"]) for h in reversed(history)
