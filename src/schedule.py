@@ -30,6 +30,16 @@ def run_due(client: ThreadsClient) -> dict:
     stats = {"due": len(due), "posted": 0, "failed": 0}
     for row in due:
         text = sanitize(row["text"])  # 投稿直前に装飾記号(**等)を必ず除去
+        # ★2026-08-09の事故対策：同一本文を配信済みなら絶対に再配信せん。
+        #   手貼りの予約行が id 重複（345が2行）しとって、「済み」マークが
+        #   別の行に書かれ続け、15分ごとに同じ投稿が42回配信された。
+        #   原因が何であれ（id重複・マーク失敗・シートの手編集）、
+        #   「同じ本文は二度と出さん」を最後の壁にする。
+        if store.was_posted_before(text):
+            store.mark_scheduled(row["id"], "skipped",
+                                 error="同一本文を配信済み（再配信ループ防止）")
+            print(f"⏭  予約スキップ（配信済み本文）: id={row['id']}")
+            continue
         try:
             media_id = client.publish_thread(text)
             store.mark_scheduled(row["id"], "posted", media_id=media_id)

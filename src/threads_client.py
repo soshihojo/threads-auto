@@ -210,6 +210,11 @@ class ThreadsClient:
         cid = self._create_container(media_type="TEXT", text=text, reply_to_id=media_id)
         return self._publish_container(cid)
 
+    def delete_post(self, media_id: str) -> dict:
+        """自分の投稿を削除する（Threads APIのDELETE）。
+        ★2026-08-09：予約行のid重複で同一投稿が42回配信された事故の後始末用。"""
+        return self._request("DELETE", f"{BASE}/{media_id}", None)
+
     def hide_reply(self, reply_id: str, hide: bool = True) -> dict:
         return self._post(f"{reply_id}/manage_reply", {"hide": "true" if hide else "false"})
 

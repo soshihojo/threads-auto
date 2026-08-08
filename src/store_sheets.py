@@ -194,6 +194,17 @@ def init_db() -> None:
 
 
 # ---- posts ----
+def was_posted_before(text: str) -> bool:
+    """同一本文をすでに配信したことがあるか（予約の再配信ループを止める最終保険）。"""
+    key = "".join(str(text).split())
+    if not key:
+        return False
+    for r in _records("posts"):
+        if "".join(str(r.get("text", "")).split()) == key:
+            return True
+    return False
+
+
 def save_post(media_id: str, text: str, profile: str) -> None:
     if _find_row("posts", "media_id", media_id):
         return
