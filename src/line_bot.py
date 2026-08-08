@@ -173,11 +173,21 @@ def generate_offer(user: dict, history: list[dict], incoming: str) -> str:
 
 # 購入サイン（＝買う瞬間。検知したら自動オファー→hold）
 # 「いつ動」は「いつ動けば/いつ動いたら/いつ動くのが」等の言い回し揺れをまとめて拾う
+# ★2026-08-08：購入サインを二種類に分けた。
+#   「明示」＝鑑定・料金・申し込みを本人が口にした。即オファーでええ。
+#   「相談型」＝「どうしたらいい」等。これは相談の続きであって、鑑定を頼む言葉やない。
+#   実害（Aikoさん）：3往復目の「ここからどうしたらいいんだろうー」で即オファーが飛んだ。
+#   本人は「視てほしい」とは一言も言うてへん。相談型はまず二択の意思確認を挟み、
+#   本人が「視て」「進めたい」と言うてから出す（言うた人は買う率が2.8倍という実測に基づく）。
 PURCHASE_WORDS = [
     "料金", "値段", "いくら", "有料", "申し込", "購入", "支払", "課金",
-    "お願いしたい", "鑑定してほしい", "どうしたらいい", "どうすればいい",
+    "お願いしたい", "鑑定してほしい", "会員",
+]
+# 相談型＝処方箋を求めとるが、鑑定を頼むとまでは言うてへん言葉
+PURCHASE_WORDS_SOFT = [
+    "どうしたらいい", "どうすればいい",
     "どう動", "いつ動", "いつ送", "何を送れば", "なんて送れば",
-    "動くタイミング", "送るタイミング", "会員",
+    "動くタイミング", "送るタイミング",
 ]
 # 短文なら、それ単体で購入サインとみなす語（意味が一つしかないものだけ）
 PURCHASE_WORDS_SHORT = [
@@ -193,15 +203,14 @@ PURCHASE_WORDS_SHORT = [
 # 全部「短文でだけ」効かせる。同じ語がヒアリングの長文回答にも出てきて、
 # そこで拾うと誤爆するからや（例「彼が郵送してくれたものに関する話題」）。
 _PURCHASE_MID_LEN = 50
-PURCHASE_WORDS_MID = [
-    # ①「なんて返したらええか分からん」＝処方箋そのものの要求。
-    #    既存は「なんて送れば」しか無うて、「返せば」「言えば」を落としとった。
-    #    実害：ふうさん「金曜日に既読つけて なんて返せばいいかわかなくなってます」
+# 相談型（短文限定）。二択の意思確認を挟んでから出す
+PURCHASE_WORDS_MID_SOFT = [
     "なんて返", "何て返", "どう返せ", "どう返し", "どう伝えれ",
     "なんて言え", "何て言え", "何て言お", "なんて言お", "なんて伝え", "何て伝え",
-    # ②「もう諦めた方がええんかな」＝白黒つけてくれ、いう問い。無料では答えられん類や
     "諦めた方が", "諦めたほうが", "諦めるべき", "あきらめた方が", "あきらめるべき",
-    # ③商品の中身を確かめにきとる。ここまで来た人は、ほぼ買う気で聞いとる
+]
+PURCHASE_WORDS_MID = [
+    # 商品の中身を確かめにきとる。ここまで来た人は、ほぼ買う気で聞いとる＝明示扱い
     "視る場合", "視てもらったら", "視てもらうと", "何がわかる", "何が分かる",
     # ④鑑定書に何を求めとるかを、自分から言うてきた形
     "そう書いて", "書いて欲し", "書いてほし", "意見が聞きた", "意見を聞きた", "第三者の意見",
@@ -651,6 +660,10 @@ def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
     norm = _normalize_for_signal(text)    # 「どうしたら良い」→「どうしたらいい」等
     if any(w in norm for w in PURCHASE_WORDS):
         return "purchase"
+    if any(w in norm for w in PURCHASE_WORDS_SOFT):
+        return "purchase_soft"
+    if len(text) <= _PURCHASE_MID_LEN and any(w in norm for w in PURCHASE_WORDS_MID_SOFT):
+        return "purchase_soft"
     if len(text) <= 40 and any(w in norm for w in PURCHASE_WORDS_SHORT):
         return "purchase"
     if len(text) <= _PURCHASE_MID_LEN and any(w in norm for w in PURCHASE_WORDS_MID):
@@ -1084,18 +1097,27 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
         if _try_free_diagnosis(user_id, user, incoming, snd, history):
             return
 
-    if detect_signal(incoming, history) == "purchase":
+    sig = detect_signal(incoming, history)
+    if sig in ("purchase", "purchase_soft"):
         if _is_minor(user):
             # 未成年に有料オファーは自動送付しない（未成年者契約の取消リスク＋倫理）。
             # holdにして店主へ（手動対応待ち通知・ダッシュボードのバナーに出る）
             store.upsert_line_user(user_id, bot="hold")
             return
-        # 購入サイン＝買う瞬間。10通の上限を待たず、その場で個別鑑定オファーを自動送付
-        #（送付後はhold＝納期・支払い等の続きの質問は店主がLINEアプリから手動で返す）
         if _offer_already_sent(user_id):
             # すでにオファー済みなら二度は送らない（続きは店主が手動で）
             store.upsert_line_user(user_id, bot="hold")
             return
+        # ★2026-08-08：オファーは、本人が「視てほしい」「進めたい」と言うてから出す。
+        #   「どうしたらいい」等の相談型（purchase_soft）は、まず二択の意思確認を挟む。
+        #   明示の依頼（purchase＝料金・申し込み・視てほしい等）だけが直接オファーへ行ける。
+        #   実測：意思を口にしてから受けた人は 19.2%、そうでない人は 6.8%（2.8倍）。
+        if sig == "purchase_soft" and not _asked_deeper(history):
+            snd(ASK_DEEPER)
+            print(f"[line_bot] 相談型サイン。オファーの前に二択で意思を聞いた: {user_id}")
+            return
+        # 購入サイン＝買う瞬間。上限を待たず、その場で個別鑑定オファーを自動送付
+        #（送付後はhold＝納期・支払い等の続きの質問は店主がLINEアプリから手動で返す）
         if snd(generate_offer(user, history, incoming)):
             _send_offer_after(user_id, snd)
             store.upsert_line_user(user_id, bot="hold")
@@ -1161,10 +1183,15 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
     #   返してきて、案内は永遠に来んかった。三歳と一歳の子を抱えた人を待たせた。
     #   予告を検知したら、その文は捨てて、代わりにオファーを送る。
     if _PROMISE_LATER_RE.search(text) and not _is_minor(user):
-        print(f"[line_bot] 生成が『あとで案内』と予告したのでオファーに切り替え: {user_id}")
         if _offer_already_sent(user_id):
             store.upsert_line_user(user_id, bot="hold")
             return
+        # 予告を検知しても、本人がまだ「視てほしい」と言うてへんなら、まず二択で聞く
+        if not _asked_deeper(history):
+            print(f"[line_bot] 生成が『あとで案内』と予告。オファーやのうて二択を送った: {user_id}")
+            snd(ASK_DEEPER)
+            return
+        print(f"[line_bot] 生成が『あとで案内』と予告したのでオファーに切り替え: {user_id}")
         if snd(generate_offer(user, history, incoming)):
             _send_offer_after(user_id, snd)
             store.upsert_line_user(user_id, bot="hold")
