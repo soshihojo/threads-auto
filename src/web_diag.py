@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import random
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
 from . import store
 from .config import active_profile
@@ -137,8 +138,15 @@ def submit(data: dict) -> dict:
         store.add_web_event("submit", str(data.get("vid", ""))[:64])
     except Exception as e:
         print(f"[shindan] submit計測失敗（診断は継続）: {e}")
+    # ★2026-08-08（討論の合意施策①）：番号を「覚えて手で打つ」体験を消す。
+    #   oaMessage形式は、押すと椿とのトークが開いて本文に「鑑定番号XXXX」が入っとる。
+    #   送信を押すだけや。未追加の端末では追加を挟むが、その場合もコピー釦が保険になる。
+    basic = str(active_profile().get("line_basic_id", "") or "").strip().lstrip("@")
+    oa_url = (f"https://line.me/R/oaMessage/%40{basic}/?{quote('鑑定番号' + code)}"
+              if basic else "")
     return {"ok": True, "code": code, "type": t, "love": love,
-            "line_url": active_profile().get("line_url", "")}
+            "line_url": active_profile().get("line_url", ""),
+            "line_oa_url": oa_url}
 
 
 def redeem(code: str) -> dict | None:
@@ -231,6 +239,8 @@ button:disabled { opacity:.5; }
 .linebtn { display:block; text-align:center; background:#06C755; color:#fff; text-decoration:none;
   padding:16px; border-radius:10px; font-size:16.5px; letter-spacing:.1em; margin-bottom:14px; }
 .step { font-size:13px; color:#cdbfae; text-align:center; }
+.copybtn { margin-top:8px; background:none; border:1px solid #b08d3e; color:#d9a441;
+  border-radius:8px; padding:6px 18px; font-size:12.5px; letter-spacing:.15em; cursor:pointer; }
 footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d6257; margin-top:44px; }
 </style></head><body><main>
 """ + _CAMELLIA + """
@@ -280,10 +290,11 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
     <div class="catch" id="tcatch"></div>
     <div class="desc" id="tdesc"></div>
   </div>
-  <p class="next">縁の形は、これで分かった。<br>ほな——彼が<b>“今”あんたをどう思てるか</b>。<br>それはここでは視られへん。<b>LINEで視たる。</b></p>
-  <div class="codebox"><div class="lbl">あんたの鑑定番号</div><div class="code" id="code"></div></div>
+  <p class="next">縁のカタチは、これで出た。<br>ほな——彼が<b>“今”あんたをどう思てるか</b>。<b>どこまで待てばええか</b>。<b>次の一手を何にするか</b>。<br>そこから先は、<b>LINEの方で視る。</b></p>
+  <div class="codebox"><div class="lbl">あんたの鑑定番号</div><div class="code" id="code"></div>
+    <button type="button" class="copybtn" id="copyb">番号をコピー</button></div>
   <a class="linebtn" id="lbtn" href="#">LINEで続きを視てもらう</a>
-  <p class="step">追加したら、この番号だけ送ってな。<br>すぐに“彼の今の本音”を視て返すで🌙</p>
+  <p class="step" id="stept">上のボタン押したら、番号は入っとる。<b>送信だけしてな。</b><br>開かん時は、番号をコピーして送ってくれたらええで🌙</p>
 </section>
 
 <footer>椿｜彼の本音しか視ん</footer>
@@ -367,7 +378,17 @@ document.getElementById("f").addEventListener("submit", async (e)=>{
     document.getElementById("tcatch").textContent="——"+j.type.catch+"——";
     document.getElementById("tdesc").textContent=j.type.desc;
     document.getElementById("code").textContent=j.code;
-    document.getElementById("lbtn").href=j.line_url;
+    document.getElementById("lbtn").href=j.line_oa_url||j.line_url;
+    if(!j.line_oa_url){ document.getElementById("stept").innerHTML=
+      "追加したら、この番号だけ送ってな。<br>すぐに“彼の今の本音”を視て返すで🌙"; }
+    document.getElementById("copyb").onclick=async()=>{
+      const b=document.getElementById("copyb");
+      try{ await navigator.clipboard.writeText(j.code); }
+      catch(_){ const t=document.createElement("textarea"); t.value=j.code;
+        document.body.appendChild(t); t.select();
+        try{ document.execCommand("copy"); }catch(__){} document.body.removeChild(t); }
+      b.textContent="コピーしたで"; setTimeout(()=>{ b.textContent="番号をコピー"; },2000);
+    };
     document.getElementById("f").style.display="none";
     document.getElementById("result").style.display="block";
     window.scrollTo({top:0, behavior:"smooth"});
