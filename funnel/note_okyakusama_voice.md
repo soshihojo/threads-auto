@@ -56,6 +56,6 @@
 あんたの心が「いこか」と思えたその時に、安心して一歩、踏み出してきてな。
 
 個別鑑定を受けたい人は、ここからおいで🌙
-▶ https://1aksbkdokn31q1trp81e.stores.jp/items/6a75ab0eae8e9e00447387f2
+▶ https://buy.stripe.com/5kQaEWcwS0indne2HU53O05
 
 ※鑑定の受け取り方には個人差があります。復縁や結果を保証するものではありません。
