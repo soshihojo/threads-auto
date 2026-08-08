@@ -165,14 +165,30 @@ class ThreadsClient:
         return res.get("data", [])
 
     # ---------- 返信 ----------
-    def replies(self, media_id: str, *, top_level_only: bool = True) -> list[dict]:
-        """ある投稿への返信を取得。"""
+    def replies(self, media_id: str, *, top_level_only: bool = True,
+                max_pages: int = 10) -> list[dict]:
+        """ある投稿への返信を取得。
+
+        ★2026-08-08：ページングを追跡するようにした。前は最初の1ページ（約25件）しか
+        取ってへんかったので、バズ投稿の返信数が25で頭打ちになり、
+        自己リプライのしきい値（30件）に永遠に届かんかった。
+        取りこぼした返信への自動返信も、これで拾えるようになる。
+        max_pages は暴走保険（10ページ=約250件で打ち切り）。"""
         edge = "replies" if top_level_only else "conversation"
-        res = self._get(
-            f"{media_id}/{edge}",
-            {"fields": "id,text,username,timestamp,replied_to,root_post,has_replies,hide_status"},
-        )
-        return res.get("data", [])
+        out: list[dict] = []
+        params: dict | None = {
+            "fields": "id,text,username,timestamp,replied_to,root_post,has_replies,hide_status"}
+        url_path = f"{media_id}/{edge}"
+        for _ in range(max_pages):
+            res = self._get(url_path, params)
+            out.extend(res.get("data", []))
+            cursor = ((res.get("paging") or {}).get("cursors") or {}).get("after")
+            if not cursor or not res.get("data"):
+                break
+            params = {
+                "fields": "id,text,username,timestamp,replied_to,root_post,has_replies,hide_status",
+                "after": cursor}
+        return out
 
     SPLIT_MARK = "===続き==="
 
