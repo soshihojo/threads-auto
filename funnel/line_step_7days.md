@@ -132,9 +132,9 @@ https://threads-auto-5c6q.onrender.com/shindan
 ・時期の全体の地図／やったらあかんこと／関係の組み立て直しまで入る
 ・申し込みから数日以内に、ここ（LINE）に届く
 → 縁ができたあんただけの数量限定 3,980円（通常9,980円・60%OFF）
-https://buy.stripe.com/5kQaEWcwS0indne2HU53O05
+https://1aksbkdokn31q1trp81e.stores.jp/items/6a777f09db80bae422c65694
 
-申し込みが済んだら、購入の時に入力したメールアドレスを、ここに送ってな。
+申し込んでくれたら、購入のあとに出てくるオーダー番号（数字だけ）を、ここに送ってな。
 スクショやのうて数字を打ってくれたら、こっちですぐ照合できて、そのまま鑑定に入れるで。
 
 ▼実際に鑑定を受けたお客様の声
@@ -279,7 +279,7 @@ https://note.com/tsubaki_honne/n/n24b6aed96bf2
 枠が埋まったら、値段は戻すからな。気になるなら今のうちやで。
 
 ▼個別鑑定を受ける
-https://buy.stripe.com/5kQaEWcwS0indne2HU53O05
+https://1aksbkdokn31q1trp81e.stores.jp/items/6a777f09db80bae422c65694
 
 最後に一個。
 復縁は“保証”できるもんやない。それでも、やり方と時期を変えて報われた子を、ウチは見てきた。
