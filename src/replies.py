@@ -68,6 +68,40 @@ def _draft_reply(reply_text: str, username: str, is_lead: bool,
     return strip_ai_leak(text)
 
 
+# ── バズ回の自己リプライ（2026-08-08・討論の合意施策⑥） ──
+# 返信がしきい値を超えた投稿にだけ、椿が1本だけ自己リプライして、
+# コメント欄の上部で「まだ並んどる子」を回収する。
+# 条件は3つで固定：しきい値超のみ・1投稿1回のみ・着地は本文CTAと同一（プロフィール直行）。
+# この条件を緩めて常設化したら多段CTAになる（実データでリード0の最大要因）。緩めないこと。
+SELF_REPLY_TEXT = (
+    "ようけ来とるな。上から順に見とるで。\n"
+    "自分の番まで待てん子は、ウチのプロフの入り口から二人の生年月日入れとき。"
+    "そっちの方が深う視れるからな"
+)
+
+
+def _maybe_self_reply(client: ThreadsClient, post_id: str, reply_count: int,
+                      threshold: int, stats: dict) -> None:
+    """返信がしきい値を超えた投稿に、一度だけ自己リプライを送る。"""
+    if threshold <= 0 or reply_count < threshold:
+        return
+    # 1回の巡回で送るのは最大2本。初回に過去のバズ投稿へ一斉に飛ぶと
+    # 連投に見える（BAN対策）。残りは次の巡回（2時間後）が拾う
+    if stats.get("self_replies", 0) >= 2:
+        return
+    marker = f"selfreply_{post_id}"
+    if store.is_reply_seen(marker):
+        return  # もう送っとる。二本目は絶対に送らん
+    try:
+        client.reply_to(post_id, SELF_REPLY_TEXT)
+        store.mark_reply_seen(marker, post_id, "(self)", SELF_REPLY_TEXT)
+        stats["self_replies"] = stats.get("self_replies", 0) + 1
+        print(f"[replies] バズ回（返信{reply_count}件）に自己リプライを送った: {post_id}")
+    except Exception as e:
+        # 失敗しても巡回は止めない。マーカーを付けてへんので次回また試す
+        print(f"[replies] 自己リプライの送信失敗（次回再試行）: {e}")
+
+
 def process_replies(client: ThreadsClient) -> dict:
     """直近投稿の返信を処理。新規返信ごとにリード判定・下書き作成（autoなら送信）。"""
     cfg = load_config()
@@ -81,10 +115,13 @@ def process_replies(client: ThreadsClient) -> dict:
     stats = {"new_replies": 0, "leads": 0, "drafts": 0, "auto_sent": 0}
     _recent: list[str] = []   # この巡回で作った下書き。骨格の被りを避けるため次に渡す
 
+    self_reply_threshold = int(cfg["replies"].get("self_reply_threshold", 30))
     for post in posts:
         post_id = post["id"]
         permalink = post.get("permalink")
-        for r in client.replies(post_id, top_level_only=True):
+        all_replies = list(client.replies(post_id, top_level_only=True))
+        _maybe_self_reply(client, post_id, len(all_replies), self_reply_threshold, stats)
+        for r in all_replies:
             if stats["new_replies"] >= max_per_run:
                 return stats
             rid = r.get("id")
