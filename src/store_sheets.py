@@ -307,21 +307,67 @@ def add_scheduled(text: str, scheduled_at: str) -> int:
     return new_id
 
 
+def parse_dt(s) -> datetime | None:
+    """scheduled_at を日時に直す。書式の揺れを吸収する。
+
+    ★2026-08-10：ここを文字列比較でやっとって、一日ぶんの予約が真夜中に
+    まとめて投稿される事故が起きた（8/10の12時〜21時の予約が全部00:01に出た）。
+    原因は書式の食い違い。コードが入れる値は "2026-08-10T21:00:00" やが、
+    シートに手で貼った行はGoogleが "2026-08-10 21:00:00" に整形してまう。
+    文字列で比べると位置10の ' '(0x20) と 'T'(0x54) を見るだけになり、
+    スペース側は同じ日付なら常に「時間が来た」と判定されてまう。
+    せやから、比較の前に必ず日時として読む。ゼロ埋め無し（0:00:00）や
+    スラッシュ区切りも受ける。
+    """
+    s = str(s or "").strip().replace("/", "-").replace("T", " ")
+    if not s:
+        return None
+    date_part, _, time_part = s.partition(" ")
+    try:
+        y, mo, d = (int(x) for x in date_part.split("-"))
+    except ValueError:
+        return None
+    hh = mm = ss = 0
+    if time_part.strip():
+        bits = time_part.strip().split(":")
+        try:
+            hh = int(bits[0])
+            mm = int(bits[1]) if len(bits) > 1 else 0
+            ss = int(float(bits[2])) if len(bits) > 2 else 0
+        except ValueError:
+            return None
+    try:
+        return datetime(y, mo, d, hh, mm, ss)
+    except ValueError:
+        return None
+
+
+
 def list_scheduled(status: str | None = None, limit: int = 200) -> list[dict]:
     rows = _records("scheduled_posts")
+    # 並べ替えも日時として比べる（文字列やと書式の違う行が変な位置に来る）
+    far = datetime(2100, 1, 1)
     if status:
         rows = [r for r in rows if r.get("status") == status]
-        rows.sort(key=lambda r: str(r.get("scheduled_at", "")))
+        rows.sort(key=lambda r: parse_dt(r.get("scheduled_at")) or far)
     else:
-        rows.sort(key=lambda r: str(r.get("scheduled_at", "")), reverse=True)
+        rows.sort(key=lambda r: parse_dt(r.get("scheduled_at")) or datetime(1970, 1, 1),
+                  reverse=True)
     return rows[:limit]
 
 
+
 def due_scheduled(now_iso: str) -> list[dict]:
-    rows = [r for r in _records("scheduled_posts")
-            if r.get("status") == "scheduled" and str(r.get("scheduled_at", "")) and str(r["scheduled_at"]) <= now_iso]
-    rows.sort(key=lambda r: str(r.get("scheduled_at", "")))
-    return rows
+    now = parse_dt(now_iso) or datetime.now()
+    due = []
+    for r in _records("scheduled_posts"):
+        if r.get("status") != "scheduled":
+            continue
+        t = parse_dt(r.get("scheduled_at"))
+        if t and t <= now:
+            due.append((t, r))
+    due.sort(key=lambda x: x[0])
+    return [r for _, r in due]
 
 
 def mark_scheduled(post_id: int, status: str, *, media_id: str | None = None, error: str | None = None) -> None:
