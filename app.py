@@ -347,13 +347,15 @@ def _backend_attr(name: str):
         return None
 
 
-@st.cache_data(ttl=90, show_spinner=False)
-def _consult_board() -> list[dict]:
+@st.cache_data(ttl=25, show_spinner=False)
+def _consult_board() -> tuple[str, list[dict]]:
     """会員ごとの「LINEの今」を、シートの読み込み3回だけでまとめて作る。
 
     会員とLINEの紐付けは生年月日2つの一致で自動（紐付け作業は要らん）。
     会員ごとに find_line_user_by_births / recent_line_chats を呼ぶと
     人数ぶんシートを読んで待たされるので、全件を1回ずつ読んで突き合わせる。
+
+    戻り値の先頭は「いつ取ってきたか」。古い内容を新しい顔で見せんために画面に出す。
     """
     members = store.list_members()
     by_births = {}
@@ -391,11 +393,13 @@ def _consult_board() -> list[dict]:
             "uid": uid, "line_name": str(u.get("display_name") or "") if u else "",
             "waiting": "\n".join(waiting),
             "last_ts": str(chats[-1].get("created_at") or "")[:16] if chats else "",
-            "chats": chats[-14:],
+            "last_text": str(chats[-1].get("text") or "") if chats else "",
+            "n_all": len(chats),
+            "chats": chats[-30:],
         })
     board.sort(key=lambda b: b["last_ts"], reverse=True)
     board.sort(key=lambda b: 0 if b["waiting"] else 1)   # 未返信を上に（安定ソート）
-    return board
+    return f"{now_jst():%H:%M:%S}", board
 
 
 if view == VIEW_CONSULT:
@@ -412,16 +416,17 @@ if view == VIEW_CONSULT:
         st.session_state.pop("con_result", None)
         st.rerun()
     try:
-        _board = _consult_board()
+        _fetched_at, _board = _consult_board()
     except Exception as e:
         st.warning(f"会員リストの読み込みに失敗（{e}）")
-        _board = []
+        _fetched_at, _board = "", []
     if not _board:
         st.info("会員がいません。👥会員の画面で登録してください。")
     else:
         _pending = [b for b in _board if b["waiting"]]
         _hc[0].markdown(f"### 🔴 会員の発言で止まっとる {len(_pending)}人"
-                        f"　<span style='color:gray'>／ 会員 {len(_board)}人</span>",
+                        f"　<span style='color:gray'>／ 会員 {len(_board)}人"
+                        f"　（LINE取得 {_fetched_at}）</span>",
                         unsafe_allow_html=True)
         st.caption("🔴は「記録上、最後に喋ったのが会員」という意味です。LINE公式アプリから手で返した分は"
                    "こちらに記録が残らないため、返信済みでも🔴が付いたままになります。"
@@ -433,9 +438,27 @@ if view == VIEW_CONSULT:
         cmem = {"id": cb["id"], "nickname": cb["nickname"],
                 "me_birth": cb["me_birth"], "him_birth": cb["him_birth"]}
 
+        # ★2026-08-10：LINEに新しい発言が来ていたら、画面に残っとる前回の入力を捨てる。
+        #   Streamlitのwidgetはkeyに値を持ち続けるため、value=に最新を渡しても
+        #   「前に開いた時の内容」が表示され続ける（riyoの相談が古いまま出た実害）。
+        _sig = f"{cb['last_ts']}|{cb['n_all']}"
+        _stale_reply = False
+        if st.session_state.get(f"con_sig_{cb['id']}") != _sig:
+            st.session_state[f"con_sig_{cb['id']}"] = _sig
+            st.session_state.pop(f"con_msg_{cb['id']}", None)      # 相談欄は最新で入れ直す
+            st.session_state.pop(f"con_confirm_{cb['id']}", None)  # 確認中なら取り消す
+            # 作りかけの返信は消さん（書いたもんを勝手に捨てん）。ただし古い前提のまま
+            # 送ってまわんように、下で警告を出す
+            _stale_reply = str((st.session_state.get("con_result") or {}).get("member_id")) == cb["id"]
+
         if cb["uid"]:
-            with st.expander(f"📱 LINEのやりとり（{cb['line_name'] or cb['nickname']}・直近{len(cb['chats'])}件）",
-                             expanded=bool(cb["waiting"])):
+            if cb["last_ts"]:
+                _who_last = "会員" if cb["waiting"] else "椿"
+                st.markdown(f"🆕 **いちばん新しい発言**（{_who_last}・{cb['last_ts']}）")
+                st.info(cb["last_text"][:400] or "（本文なし）")
+            with st.expander(f"📱 LINEのやりとり全部（{cb['line_name'] or cb['nickname']}・"
+                             f"直近{len(cb['chats'])}件／全{cb['n_all']}件・下ほど新しい）",
+                             expanded=False):
                 for _r in cb["chats"]:
                     _who = "🙋 会員" if str(_r.get("role")) == "user" else "🌙 椿"
                     st.markdown(f"{_who}　<span style='color:gray;font-size:0.85em'>"
@@ -519,6 +542,9 @@ if view == VIEW_CONSULT:
                     st.error(f"生成に失敗しました（{e}）。少し待って再度お試しください。")
         cr = st.session_state.get("con_result")
         if cr and str(cr.get("member_id")) == str(cmem["id"]):
+            if _stale_reply:
+                st.warning("この返信を作ったあとに、LINEに新しい発言が届いています。"
+                           "上の「いちばん新しい発言」を見て、必要なら作り直してください。")
             edited = st.text_area("返信（このまま送れます。直したい所は直してや）",
                                   value=cr["reply"], height=300, key=f"con_out_{cmem['id']}")
             if cr.get("saved"):
