@@ -1090,6 +1090,15 @@ def _reply_after_offer(user_id: str, user: dict, incoming: str, snd, history: li
         return                      # オファー前のholdは店主の対応域。触らん
     if _ORDER_NO_RE.search(incoming):
         return                      # 注文番号は店主が処理する。機械が挟まらん
+    # ★2026-08-11：買うてくれた人には、機械を喋らせん。
+    #   この受け止め機能は「買わんかった人を無言で放置せんため」に入れたもんで、
+    #   購入者は店主が手で continue する相手や。とくに鑑定書の感想が届いた時は、
+    #   月詠みを案内する唯一のタイミングやのに、機械が先に喋ると場が潰れる。
+    #   実害（satoi.yさん 2026-08-10 23:56）：鑑定書の感想に機械が割り込み、
+    #   しかも「ちゃんと視て、返すな」と、届かん約束までしてもうた。
+    if any(h["role"] == "user" and _ORDER_NO_RE.search(str(h["text"])) for h in history):
+        print(f"[line_bot] 購入者なので自動返信しない（店主が対応）: {user_id}")
+        return
     if detect_signal(incoming) == "danger":
         snd(DANGER_REPLY)
         return
@@ -1102,6 +1111,10 @@ def _reply_after_offer(user_id: str, user: dict, incoming: str, snd, history: li
     if len(after) >= POST_OFFER_REPLIES:
         return                      # もう返した。ここから先は店主に任せる
     text = _retry(lambda: generate_nurture(user, history[-13:-1], incoming), "オファー後の返信")
+    if text and _PROMISE_LATER_RE.search(text):
+        # 「あとで返す」の類は、この経路では絶対に送らん。届ける仕組みが無いからや
+        print(f"[line_bot] オファー後の返信が予告やったので送らんかった: {user_id}")
+        return
     if text:
         snd(text)
         print(f"[line_bot] オファー後の受け止めを返した（{len(after)+1}/{POST_OFFER_REPLIES}）: {user_id}")
