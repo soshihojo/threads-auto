@@ -644,6 +644,27 @@ def push_text(user_id: str, text: str) -> bool:
     return r.ok
 
 
+def push_long_text(user_id: str, text: str) -> bool:
+    """店主が目で確認した長文（会員相談の返信など）を、書いたそのままの形で送る。
+
+    push_text とちごて「---」での吹き出し分割をせん。
+    分割は最大3通で打ち切る作りなので、段落の多い会員返信をそのまま通すと
+    4通目以降が黙って落ちる危険がある。ここでは分けずに、
+    LINEの1通5,000字の上限だけ守って続きの通に送る。
+    Markdown除去（_plain_text）は同じように通す。"""
+    body = _plain_text(text).strip()
+    if not body:
+        return False
+    chunks = [body[i:i + 4500] for i in range(0, len(body), 4500)][:5]
+    r = requests.post(f"{LINE_API}/message/push", headers=_headers(),
+                      data=json.dumps({"to": user_id,
+                                       "messages": [{"type": "text", "text": c} for c in chunks]}),
+                      timeout=20)
+    if not r.ok:
+        print(f"[line_bot] push_long_text 失敗 {r.status_code}: {r.text[:200]}")
+    return r.ok
+
+
 def get_display_name(user_id: str) -> str:
     try:
         r = requests.get(f"{LINE_API}/profile/{user_id}", headers=_headers(), timeout=10)

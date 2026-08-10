@@ -455,6 +455,12 @@ def get_line_user(user_id: str) -> dict | None:
     return None
 
 
+def list_line_users() -> list[dict]:
+    """LINEユーザーを全件返す。会員リストとの突き合わせを1回の読み込みで済ませるため
+    （会員ごとに find_line_user_by_births を呼ぶと人数ぶんシートを読んで遅い）。"""
+    return list(_records("line_users"))
+
+
 def upsert_line_user(user_id: str, **fields) -> None:
     allowed = {"display_name", "me_birth", "him_birth", "bot", "note"}
     fields = {k: v for k, v in fields.items() if k in allowed}

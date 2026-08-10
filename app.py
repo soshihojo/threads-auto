@@ -325,20 +325,104 @@ if view == VIEW_DIAG:
                      key=f"diag_out_{abs(hash(res['reading'])) % 10**8}")
 
 
-# ---------------- 会員相談（相談し放題の返信生成＋履歴） ----------------
+# ---------------- 会員相談（相談し放題の返信生成＋LINE送信） ----------------
+@st.cache_data(ttl=90, show_spinner=False)
+def _consult_board() -> list[dict]:
+    """会員ごとの「LINEの今」を、シートの読み込み3回だけでまとめて作る。
+
+    会員とLINEの紐付けは生年月日2つの一致で自動（紐付け作業は要らん）。
+    会員ごとに find_line_user_by_births / recent_line_chats を呼ぶと
+    人数ぶんシートを読んで待たされるので、全件を1回ずつ読んで突き合わせる。
+    """
+    members = store.list_members()
+    by_births = {}
+    for u in store.list_line_users():
+        key = (str(u.get("me_birth") or "").strip(), str(u.get("him_birth") or "").strip())
+        if all(key):
+            by_births[key] = u
+    chats_by_uid: dict[str, list[dict]] = {}
+    for r in store.all_line_chats(days=45):
+        chats_by_uid.setdefault(str(r.get("user_id") or ""), []).append(r)
+
+    board = []
+    for m in members:
+        u = by_births.get((str(m["me_birth"]).strip(), str(m["him_birth"]).strip()))
+        uid = str(u["user_id"]) if u else ""
+        chats = chats_by_uid.get(uid, []) if uid else []
+        # 末尾から続く「会員の発言」＝まだこっちが返せてないぶん
+        waiting = []
+        for r in reversed(chats):
+            if str(r.get("role")) != "user":
+                break
+            waiting.append(str(r.get("text") or ""))
+        waiting.reverse()
+        board.append({
+            "id": str(m["id"]), "nickname": str(m["nickname"]),
+            "me_birth": str(m["me_birth"]), "him_birth": str(m["him_birth"]),
+            "uid": uid, "line_name": str(u.get("display_name") or "") if u else "",
+            "waiting": "\n".join(waiting),
+            "last_ts": str(chats[-1].get("created_at") or "")[:16] if chats else "",
+            "chats": chats[-14:],
+        })
+    board.sort(key=lambda b: b["last_ts"], reverse=True)
+    board.sort(key=lambda b: 0 if b["waiting"] else 1)   # 未返信を上に（安定ソート）
+    return board
+
+
 if view == VIEW_CONSULT:
-    st.caption("相談し放題の会員対応。会員を選び、届いた相談を貼ると、その子専用の返信を作ります。控えも残せます。")
+    st.caption("会員から届いた相談に、その子専用の返信を作って、そのままLINEに送れます。"
+               "LINEアプリとの行き来もコピペも要らんので、スマホからでも完結します。")
+    _hc = st.columns([3, 1])
+    if _hc[1].button("🔄 最新に更新", use_container_width=True, key="con_reload"):
+        _consult_board.clear()
+        # 画面に残っている入力も捨てる。捨てんと、新しく届いた相談が
+        # 「前に開いた時の内容」に上書きされて見えん（widgetのkeyが値を持ち続けるため）
+        for _k in [k for k in list(st.session_state)
+                   if str(k).startswith(("con_msg_", "con_out_", "con_confirm_"))]:
+            st.session_state.pop(_k, None)
+        st.session_state.pop("con_result", None)
+        st.rerun()
     try:
-        _cmembers = store.list_members()
+        _board = _consult_board()
     except Exception as e:
         st.warning(f"会員リストの読み込みに失敗（{e}）")
-        _cmembers = []
-    _cmap = {f"{m['nickname']}（{m['me_birth']} / {m['him_birth']}）": m for m in _cmembers}
-    if not _cmap:
+        _board = []
+    if not _board:
         st.info("会員がいません。👥会員の画面で登録してください。")
     else:
-        cpick = st.selectbox("会員を選ぶ", list(_cmap.keys()), key="con_pick")
-        cmem = _cmap[cpick]
+        _pending = [b for b in _board if b["waiting"]]
+        _hc[0].markdown(f"### 🔴 会員の発言で止まっとる {len(_pending)}人"
+                        f"　<span style='color:gray'>／ 会員 {len(_board)}人</span>",
+                        unsafe_allow_html=True)
+        st.caption("🔴は「記録上、最後に喋ったのが会員」という意味です。LINE公式アプリから手で返した分は"
+                   "こちらに記録が残らないため、返信済みでも🔴が付いたままになります。"
+                   "この画面から送った分は記録されるので、使うほど正確になります。")
+        _labels = [f"{'🔴' if b['waiting'] else '✅'} {b['nickname']}"
+                   f"{'' if b['uid'] else '（LINE未リンク）'}　{b['last_ts']}" for b in _board]
+        cpick = st.selectbox("会員を選ぶ", _labels, key="con_pick", label_visibility="collapsed")
+        cb = _board[_labels.index(cpick)]
+        cmem = {"id": cb["id"], "nickname": cb["nickname"],
+                "me_birth": cb["me_birth"], "him_birth": cb["him_birth"]}
+
+        if cb["uid"]:
+            with st.expander(f"📱 LINEのやりとり（{cb['line_name'] or cb['nickname']}・直近{len(cb['chats'])}件）",
+                             expanded=bool(cb["waiting"])):
+                for _r in cb["chats"]:
+                    _who = "🙋 会員" if str(_r.get("role")) == "user" else "🌙 椿"
+                    st.markdown(f"{_who}　<span style='color:gray;font-size:0.85em'>"
+                                f"{str(_r.get('created_at'))[:16]}</span>", unsafe_allow_html=True)
+                    st.text(str(_r.get("text") or ""))
+            if cb["waiting"] and st.button("✓ これはもうLINEアプリで返した（対応済みにする）",
+                                           key=f"con_done_{cb['id']}"):
+                # LINE公式アプリから手で送った返信はWebhookに流れてこず記録が残らんので、
+                # 印だけ残して🔴を消す。会員の発言やないので、返信生成の材料には入らん
+                store.add_line_chat(cb["uid"], "assistant", "［店主がLINEアプリから手動で返信］")
+                _consult_board.clear()
+                st.rerun()
+        else:
+            st.warning("この会員のLINEが見つかりません（line_usersに登録された生年月日2つが"
+                       "会員登録と一致していない）。返信文は作れますが、送信ボタンは出ません。")
+
         _all_hist = store.list_readings(cmem["id"], limit=50)
         # 納品済みの個別鑑定書（👥会員でPDF登録したもの）は、履歴とは別に返信生成の参照資料にする
         _kantei_rows = [h for h in _all_hist if h["month"] == "個別鑑定書"]
@@ -346,25 +430,25 @@ if view == VIEW_CONSULT:
         chist = [h for h in _all_hist if h["month"] != "個別鑑定書"][:5]
         if kantei_text:
             st.caption("📎 個別鑑定書 登録済み — 返信はこの鑑定の内容（性質の読み・時期・処方箋）と矛盾しない形で生成されます")
-        # 会員のLINE（生年月日一致で自動リンク）から、直近のメッセージ＝画像の読み取り内容も参照する
-        _line_recent = ""
-        try:
-            _lu = store.find_line_user_by_births(cmem["me_birth"], cmem["him_birth"])
-            if _lu:
-                _lmsgs = [h for h in store.recent_line_chats(_lu["user_id"], limit=30) if h["role"] == "user"][-8:]
-                if _lmsgs:
-                    _line_recent = "\n".join(f"・{str(h['created_at'])[:16]} {str(h['text'])[:250]}" for h in _lmsgs)
-                    st.caption("📱 LINEを自動リンク済み — 会員から最近LINEに届いた内容（画像の読み取り含む）も返信生成が参照します")
-        except Exception:
-            pass
+        # 会員からLINEに届いた直近のメッセージ（画像の読み取り内容含む）も返信生成が参照する。
+        # 上でまとめて読んだ会話をそのまま使う＝ここでシートを読み直さない
+        _lmsgs = [h for h in cb["chats"] if str(h.get("role")) == "user"][-8:]
+        _line_recent = "\n".join(f"・{str(h.get('created_at'))[:16]} {str(h.get('text') or '')[:250]}"
+                                 for h in _lmsgs)
+        if _line_recent:
+            st.caption("📱 LINEを自動リンク済み — 会員から最近LINEに届いた内容（画像の読み取り含む）も返信生成が参照します")
         if chist:
             with st.expander(f"📜 この子との直近のやりとり（{len(chist)}件）"):
                 for h in chist:
                     if h["worry"]:
                         st.caption(f"相談: {h['worry']}")
                     st.text(h["reading"])
-        incoming = st.text_area("会員から届いた相談を貼る", key="con_msg", height=120,
-                                placeholder="例：昨日ひさびさに彼から連絡きた。なんて返したらいい？")
+        # 未返信ぶんは自動で入れておく（LINEを開いてコピーしてくる手間をなくす）。
+        # keyを会員ごとに分ける＝会員を切り替えたら、その子の未返信が入り直す
+        incoming = st.text_area(
+            "会員から届いた相談" + ("（LINEの未返信ぶんを自動で入れました。編集できます）" if cb["waiting"] else ""),
+            value=cb["waiting"], key=f"con_msg_{cb['id']}", height=120,
+            placeholder="例：昨日ひさびさに彼から連絡きた。なんて返したらいい？")
         if st.button("💬 この子専用の返信を作る", type="primary", key="con_run"):
             if not incoming.strip():
                 st.error("相談内容を貼ってください。")
@@ -385,29 +469,78 @@ if view == VIEW_CONSULT:
                                                          kantei=kantei_text)
                     # 相談と返信を自動で控えに保存（次回の返信生成が「前回までのやりとり」として参照する）。
                     # 同じ相談文で作り直した場合は前の控えを上書き＝重複させない
+                    reading_id = None
                     try:
                         _dup = next((h for h in _all_hist if h["month"] == "相談"
                                      and str(h["worry"]).strip() == incoming.strip()), None)
                         if _dup:
-                            store.update_reading(_dup["id"], res["reply"])
+                            reading_id = _dup["id"]
+                            store.update_reading(reading_id, res["reply"])
                         else:
-                            store.add_reading(cmem["id"], "相談", incoming.strip(), res["reply"])
+                            reading_id = store.add_reading(cmem["id"], "相談", incoming.strip(), res["reply"])
                         saved = True
                     except Exception as e:
                         saved = False
                         st.warning(f"控えの自動保存に失敗しました（返信自体は下に表示されています）: {e}")
                     st.session_state["con_result"] = {"reply": res["reply"], "member_id": cmem["id"],
-                                                      "msg": incoming, "saved": saved}
+                                                      "msg": incoming, "saved": saved,
+                                                      "reading_id": reading_id}
+                    st.session_state.pop(f"con_confirm_{cmem['id']}", None)  # 前回の確認状態を持ち越さない
                 except Exception as e:
                     st.error(f"生成に失敗しました（{e}）。少し待って再度お試しください。")
         cr = st.session_state.get("con_result")
         if cr and str(cr.get("member_id")) == str(cmem["id"]):
-            # keyを返信内容から作る＝2回目以降の生成で古い表示が残るのを防ぐ
-            st.text_area("返信（コピーして送れます）", value=cr["reply"], height=300,
-                         key=f"con_out_{abs(hash(cr['reply'])) % 10**8}")
+            edited = st.text_area("返信（このまま送れます。直したい所は直してや）",
+                                  value=cr["reply"], height=300, key=f"con_out_{cmem['id']}")
             if cr.get("saved"):
                 st.caption("📝 この相談と返信は自動で控えに保存されました（同じ相談文で作り直すと上書きされます）。"
                            "送らなかった返信を消したい場合は、スプレッドシートの readings シートから該当行を削除してください。")
+
+            # ---- LINEへ直接送る（コピペとアプリの行き来をなくす。誤爆防止に2段階） ----
+            if not cb["uid"]:
+                st.info("この会員はLINEが未リンクなので、上の文面をコピーしてLINEアプリから送ってください。")
+            elif not env("LINE_CHANNEL_ACCESS_TOKEN"):
+                st.info("この画面からLINEへ送るには、Streamlitのシークレットに "
+                        "LINE_CHANNEL_ACCESS_TOKEN を追加してください（未設定のため送信ボタンは出ません）。")
+            else:
+                _ck = f"con_confirm_{cmem['id']}"
+                if not st.session_state.get(_ck):
+                    if st.button(f"📤 {cb['nickname']}さんのLINEに送る", type="primary",
+                                 use_container_width=True, key=f"con_send_{cmem['id']}"):
+                        st.session_state[_ck] = True
+                        st.rerun()
+                else:
+                    st.warning(f"「{cb['line_name'] or cb['nickname']}」さんのLINEに、"
+                               f"上の文面（{len(edited)}字）をこのまま送ります。ええか？")
+                    _s1, _s2 = st.columns(2)
+                    if _s1.button("✅ 送信する", type="primary", use_container_width=True,
+                                  key=f"con_go_{cmem['id']}"):
+                        try:
+                            from src import line_bot as _lb
+                            if _lb.push_long_text(cb["uid"], edited):
+                                # 会話ログに残す＝次の生成もダッシュボードの表示も、送った文面を前提にできる
+                                store.add_line_chat(cb["uid"], "assistant", edited)
+                                # 控えは「実際に送った文面」で上書きする（編集ぶんを取りこぼさない）
+                                if cr.get("reading_id"):
+                                    try:
+                                        store.update_reading(cr["reading_id"], edited)
+                                    except Exception as e:
+                                        st.warning(f"控えの更新に失敗（送信は成功しています）: {e}")
+                                for _k in (_ck, "con_result", f"con_msg_{cmem['id']}",
+                                           f"con_out_{cmem['id']}"):
+                                    st.session_state.pop(_k, None)
+                                _consult_board.clear()
+                                st.success(f"{cb['nickname']}さんに送信しました")
+                                time.sleep(1.2)
+                                st.rerun()
+                            else:
+                                st.error("送信に失敗しました（LINE側がエラーを返しました）。"
+                                         "文面はそのまま残っているので、少し待って再度お試しください。")
+                        except Exception as e:
+                            st.error(f"送信に失敗しました（{e}）")
+                    if _s2.button("やめる", use_container_width=True, key=f"con_no_{cmem['id']}"):
+                        st.session_state[_ck] = False
+                        st.rerun()
 
 
 # ---------------- 会員リスト ----------------

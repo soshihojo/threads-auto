@@ -400,6 +400,13 @@ def get_line_user(user_id: str) -> dict | None:
         return dict(row) if row else None
 
 
+def list_line_users() -> list[dict]:
+    """LINEユーザーを全件返す（会員リストとの突き合わせを1回の読み込みで済ませる）。"""
+    with conn() as c:
+        rows = c.execute("SELECT * FROM line_users").fetchall()
+    return [dict(r) for r in rows]
+
+
 def upsert_line_user(user_id: str, **fields) -> None:
     allowed = {"display_name", "me_birth", "him_birth", "bot", "note"}
     fields = {k: v for k, v in fields.items() if k in allowed}
