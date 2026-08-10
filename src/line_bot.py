@@ -279,6 +279,29 @@ def _asked_deeper(history: list[dict]) -> bool:
     """もう「深く視てほしいか」を聞いたか。二度は聞かん。文面の新旧どちらも数える。"""
     return any(any(m in str(h.get("text", "")) for m in _ASK_DEEPER_MARKS)
                for h in history if h.get("role") == "assistant")
+
+
+# ---------- ブロック→再追加（仕切り直し） ----------
+# ★2026-08-10：一度ブロックして再追加した人に、昔のオファー履歴が効き続けて
+#   無言holdになる実害があった（❁⃘あゆみさん：7/13オファー→ブロック→8/10再追加、
+#   鑑定番号で戻ってきて相談を送ったのに一言も返らんかった）。
+#   再追加は「もう一回話したい」いう意思表示や。followイベントでnoteに再追加時刻を
+#   刻み、オファー済み・二択済み・無料上限の判定はその時刻より後だけを数える。
+#   LLMに渡す会話の文脈は絞らん（昔の話を覚えとる方が返しの質が上がる）。
+_REFOLLOW_RE = re.compile(r"再追加:(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})")
+
+
+def _refollow_ts(note: str | None) -> str:
+    """noteからブロック→再追加の時刻を取り出す。無ければ空文字（＝全履歴が対象）。"""
+    m = _REFOLLOW_RE.search(str(note or ""))
+    return m.group(1) if m else ""
+
+
+def _since_refollow(history: list[dict], cutoff: str) -> list[dict]:
+    """再追加より後のやりとりだけに絞る（会話の状態判定用）。"""
+    if not cutoff:
+        return history
+    return [h for h in history if str(h.get("created_at") or "") >= cutoff]
 # ASK_DEEPER への「断り・保留」。これが返ってきたら売らん
 _REFUSAL_RE = re.compile(
     r"自分で|勘で動|考え|今はいい|今は大丈夫|大丈夫です|いらん|いらない|"
@@ -465,8 +488,11 @@ def _offer_already_sent(user_id: str) -> bool:
     """この人に有料オファーを送った履歴があるか。送信の直前に必ずDBを読み直して判定する。
     連投（数秒間隔の複数メッセージ）をWebhookが並行処理すると、それぞれが独立に
     上限判定→オファー送信してしまい、同じ人にオファーが2連続で届いた実バグ（田中麻衣さん）
-    への対策。オファーは自動では一人一回きり。"""
+    への対策。オファーは自動では一人一回きり。
+    ただしブロック→再追加した人は仕切り直し＝再追加より前のオファーは数えん。"""
     history = store.recent_line_chats(user_id, limit=200)
+    user = store.get_line_user(user_id) or {}
+    history = _since_refollow(history, _refollow_ts(user.get("note")))
     return any(h["role"] == "assistant" and _is_offer_text(str(h["text"])) for h in history)
 
 
@@ -840,7 +866,16 @@ def handle_event(ev: dict) -> None:
         # bot="on"で必ず復帰させる。ブロック→再追加した人はunfollowでbot="off"に
         # なったままで、followが表示名しか更新せず、再追加後のメッセージが自動返信
         # されない実害があった（yumichin・2026-07-28）。再追加＝仕切り直しなのでonに戻す
-        store.upsert_line_user(user_id, display_name=get_display_name(user_id), bot="on")
+        fields = {"display_name": get_display_name(user_id), "bot": "on"}
+        # 会話履歴のある人のfollow＝ブロック→再追加。noteに時刻を刻んで、
+        # オファー済み・二択済み・無料上限の判定を仕切り直す（詳細は_refollow_tsの上）
+        existing = store.get_line_user(user_id)
+        if existing and store.recent_line_chats(user_id, limit=1):
+            stamp = f"再追加:{datetime.now().isoformat(timespec='seconds')}"
+            old = _REFOLLOW_RE.sub("", str(existing.get("note") or ""))
+            old = old.replace("ブロック/解除", "").strip("｜ ")
+            fields["note"] = f"{stamp}｜{old}" if old else stamp
+        store.upsert_line_user(user_id, **fields)
         try:  # 実際の友だち追加数をファネル計測に記録（ボタン押下でなく本当の追加）
             store.add_web_event("line_follow")
         except Exception as e:
@@ -1116,7 +1151,10 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
     # 窓から溢れて永遠にオファーに達しない、という実バグがあった
     history = store.recent_line_chats(user_id, limit=200)
     diag_sent = _diag_count(history) > 0  # オファー等の長文は診断とみなさない
-    bot_replies = sum(1 for h in history
+    # オファー済み・二択済み・無料上限は、ブロック→再追加より後だけで数える（仕切り直し）。
+    # 診断済み判定(diag_sent)とLLMへの文脈(transcript)は全履歴のまま＝診断の二重送信を防ぐ
+    state_hist = _since_refollow(history, _refollow_ts(user.get("note")))
+    bot_replies = sum(1 for h in state_hist
                       if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN
                       and ASK_MARKER not in h["text"])
     over_limit = bot_replies >= FREE_REPLY_LIMIT
@@ -1143,7 +1181,7 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
         #   「どうしたらいい」等の相談型（purchase_soft）は、まず二択の意思確認を挟む。
         #   明示の依頼（purchase＝料金・申し込み・視てほしい等）だけが直接オファーへ行ける。
         #   実測：意思を口にしてから受けた人は 19.2%、そうでない人は 6.8%（2.8倍）。
-        if sig == "purchase_soft" and not _asked_deeper(history):
+        if sig == "purchase_soft" and not _asked_deeper(state_hist):
             snd(ASK_DEEPER)
             print(f"[line_bot] 相談型サイン。オファーの前に二択で意思を聞いた: {user_id}")
             return
@@ -1162,7 +1200,8 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
         last_user = next((h["text"] for h in reversed(history) if h["role"] == "user"), None)
         if last_user != incoming:
             return
-        bot_replies = sum(1 for h in history
+        state_hist = _since_refollow(history, _refollow_ts(user.get("note")))
+        bot_replies = sum(1 for h in state_hist
                           if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN
                           and ASK_MARKER not in h["text"])
         over_limit = bot_replies >= FREE_REPLY_LIMIT
@@ -1185,7 +1224,7 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
             # すでにオファー済みなら二度は送らない（続きは店主が手動で）
             store.upsert_line_user(user_id, bot="hold")
             return
-        if not _asked_deeper(history):
+        if not _asked_deeper(state_hist):
             # ★上限に達しても、いきなり売らん。まず本人に決めさせる。
             #   ここで「視てほしい」と言うてくれたら、その一言が購入サインとして
             #   拾われて（_DECLINE_RE に ASK_DEEPER_MARK を入れてある）、
@@ -1218,7 +1257,7 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
             store.upsert_line_user(user_id, bot="hold")
             return
         # 予告を検知しても、本人がまだ「視てほしい」と言うてへんなら、まず二択で聞く
-        if not _asked_deeper(history):
+        if not _asked_deeper(state_hist):
             print(f"[line_bot] 生成が『あとで案内』と予告。オファーやのうて二択を送った: {user_id}")
             snd(ASK_DEEPER)
             return
