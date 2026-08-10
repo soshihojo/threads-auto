@@ -326,6 +326,27 @@ if view == VIEW_DIAG:
 
 
 # ---------------- 会員相談（相談し放題の返信生成＋LINE送信） ----------------
+def _backend_attr(name: str):
+    """store / line_bot に新しく足した関数を、確実に掴んで返す（無ければ None）。
+
+    ★2026-08-10：store は `from .store_sheets import *` で名前を配っとる。
+    Streamlitがapp.pyだけ再読み込みして src.store を古いまま使い回すと、
+    後から足した関数が store に生えてこず AttributeError になる
+    （実害：list_line_users が「no attribute」で会員相談の画面が丸ごと落ちた）。
+    まず store を見て、無ければバックエンドの実体を直に見に行く。
+    """
+    fn = getattr(store, name, None)
+    if fn is not None:
+        return fn
+    import importlib
+    mod_name = ("src.store_sheets" if (env("STORE_BACKEND") or "sqlite").lower() == "sheets"
+                else "src.store_sqlite")
+    try:
+        return getattr(importlib.import_module(mod_name), name, None)
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=90, show_spinner=False)
 def _consult_board() -> list[dict]:
     """会員ごとの「LINEの今」を、シートの読み込み3回だけでまとめて作る。
@@ -336,10 +357,18 @@ def _consult_board() -> list[dict]:
     """
     members = store.list_members()
     by_births = {}
-    for u in store.list_line_users():
-        key = (str(u.get("me_birth") or "").strip(), str(u.get("him_birth") or "").strip())
-        if all(key):
-            by_births[key] = u
+    _list_users = _backend_attr("list_line_users")
+    if _list_users:
+        for u in _list_users():
+            key = (str(u.get("me_birth") or "").strip(), str(u.get("him_birth") or "").strip())
+            if all(key):
+                by_births[key] = u
+    else:
+        # 最後の逃げ道：会員ごとに引く（人数ぶんシートを読むので遅いが、画面は動く）
+        for m in members:
+            u = store.find_line_user_by_births(m["me_birth"], m["him_birth"])
+            if u:
+                by_births[(str(m["me_birth"]).strip(), str(m["him_birth"]).strip())] = u
     chats_by_uid: dict[str, list[dict]] = {}
     for r in store.all_line_chats(days=45):
         chats_by_uid.setdefault(str(r.get("user_id") or ""), []).append(r)
@@ -517,7 +546,10 @@ if view == VIEW_CONSULT:
                                   key=f"con_go_{cmem['id']}"):
                         try:
                             from src import line_bot as _lb
-                            if _lb.push_long_text(cb["uid"], edited):
+                            # push_long_text も後から足した関数なので、
+                            # 古いモジュールが残っていても送れるように push_text へ落とす
+                            _push = getattr(_lb, "push_long_text", None) or _lb.push_text
+                            if _push(cb["uid"], edited):
                                 # 会話ログに残す＝次の生成もダッシュボードの表示も、送った文面を前提にできる
                                 store.add_line_chat(cb["uid"], "assistant", edited)
                                 # 控えは「実際に送った文面」で上書きする（編集ぶんを取りこぼさない）

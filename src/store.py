@@ -14,7 +14,7 @@ _backend = (env("STORE_BACKEND") or "sqlite").lower()
 
 if _backend == "sheets":
     from .store_sheets import *  # noqa: F401,F403
-    from .store_sheets import init_db  # 明示（*でも入るが意図を明確に）
+    from .store_sheets import init_db, list_line_users  # 明示（*でも入るが意図を明確に）
 else:
     from .store_sqlite import *  # noqa: F401,F403
-    from .store_sqlite import conn, init_db  # noqa: F401  (sqlite専用: conn)
+    from .store_sqlite import conn, init_db, list_line_users  # noqa: F401  (sqlite専用: conn)
