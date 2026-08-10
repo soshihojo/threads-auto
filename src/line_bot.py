@@ -190,6 +190,12 @@ PURCHASE_WORDS = [
     "料金", "値段", "いくら", "有料", "申し込", "購入", "支払", "課金",
     "お願いしたい", "鑑定してほしい", "診てほしい", "会員",
 ]
+# 値段に触れながら引いとる言い方。買う気の逆やから、語彙判定より先に弾く
+_PRICE_DECLINE_RE = re.compile(
+    r"(?:有料|料金|値段|金額|お金|かね)[^。\n]{0,12}"
+    r"(?:ちょっと|厳し|きつ|無理|やめ|いいです|大丈夫|考え|迷|なぁ|なあ)"
+    r"|(?:高い|高すぎ|高そう)"
+)
 # 相談型＝処方箋を求めとるが、鑑定を頼むとまでは言うてへん言葉
 PURCHASE_WORDS_SOFT = [
     "どうしたらいい", "どうすればいい",
@@ -299,6 +305,48 @@ def _asked_deeper(history: list[dict]) -> bool:
                for h in history if h.get("role") == "assistant")
 
 
+# ★2026-08-10：上のマーカーは「もう聞いたか」の判定にだけ使う（言い回しが揺れても
+#   二度聞きせんように広めに拾う）。オファーの引き金にはこっちの厳密な印だけを使う。
+#   経緯：プロンプトが生成に「必ず二択の言い回しを含めろ」と命じとったせいで、
+#   生成が2通目に書いた二択がそのまま引き金として武装し、短い相槌でオファーが
+#   飛ぶようになった。8/10の27人にオファーが出て購入ゼロ。引き金は、
+#   仕組みが自分の意思で送った定型文（ASK_DEEPER）の直後だけに限る。
+_ASK_DEEPER_CANNED = "ここまで聞いて、あんたの状況は掴めた"
+
+
+def _canned_ask_deeper_just_sent(history: list[dict]) -> bool:
+    """直前に椿が送ったんが、仕組みの定型二択そのものか。"""
+    last_bot = next((str(h.get("text") or "") for h in reversed(history)
+                     if h.get("role") == "assistant"), "")
+    return _ASK_DEEPER_CANNED in last_bot
+
+
+# 本人が自分から求めてへん相手に、これより早う売りに行かん（発言数）
+OFFER_MIN_TURNS = int(env("LINE_OFFER_MIN_TURNS") or "7")
+
+
+def _user_turns(history: list[dict]) -> int:
+    return sum(1 for h in history if h.get("role") == "user")
+
+
+def _asked_in_own_words(text: str) -> bool:
+    """本人が自分の語彙で「いくら」「視てほしい」と言うたか。
+    二択への相槌（「はい」「みて」）は含めん。ここが分かれ目で、実データでは
+    発言6回以下でも、自分から言うた人は37.5%買い、相槌だけの人は1.7%しか買わん。"""
+    if _PRICE_DECLINE_RE.search(text) or _MONEY_TROUBLE_RE.search(text):
+        return False
+    norm = _normalize_for_signal(text)
+    if any(w in norm for w in PURCHASE_WORDS):
+        return True
+    if len(text) <= 40 and any(w in norm for w in PURCHASE_WORDS_SHORT):
+        return True
+    if len(text) <= _PURCHASE_MID_LEN and any(w in norm for w in PURCHASE_WORDS_MID):
+        return True
+    if len(text) <= _PURCHASE_MID_LEN and _DELIVERY_Q_RE.search(norm):
+        return True
+    return False
+
+
 # ---------- ブロック→再追加（仕切り直し） ----------
 # ★2026-08-10：一度ブロックして再追加した人に、昔のオファー履歴が効き続けて
 #   無言holdになる実害があった（❁⃘あゆみさん：7/13オファー→ブロック→8/10再追加、
@@ -321,9 +369,18 @@ def _since_refollow(history: list[dict], cutoff: str) -> list[dict]:
         return history
     return [h for h in history if str(h.get("created_at") or "") >= cutoff]
 # ASK_DEEPER への「断り・保留」。これが返ってきたら売らん
+# ここに引っかかる返事には売りに行かん（断り・迷い・ただの相槌）。
+# ★2026-08-10：穴が2つあって、実際に迷いの表明へオファーを撃っとった（全員買うてへん）。
+#   「難しい…」（漢字の難し）「どっちがいいんだろわかんない」（撥音便のわかんな）が素通り。
+#   ほんで「ありがとうございますー」だけの返事にもオファーが飛んどった。
+#   礼は決断やない。値段を見て引いた言い方（高い・かかるなら）も、当然売りに行かん。
 _REFUSAL_RE = re.compile(
     r"自分で|勘で動|考え|今はいい|今は大丈夫|大丈夫です|いらん|いらない|"
-    r"やめ|結構|けっこうです|また今度|あとで|後で|うーん|迷|むず|悩|わからん|分からん"
+    r"やめ|結構|けっこうです|また今度|あとで|後で|うーん|迷|むず|悩|わからん|分からん|"
+    r"難し|むずかし|わかんな|分かんな|どっちがいい|どっちも|どうしよ|微妙|"
+    r"決めきれ|決められ|考えさせ|ちょっと待|"
+    r"高い|高す|かかるなら|かかるんや|お金ない|余裕が|"
+    r"^\s*(?:ありがと|あんがと|了解|オッケ|OK|ok|おおきに|感謝|すみません|ごめん)"
 )
 _ASSENT_RE = re.compile(
     r"^\s*(?:はい|うん|ぜひ|お願い|おねがい|よろしく|やりたい|やってほし|"
@@ -391,13 +448,14 @@ NURTURE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば
 
 厳守:
 - 処方箋（いつ・何を・どう動くか）は渡さない。「今は送るな」「待っとき」のような否定形の指示も処方箋であり、無料では渡さない。渡してええのは「彼の性質・今の状況・気持ちの読み」まで
-- 行動（どうしたらいい・ほっとくべきか・送るべきか等）を聞かれた時は、「無料では言えん」のような壁の宣言を絶対にしない。「無料」「有料」という言葉自体を相談者に向けて使わない。代わりにこの流れで返す：①まず相手の今の気持ちを一言で受け止める ②彼の性質・状況の読みを一つ足す（ここまでは今まで通り渡してええ）③そのまま会話の流れで、意思を聞く二択に繋ぐ——「このまま自分の勘で動くか、ウチがちゃんと視てから動き方を決めるか、どっちや」の趣旨を、直前の相手の言葉（「ほっとく」「待つ」等）を引用した自然な言い方で聞く。★ただし「自分の勘で動くか」か「ちゃんと視てから」のどちらかの言い回しは、必ずそのまま文中に含めること（この言葉を目印に、直後の返事を仕組みが正しく読むためや）。壁やなくて分かれ道として見せるんが椿の橋渡しや
+- 行動（どうしたらいい・ほっとくべきか・送るべきか等）を聞かれた時は、「無料では言えん」のような壁の宣言を絶対にしない。「無料」「有料」という言葉自体を相談者に向けて使わない。代わりにこの流れで返す：①まず相手の今の気持ちを一言で受け止める ②彼の性質・状況の読みを一つ足す（ここまでは今まで通り渡してええ）③彼についての「答えの形」だけ見せて、そこで止める——「心が離れたんか、意地が邪魔しとるだけなんか、そこの見極めが今いちばん大事なとこや」のように、答えそのものは言わずに、何が分かれ目なんかを名指しする。相手が「それはどう見分けるん？」と自分から聞き返してくる形が正解や
+- 【最重要】「このまま自分の勘で動くか、ウチが視てから決めるか」のような、視るか視ないかを問う二択を、あなたから書いてはならない。この問いは別の仕組みが、会話が十分深まってから一度だけ出す。あなたが早うに書くと、相手が彼のことを聞き返す前に会話が終わってまう（実害：2026-08-10、この二択を2通目で書くようになった結果、27人にオファーが飛んで購入ゼロやった）。彼についての問いを立てたら、その同じ返信の中で申し込みや意思確認の話に移らんこと
 - 料金・商品・リンク・会員の話を自分から切り出して売り込まない（オファーは別で出す）
 - 【最重要・絶対厳禁】自分がAIであることを匂わせる一切を書かない。モデル名（Claude・Sonnet・GPT等）、開発元の名前、「執筆者」「作成者」「生成」といった署名、英語の署名行を、本文の途中にも末尾にも絶対に付けない。椿は生身の鑑定士であり、名乗るのは「椿」だけ。AIかと聞かれても否定も肯定もせず「ウチは椿や」と流す
 - 【最重要・読み違い防止】相談者は自分のことを「私」「わたし」「うち」と呼ぶ。あなた（椿）が「あんたから？彼から？」「どっちや？」と二択で聞いた直後に「私」「わたし」「うち」とだけ返ってきたら、それは「相談者自身」という完全な答えや。「彼」「彼から」なら彼側。一語の短い返事は、必ず直前にあなたが投げた質問への答えとして解釈してから返す。意味が通るのに「『私』だけ来ても分からん」「それだけやと続きが分からん」と聞き返すのは絶対にしない（実害：陽子さんに「どっちや？」と聞いて「私」と完全な答えをもろたのに、聞き返して会話を壊した）
 - 【最重要・世界観】「店主」「担当」「運営」など裏方の存在を客に絶対に明かさない。椿は"あんたを視る本人"として振る舞う。「それはウチの担当ちゃう」「店主に聞いて」は禁句
 - 【最重要・絶対厳禁】「このあと案内が来る」「料金はあとで送る」「もうちょい待っといて」のように、後から何かを届ける約束を絶対にしない。あなたは案内を送る仕組みを持っていない。約束しても永遠に届かず、相手は待ち続ける（実際にそうなった。三歳と一歳の子を抱えた人が「お待ちしてます」と返して、何も届かんかった）。
-　料金・申し込み方法・「どうしたら視てもらえるか」を聞かれたら、予告して終わらせず、「ほな、ちゃんと視てから言うわ。ここから先は片手間で答えるとこやない」の趣旨で受けて止める（「無料」「有料」という言葉は使わない。★「ちゃんと視てから」の言い回しは必ず含める）。止めた直後の案内は、別の仕組みが自動で出す。あなたはその存在に触れんでよい
+　料金・申し込み方法・「どうしたら視てもらえるか」を聞かれたら、予告して終わらせず、「ほな、ちゃんと視てから言うわ。ここから先は片手間で答えるとこやない」の趣旨で受けて止める（「無料」「有料」という言葉は使わない）。止めた直後の案内は、別の仕組みが自動で出す。あなたはその存在に触れんでよい
 　★ただし値段そのものをはぐらかす言い方は絶対にしない。「金額は気にせんでええ」「お金のことは置いといて」「そこは心配せんでええ」は禁句。相手は値段を聞いとるのに「気にせんでええ」と返したら、無料やと受け取られる。金額に触れるなら黙って触れず、視ることだけを引き受けて止める（実害：まみさんに「金額は気にせんでええ」と返して、値段も案内も出さんまま会話が止まった）
 - 鑑定書の届き方・納期など単純な事実の質問には、椿自身が普通に答えてよい：届き方＝「鑑定書はPDFでこのLINEに届く（郵送やない）」、納期＝「申し込んでくれたら数日以内にここに届ける」。返金や複雑な手続きの相談だけは「そこはちょっと確認して、あとで返すな」と受ける（店主とは言わない）
 - 『宿曜』の語・宿の名前・占い専門用語は出さない。「ウチが視たら」でよい
@@ -745,6 +803,11 @@ def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
         return "danger"
     if _MONEY_TROUBLE_RE.search(text):
         return None                       # 「お金がない」は買う意思の逆。絶対に売りにいかん
+    # ★2026-08-10：値段の語が入っとるだけで購入サインにしとったせいで、
+    #   「有料はちょっと厳しいです」を購入意思と読んで撃っとった。値段に触れつつ
+    #   引いとる言い方は、買う気の逆や。語彙判定より先に弾く
+    if _PRICE_DECLINE_RE.search(text):
+        return None
     norm = _normalize_for_signal(text)    # 「どうしたら良い」→「どうしたらいい」等
     if any(w in norm for w in PURCHASE_WORDS):
         return "purchase"
@@ -768,10 +831,8 @@ def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
     #   実害（2026-08-08・石井希美さん）：二択に「みて」と答えたのに、
     #   ひらがなが同意語に無うて拾えず、無言のまま hold になった。
     #   二択に答えてくれた人を語彙の穴で取りこぼすのは、もう終わりにする。
-    if history and len(text) <= 30:
-        last_bot = next((str(h["text"]) for h in reversed(history)
-                         if h.get("role") == "assistant"), "")
-        if any(m in last_bot for m in _ASK_DEEPER_MARKS) and not _REFUSAL_RE.search(text):
+    if history and len(text) <= 30 and _canned_ask_deeper_just_sent(history):
+        if not _REFUSAL_RE.search(text):
             return "purchase"
     return None
 
@@ -993,7 +1054,9 @@ def handle_event(ev: dict) -> None:
             # 履歴が長い人は、窓から古い診断が溢れて base=0 に見えることがある。
             # 件数でも見て、確立済みの相手には初回診断を送らせない
             if _is_established(history):
-                _handle_code(user_id, incoming, snd)   # 番号だけは受ける
+                if _handle_code(user_id, incoming, snd):
+                    return
+                _reply_after_offer(user_id, user, incoming, snd, history)
                 return
             if not _handle_code(user_id, incoming, snd) and base == 0:
                 _try_free_diagnosis(user_id, user, incoming, snd, history)
@@ -1008,6 +1071,40 @@ def handle_event(ev: dict) -> None:
         return
 
     _auto_reply(user_id, user, incoming, reply_token)
+
+
+# オファーを出したあと、店主に渡すまでに椿が返してええ通数
+POST_OFFER_REPLIES = int(env("LINE_POST_OFFER_REPLIES") or "2")
+_ORDER_NO_RE = re.compile(r"(?<!\d)\d{9,12}(?!\d)")
+
+
+def _reply_after_offer(user_id: str, user: dict, incoming: str, snd, history: list[dict]) -> None:
+    """オファーを送ったあとに話しかけてくれた人へ、受け止めだけを返す。
+
+    ★2026-08-10：オファー後は bot=hold になって椿が黙る作りやった。その結果、
+    買わんかった人が話しかけてきても一言も返らんまま終わる会話が53件あった。
+    売り込みはせん（オファーは一人一回きりのまま）。受け止めを最大2通だけ返して、
+    それ以降は今まで通り店主に渡す。
+    """
+    if not _offer_already_sent(user_id):
+        return                      # オファー前のholdは店主の対応域。触らん
+    if _ORDER_NO_RE.search(incoming):
+        return                      # 注文番号は店主が処理する。機械が挟まらん
+    if detect_signal(incoming) == "danger":
+        snd(DANGER_REPLY)
+        return
+    # オファー以降に椿が返した数を数える
+    last_offer = max((i for i, h in enumerate(history)
+                      if h["role"] == "assistant" and _is_offer_text(str(h["text"]))), default=None)
+    if last_offer is None:
+        return
+    after = [h for h in history[last_offer + 1:] if h["role"] == "assistant"]
+    if len(after) >= POST_OFFER_REPLIES:
+        return                      # もう返した。ここから先は店主に任せる
+    text = _retry(lambda: generate_nurture(user, history[-13:-1], incoming), "オファー後の返信")
+    if text:
+        snd(text)
+        print(f"[line_bot] オファー後の受け止めを返した（{len(after)+1}/{POST_OFFER_REPLIES}）: {user_id}")
 
 
 def _handle_code(user_id: str, incoming: str, snd) -> bool:
@@ -1209,6 +1306,19 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
             return
 
     sig = detect_signal(incoming, history)
+    # ★2026-08-10：本人が自分の言葉で求めてへんうちは、まだ売りにいかん。
+    #   実データ（8/10より前の249件）：発言6回以下でも、自分から料金や依頼を
+    #   口にした人は 3/8＝37.5% 買う。一方こっちが振って相槌が返っただけの人は
+    #   1/60＝1.7% しか買わん。同じ浅さで22倍ちがう。
+    #   せやから止めるんは「浅い×受け身」だけ。自分から言うた人は待たせん。
+    #   ここで止めても会話は続く（下のナーチャリングに落ちる）＝無視にはならん。
+    if (sig in ("purchase", "purchase_soft")
+            and not _asked_in_own_words(incoming)
+            and _user_turns(state_hist) < OFFER_MIN_TURNS
+            and not over_limit):
+        print(f"[line_bot] まだ早い（発言{_user_turns(state_hist)}回・本人からの依頼なし）"
+              f"ので売らずに会話を続ける: {user_id}")
+        sig = None
     if sig in ("purchase", "purchase_soft"):
         if _is_minor(user):
             # 未成年に有料オファーは自動送付しない（未成年者契約の取消リスク＋倫理）。
