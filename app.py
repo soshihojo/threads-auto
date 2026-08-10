@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import streamlit as st
 
@@ -326,6 +326,10 @@ if view == VIEW_DIAG:
 
 
 # ---------------- 会員相談（相談し放題の返信生成＋LINE送信） ----------------
+# 未返信を「いま届いたまとまり」で区切る間隔。これ以上あいたら別の話とみなす
+_BURST_GAP_H = 6
+
+
 def _backend_attr(name: str):
     """store / line_bot に新しく足した関数を、確実に掴んで返す（無ければ None）。
 
@@ -381,17 +385,35 @@ def _consult_board() -> tuple[str, list[dict]]:
         uid = str(u["user_id"]) if u else ""
         chats = chats_by_uid.get(uid, []) if uid else []
         # 末尾から続く「会員の発言」＝まだこっちが返せてないぶん
-        waiting = []
+        wrows = []
         for r in reversed(chats):
             if str(r.get("role")) != "user":
                 break
-            waiting.append(str(r.get("text") or ""))
-        waiting.reverse()
+            wrows.append(r)
+        wrows.reverse()
+        # ★2026-08-10：未返信を全部つないで相談欄に入れると、何日ぶんもの独り言が
+        #   一塊になって「どれに答える話や」が分からんようになった（みのりさん・3日19件）。
+        #   最後の発言から遡って、_BURST_GAP_H 時間以上あいたところで切る＝
+        #   「いま届いたまとまり」だけを既定にする。全部欲しい時は画面で切り替える。
+        recent = wrows[-1:] if wrows else []
+        for i in range(len(wrows) - 1, 0, -1):
+            try:
+                gap = (datetime.fromisoformat(str(wrows[i].get("created_at")))
+                       - datetime.fromisoformat(str(wrows[i - 1].get("created_at")))).total_seconds()
+            except Exception:
+                gap = 0.0
+            if gap > _BURST_GAP_H * 3600:
+                break
+            recent.insert(0, wrows[i - 1])
+        waiting = [str(r.get("text") or "") for r in wrows]
         board.append({
             "id": str(m["id"]), "nickname": str(m["nickname"]),
             "me_birth": str(m["me_birth"]), "him_birth": str(m["him_birth"]),
             "uid": uid, "line_name": str(u.get("display_name") or "") if u else "",
             "waiting": "\n".join(waiting),
+            "waiting_recent": "\n".join(str(r.get("text") or "") for r in recent),
+            "n_waiting": len(wrows), "n_recent": len(recent),
+            "recent_from": str(recent[0].get("created_at") or "")[:16] if recent else "",
             "last_ts": str(chats[-1].get("created_at") or "")[:16] if chats else "",
             "last_text": str(chats[-1].get("text") or "") if chats else "",
             "n_all": len(chats),
@@ -445,7 +467,10 @@ if view == VIEW_CONSULT:
         _stale_reply = False
         if st.session_state.get(f"con_sig_{cb['id']}") != _sig:
             st.session_state[f"con_sig_{cb['id']}"] = _sig
-            st.session_state.pop(f"con_msg_{cb['id']}", None)      # 相談欄は最新で入れ直す
+            # 相談欄は最新で入れ直す（keyに範囲が付くので前方一致で消す）
+            for _k in [k for k in list(st.session_state)
+                       if str(k).startswith(f"con_msg_{cb['id']}_")]:
+                st.session_state.pop(_k, None)
             st.session_state.pop(f"con_confirm_{cb['id']}", None)  # 確認中なら取り消す
             # 作りかけの返信は消さん（書いたもんを勝手に捨てん）。ただし古い前提のまま
             # 送ってまわんように、下で警告を出す
@@ -496,10 +521,18 @@ if view == VIEW_CONSULT:
                         st.caption(f"相談: {h['worry']}")
                     st.text(h["reading"])
         # 未返信ぶんは自動で入れておく（LINEを開いてコピーしてくる手間をなくす）。
-        # keyを会員ごとに分ける＝会員を切り替えたら、その子の未返信が入り直す
+        # 既定は「いま届いたまとまり」だけ。何日ぶんも溜まっとる人は全部にも切り替えられる
+        _scope_i = 0
+        if cb["waiting"] and cb["n_recent"] < cb["n_waiting"]:
+            _opts = [f"直近のまとまりだけ（{cb['n_recent']}件・{cb['recent_from']}〜）",
+                     f"未返信ぜんぶ（{cb['n_waiting']}件）"]
+            _scope_i = _opts.index(st.radio(
+                "どこまで相談欄に入れる？", _opts, key=f"con_scope_{cb['id']}", horizontal=True))
+        _fill = cb["waiting"] if _scope_i else (cb["waiting_recent"] or cb["waiting"])
+        # keyに範囲を含める＝切り替えたら中身が入れ替わる（widgetが古い値を握るのを避ける）
         incoming = st.text_area(
-            "会員から届いた相談" + ("（LINEの未返信ぶんを自動で入れました。編集できます）" if cb["waiting"] else ""),
-            value=cb["waiting"], key=f"con_msg_{cb['id']}", height=120,
+            "会員から届いた相談" + ("（LINEから自動で入れました。編集できます）" if cb["waiting"] else ""),
+            value=_fill, key=f"con_msg_{cb['id']}_{_scope_i}", height=160,
             placeholder="例：昨日ひさびさに彼から連絡きた。なんて返したらいい？")
         if st.button("💬 この子専用の返信を作る", type="primary", key="con_run"):
             if not incoming.strip():
@@ -584,8 +617,9 @@ if view == VIEW_CONSULT:
                                         store.update_reading(cr["reading_id"], edited)
                                     except Exception as e:
                                         st.warning(f"控えの更新に失敗（送信は成功しています）: {e}")
-                                for _k in (_ck, "con_result", f"con_msg_{cmem['id']}",
-                                           f"con_out_{cmem['id']}"):
+                                for _k in ([_ck, "con_result", f"con_out_{cmem['id']}"]
+                                           + [k for k in list(st.session_state)
+                                              if str(k).startswith(f"con_msg_{cmem['id']}_")]):
                                     st.session_state.pop(_k, None)
                                 _consult_board.clear()
                                 st.success(f"{cb['nickname']}さんに送信しました")
