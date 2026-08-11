@@ -485,7 +485,7 @@ IMAGE_REPLY = (
     "そのぶん文字はちゃんと視るから、状況を言葉で教えてくれるか🌙"
 )
 # 有料会員（👥会員に登録済み）が画像を送ってきたときの受領返信
-MEMBER_IMAGE_ACK = "画像、受け取ったで。ちゃんと見るから、ちょっと待っててな🌙"
+# （会員の画像への受領文は廃止。1枚ごとに飛んで4連発した実害のため・2026-08-11）
 
 # 会員から届いた画像（LINEトークのスクショ等）を相談対応用のテキストに起こすプロンプト
 IMAGE_READ_SYSTEM = """恋愛相談の月額会員から届いた画像を、相談対応に使えるように文字へ起こす係。
@@ -1021,7 +1021,7 @@ def handle_event(ev: dict) -> None:
         if _member_status(user) == "free":
             store.add_line_chat(user_id, "user", "[画像を送付（自動返信なし・店主が手動で確認）]")
         else:
-            _handle_member_image(user_id, reply_token, msg.get("id", ""))
+            _handle_member_image(user_id, msg.get("id", ""))
         return
     if msg.get("type") != "text":
         return  # スタンプ等は無視（既読の代わりに次のテキストで拾う）
@@ -1256,9 +1256,14 @@ def fetch_message_content(message_id: str) -> tuple[bytes, str]:
     return r.content, r.headers.get("Content-Type", "image/jpeg")
 
 
-def _handle_member_image(user_id: str, reply_token: str, message_id: str) -> None:
-    """会員から届いた画像を読み取り、内容を履歴に保存して受領を返す。
-    読み取り結果は💬会員相談の返信生成が「最近のLINE」として参照する。"""
+def _handle_member_image(user_id: str, message_id: str) -> None:
+    """会員から届いた画像を読み取り、内容を履歴に黙って保存する（返事はせん）。
+    読み取り結果は💬会員相談の返信生成が「最近のLINE」として参照する。
+
+    ★2026-08-11：受領の一言を返すのをやめた。画像1枚ごとに飛ぶので、
+    4枚まとめて送ってきた会員に同じ文が4連発した（MAKIKOさん 08:51に4通）。
+    会員は店主が手で続きを見る相手やから、機械の相槌は要らん。黙って読んどく。
+    """
     note = "[画像を送付]"
     try:
         data, mime = fetch_message_content(message_id)
@@ -1273,7 +1278,6 @@ def _handle_member_image(user_id: str, reply_token: str, message_id: str) -> Non
         print(f"[line_bot] 会員画像の読み取り失敗: {e}")
         note = "[画像を送付（自動読み取り失敗。LINEアプリで直接確認）]"
     store.add_line_chat(user_id, "user", note)
-    _send(user_id, reply_token, MEMBER_IMAGE_ACK)
 
 
 def _is_minor(user: dict) -> bool:
