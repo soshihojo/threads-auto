@@ -11,8 +11,15 @@ from . import leads, notify, store
 from .config import active_profile, load_config
 from .diagnosis import AI_LEAK_RE, JARGON, strip_ai_leak, strip_jargon
 from .kantei import strip_markdown
+from .config import env as _env
 from .llm import complete
 from .threads_client import ThreadsClient
+
+# コメント返信の生成モデル。
+# 「生まれ月から彼の性質を一言」という短い定型の作業で、1回あたり入力700・出力200トークン程度。
+# 最上位モデルを当てるほどの仕事やないので、一段下で回す（単価は入力2.5分の1・出力2.5分の1）。
+# 指示文が668字とキャッシュの最低量（1,024トークン）に届かんので、こっちは値段で下げる。
+REPLY_MODEL = _env("REPLY_MODEL") or "claude-sonnet-5"
 
 REPLY_SYSTEM = """あなたは地域店舗の集客を支援する担当者として、Threadsのコメントに丁寧かつ親しみやすく短く返信します。
 方針:
@@ -59,12 +66,13 @@ def _draft_reply(reply_text: str, username: str, is_lead: bool,
         f"オファー文脈: {profile.get('offer','')}\n"
         f"相手(@{username})のコメント: 「{reply_text}」\n\n{intent}{avoid}"
     )
-    text = _clean_reply(complete(system, user, max_tokens=200, temperature=0.9))
+    text = _clean_reply(complete(system, user, model=REPLY_MODEL,
+                                 max_tokens=200, temperature=0.9))
     # モデル名・署名が混じったら一度だけ作り直す。それでも残ったら該当行を落とす
     if AI_LEAK_RE.search(text) or any(w in text for w in JARGON):
         text = _clean_reply(complete(
             system + "\n\n【厳重注意】モデル名・署名・占術名・宿の名前を絶対に書かないこと。",
-            user, max_tokens=200, temperature=0.9))
+            user, model=REPLY_MODEL, max_tokens=200, temperature=0.9))
     return strip_ai_leak(text)
 
 
