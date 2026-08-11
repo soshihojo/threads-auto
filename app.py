@@ -510,10 +510,15 @@ if view == VIEW_CONSULT:
         # 会員からLINEに届いた直近のメッセージ（画像の読み取り内容含む）も返信生成が参照する。
         # 上でまとめて読んだ会話をそのまま使う＝ここでシートを読み直さない
         _lmsgs = [h for h in cb["chats"] if str(h.get("role")) == "user"][-8:]
-        _line_recent = "\n".join(f"・{str(h.get('created_at'))[:16]} {str(h.get('text') or '')[:250]}"
+        # ★2026-08-11：ここを250字で切っとったせいで、画像の書き起こしが尻切れになっとった
+        #   （MAKIKOさんのスクショ4枚は376〜477字。毎回126〜227字が捨てられとった）。
+        #   会員が送ってくるのは彼とのトーク画面で、いちばん読ませたい中身がそこにある。
+        _shot = sum(1 for h in _lmsgs if "読み取り内容" in str(h.get("text") or ""))
+        _line_recent = "\n".join(f"・{str(h.get('created_at'))[:16]} {str(h.get('text') or '')[:1500]}"
                                  for h in _lmsgs)
         if _line_recent:
-            st.caption("📱 LINEを自動リンク済み — 会員から最近LINEに届いた内容（画像の読み取り含む）も返信生成が参照します")
+            st.caption("📱 LINEを自動リンク済み — 会員から最近LINEに届いた内容も返信生成が参照します"
+                       + (f"（うち画像の読み取り{_shot}件を全文で渡しています）" if _shot else ""))
         if chist:
             with st.expander(f"📜 この子との直近のやりとり（{len(chist)}件）"):
                 for h in chist:
