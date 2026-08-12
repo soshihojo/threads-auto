@@ -45,11 +45,18 @@ def _clean_reply(text: str) -> str:
 # 固定投稿から無料診断してみ。生年月日入れるだけ、30秒や。」と一字一句同じ締めやった。
 # コメント欄は誰でも見られるので、並ぶとテンプレやと一目で分かる。
 def _recent_reply_tails(limit: int = 12) -> list[str]:
+    """直近に送った返信を持ってくる。次の下書きに「この型は使うな」と渡すため。
+
+    ★2026-08-12：ここが `if False else []` のまま実装されてへんかった。
+    そのせいで巡回のたびに記憶がゼロから始まり、毎回同じ骨格
+    （「◯月生まれの彼、〜なタイプや。ただ〜は言わん。プロフの入り口から〜」）が
+    並び続けとった。コメント欄は誰でも見られるので、並ぶと一目でテンプレと分かる。
+    """
     try:
-        rows = [r for r in store.pending_drafts()] if False else []
-    except Exception:
-        rows = []
-    return rows
+        return store.recent_sent_drafts(limit)
+    except Exception as e:
+        print(f"[replies] 直近の返信を読めんかった（重複回避なしで続行）: {e}")
+        return []
 
 
 def _draft_reply(reply_text: str, username: str, is_lead: bool,
@@ -60,8 +67,16 @@ def _draft_reply(reply_text: str, username: str, is_lead: bool,
         (profile.get("reply_normal_intent") or DEFAULT_NORMAL_INTENT)
     avoid = ""
     if recent:
-        avoid = ("\n\n【直前に他の人へ返した文（この骨格・この締め方は使わない。"
-                 "特に締めの一文は必ず変える）】\n" + "\n".join(f"・{t}" for t in recent[-8:]))
+        avoid = (
+            "\n\n【直前に他の人へ返した文】\n" + "\n".join(f"・{t}" for t in recent[-8:])
+            + "\n\n★上と同じ型を使わんこと。コメント欄は誰でも見えるから、"
+              "同じ骨格が並んだ瞬間にテンプレやとバレる。次の三つを必ず変える：\n"
+              "①書き出し（「◯月生まれの彼、」で始めるんは、上に既に有るなら使わん。"
+              "読みから入る／相手の言葉を拾う／短い一言で刺す、など別の入り方にする）\n"
+              "②引きの作り方（「ただ〜はまだ言わん」「その先は〜」の形が上に有るなら別の作りにする）\n"
+              "③締めの一文（同じ言い回しは二度使わん）\n"
+              "長さも変える。三行の時もあれば、一行で刺す時もあってええ。"
+        )
     user = (
         f"オファー文脈: {profile.get('offer','')}\n"
         f"相手(@{username})のコメント: 「{reply_text}」\n\n{intent}{avoid}"
@@ -121,7 +136,8 @@ def process_replies(client: ThreadsClient) -> dict:
     store.init_db()
     posts = client.my_threads(limit=lookback)
     stats = {"new_replies": 0, "leads": 0, "drafts": 0, "auto_sent": 0}
-    _recent: list[str] = []   # この巡回で作った下書き。骨格の被りを避けるため次に渡す
+    # 骨格の被りを避けるため、前回までに送った返信を種にしてから始める
+    _recent: list[str] = _recent_reply_tails()
 
     self_reply_threshold = int(cfg["replies"].get("self_reply_threshold", 30))
     for post in posts:

@@ -185,6 +185,15 @@ def pending_drafts() -> list[sqlite3.Row]:
         return c.execute("SELECT * FROM draft_replies WHERE status='pending' ORDER BY created_at").fetchall()
 
 
+
+def recent_sent_drafts(limit: int = 12) -> list[str]:
+    """最近そのまま送った返信の本文を、新しい順で返す。"""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT draft_text FROM draft_replies WHERE status='sent' AND draft_text<>'' "
+            "ORDER BY sent_at DESC LIMIT ?", (limit,)).fetchall()
+    return [r[0] for r in rows]
+
 def set_draft_status(reply_id: str, status: str, *, sent: bool = False) -> None:
     with conn() as c:
         if sent:

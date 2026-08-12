@@ -252,6 +252,15 @@ def pending_drafts() -> list[dict]:
     return [r for r in _records("draft_replies") if r.get("status") == "pending"]
 
 
+
+def recent_sent_drafts(limit: int = 12) -> list[str]:
+    """最近そのまま送った返信の本文を、新しい順で返す。
+    次の下書きを作る時に「この骨格は使うな」と渡して、コメント欄で型が並ぶのを防ぐ。"""
+    rows = [r for r in _records("draft_replies")
+            if str(r.get("status")) == "sent" and str(r.get("draft_text") or "").strip()]
+    rows.sort(key=lambda r: str(r.get("sent_at") or ""), reverse=True)
+    return [str(r["draft_text"]) for r in rows[:limit]]
+
 def set_draft_status(reply_id: str, status: str, *, sent: bool = False) -> None:
     idx = _find_row("draft_replies", "reply_id", reply_id)
     if idx:
