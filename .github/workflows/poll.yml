@@ -3,7 +3,7 @@ name: threads-poll
 # 返信送信は draft モードなので承認待ち。リード通知はここで飛ぶ。
 on:
   schedule:
-    - cron: "0 0-14/2 * * *"  # 2時間おき UTC0-14（JST 9,11,13,15,17,19,21,23時）
+    - cron: "0 0-14 * * *"  # 1時間おき UTC0-14（JST 9時〜23時）
   workflow_dispatch: {}
 
 jobs:

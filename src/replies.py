@@ -6,6 +6,7 @@ mode=auto の場合のみ、生成と同時に送信する。
 from __future__ import annotations
 
 import re
+import time
 
 from . import leads, notify, store
 from .config import active_profile, load_config
@@ -139,6 +140,7 @@ def process_replies(client: ThreadsClient) -> dict:
     # 骨格の被りを避けるため、前回までに送った返信を種にしてから始める
     _recent: list[str] = _recent_reply_tails()
 
+    gap_sec = int(cfg.get("safety", {}).get("min_seconds_between_actions", 30))
     self_reply_threshold = int(cfg["replies"].get("self_reply_threshold", 30))
     for post in posts:
         post_id = post["id"]
@@ -179,11 +181,18 @@ def process_replies(client: ThreadsClient) -> dict:
             stats["drafts"] += 1
 
             # --- autoモードなら即送信 ---
+            # ★2026-08-12：自動送信に切り替えた。間を空けずに連投すると
+            #   凍結の的になるので、必ず待ってから次を送る。
+            #   config.yaml の safety.min_seconds_between_actions を実際に使う
+            #   （今まで設定だけ書いてあって、コードでは一度も見てへんかった）。
             if mode == "auto":
+                if stats["auto_sent"]:
+                    time.sleep(gap_sec)
                 try:
                     client.reply_to(rid, draft)
                     store.set_draft_status(rid, "sent", sent=True)
                     stats["auto_sent"] += 1
+                    print(f"[replies] 自動送信 {stats['auto_sent']}件目: @{ruser}")
                 except Exception as e:
                     print(f"[replies] 自動送信失敗 {rid}: {e}")
 
