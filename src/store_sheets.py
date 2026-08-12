@@ -76,8 +76,17 @@ _CACHE: dict[str, tuple[float, list]] = {}
 _RETRY_DELAYS = (0, 5, 12, 25, 45)  # 秒
 
 
+# 待って投げ直せば直る種類のエラー。
+# 429=こっちが叩きすぎ。5xx=Google側の一時的な不調で、こっちに落ち度はない。
+# ★2026-08-12：503を再試行の対象にしてへんかったせいで、Google側が数分こけただけで
+#   予約投稿のジョブが丸ごと落ちとった（8/12の15:30と18:30、どっちも503）。
+#   次の巡回が拾い直すので投稿自体は消えんが、失敗通知が飛ぶし、
+#   運悪く処理の途中で落ちたら中途半端な状態が残る。待てば直るもんは待つ。
+_RETRYABLE = (429, 500, 502, 503, 504)
+
+
 def _api(fn, *args, **kwargs):
-    """gspreadのネットワーク呼び出しを429リトライ付きで実行する。"""
+    """gspreadのネットワーク呼び出しを、一時的な失敗のリトライ付きで実行する。"""
     last = None
     for delay in _RETRY_DELAYS:
         if delay:
@@ -86,8 +95,9 @@ def _api(fn, *args, **kwargs):
             return fn(*args, **kwargs)
         except gspread.exceptions.APIError as e:
             code = getattr(getattr(e, "response", None), "status_code", None)
-            if code == 429:
+            if code in _RETRYABLE:
                 last = e
+                print(f"[sheets] {code} が返ったので {delay}秒待って再試行する")
                 continue
             raise
     raise last
