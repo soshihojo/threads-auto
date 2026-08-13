@@ -276,13 +276,6 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
     <div class="bline" id="bline"></div>
     <div class="bsig">—— 椿</div>
   </div>
-  <p class="sharelead">当たってたら、友達にも当てて回してみ👇</p>
-  <div class="share">
-    <button type="button" class="x" id="shX">Xでシェア</button>
-    <button type="button" class="th" id="shT">スレッズ</button>
-    <button type="button" id="shC">リンクをコピー</button>
-  </div>
-
   <div class="card">
     <div class="lbl">二人の縁</div>
     <h2 id="tname"></h2>
@@ -290,11 +283,28 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
     <div class="catch" id="tcatch"></div>
     <div class="desc" id="tdesc"></div>
   </div>
-  <p class="next">縁のカタチは、これで出た。<br>ほな——彼が<b>“今”あんたをどう思てるか</b>。<b>どこまで待てばええか</b>。<b>次の一手を何にするか</b>。<br>そこから先は、<b>LINEの方で視る。</b></p>
+
+  <!-- ★2026-08-13：この画面の並びを組み替えた。実測の離脱が、ここに全部集まっとったからや。
+       診断を実行した1,187人のうち、LINEのボタンを押したんは645人（54%）。542人が結果だけ見て消えた。
+       いっぽう、押した人の82%は登録まで行っとる。つまり導線の手間の問題やのうて、押す気になるかの問題やった。
+       直したんは三つ：
+       ①シェア釦をLINEの下に落とした。前は結果のすぐ下にあって、いちばん大事な動作の前に
+         「Xへ飛ぶ」いう別の動作が置いてあった。外へ出た人は戻ってこん
+       ②鑑定番号の箱をボタンの下に回した。頼む前に「番号を控えろ」いう宿題を見せとった
+       ③次への一行を、その人に出た縁の名前で書き換えるようにした（JS側で差し込む）。
+         前は誰に対しても同じ抽象文やった -->
+  <p class="next" id="nextline"></p>
+  <a class="linebtn" id="lbtn" href="#">LINEで続きを視てもらう</a>
+  <p class="step" id="stept">上のボタン押したら、番号は入っとる。<b>送信だけしてな。</b><br>開かん時は、下の番号をコピーして送ってくれたらええで🌙</p>
   <div class="codebox"><div class="lbl">あんたの鑑定番号</div><div class="code" id="code"></div>
     <button type="button" class="copybtn" id="copyb">番号をコピー</button></div>
-  <a class="linebtn" id="lbtn" href="#">LINEで続きを視てもらう</a>
-  <p class="step" id="stept">上のボタン押したら、番号は入っとる。<b>送信だけしてな。</b><br>開かん時は、番号をコピーして送ってくれたらええで🌙</p>
+
+  <p class="sharelead">当たってたら、友達にも当てて回してみ👇</p>
+  <div class="share">
+    <button type="button" class="x" id="shX">Xでシェア</button>
+    <button type="button" class="th" id="shT">スレッズ</button>
+    <button type="button" id="shC">リンクをコピー</button>
+  </div>
 </section>
 
 <footer>椿｜彼の本音しか視ん</footer>
@@ -329,7 +339,12 @@ function setupShare(name){
     }catch(_){}
   };
 }
-const STATUS = ["音信不通","既読スルー","急に冷められた","別れ話の後","片思いで進展なし","復縁したい","その他・複雑"];
+// ★2026-08-13：「人に言えない関係」を追加した。
+//   実測で、購入者33人のうち13人（39%）がトークで不倫・既婚に触れとるのに、
+//   選択肢が無いせいで全部「その他・複雑」（392件・最多）に紛れて見えてへんかった。
+//   いちばん財布の厚い層が、ファネルのどこにも名前を持ってへん状態やった。
+//   分けたら、鑑定書とヒアリングの精度も上がるし、投稿のテーマ配分も実数で決められる。
+const STATUS = ["音信不通","既読スルー","急に冷められた","別れ話の後","片思いで進展なし","復縁したい","人に言えない関係","その他・複雑"];
 const PERIOD = ["今日〜昨日（ごく最近）","〜3日","〜2週間","1ヶ月以上","片思い・まだこれから"];
 function opts(sel, from, to, suffix, ph){
   sel.add(new Option(ph, ""));
@@ -378,6 +393,12 @@ document.getElementById("f").addEventListener("submit", async (e)=>{
     document.getElementById("tcatch").textContent="——"+j.type.catch+"——";
     document.getElementById("tdesc").textContent=j.type.desc;
     document.getElementById("code").textContent=j.code;
+    // その人に出た縁の名前を使て、次への一行をその場で作る。
+    // 「あんたの結果の続き」やと分かる形にする（前は誰にでも同じ抽象文やった）
+    document.getElementById("nextline").innerHTML=
+      "「"+j.type.name+"」——縁のカタチは、これで出た。<br>"+
+      "ほな、この縁の二人が<b>いつ動いてええか</b>。彼が<b>“今”なに考えとるか</b>。<br>"+
+      "そこから先は、<b>LINEの方で視る。</b>";
     document.getElementById("lbtn").href=j.line_oa_url||j.line_url;
     if(!j.line_oa_url){ document.getElementById("stept").innerHTML=
       "追加したら、この番号だけ送ってな。<br>すぐに“彼の今の本音”を視て返すで🌙"; }

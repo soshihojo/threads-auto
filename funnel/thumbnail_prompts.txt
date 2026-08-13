@@ -1,0 +1,64 @@
+■ 商品サムネイルの生成プロンプト（3枚を揃えるため）
+
+【揃え方の考え方】
+個別鑑定書のサムネ（既存）は、赤い椿・淡いピンクと金の光・粒子・金の曲線・絹。
+この世界観は動かさん。動かすのは「その商品が果たす仕事」だけや。
+
+  個別鑑定書 … 彼が分かる      → 一輪の椿（今ここにある花）※既存のまま
+  潮見       … いつ動くか分かる → 水面に映る椿と月（時の流れ）
+  構え       … 手が止まらん     → 椿のそばに置かれた札と帯（道具）
+
+★「高い方ほど華やか」にはせん。豪華さで格を付けたら、中身やのうて値段の絵になる。
+　三枚とも同じ格で、仕事だけが違う。それが「視る深さはどれも同じ」いう売り文句と揃う。
+
+────────────────────────────────────────
+【潮見 9,800円】英語プロンプト
+────────────────────────────────────────
+
+A single vivid red camellia flower in full bloom with golden stamens, resting at the
+edge of a calm moonlit water surface, its reflection mirrored softly below. Gentle
+concentric ripples spread across the water. A pale luminous moon glows in the upper
+left through soft mist. Dreamy bokeh background blending blush pink, warm ivory and
+pale silver-blue. Delicate golden filigree swirls and scattered sparkling light
+particles drift across the scene. Soft silk fabric folds at the base. Ethereal,
+luminous, elegant Japanese aesthetic. Photorealistic, high detail, soft diffused
+lighting, square composition, flower positioned right of center.
+
+【日本語で指示する場合】
+満開の赤い椿を一輪、月あかりの静かな水面のふちに置く。水面に椿がやわらかく映り込み、
+同心円の波紋がひろがっている。左上のもやの向こうに淡く光る月。背景はぼかしで、
+桜色・生成り・淡い銀青がまざる。金の細い曲線と光の粒が舞う。足元には絹のひだ。
+幻想的で品のある和の雰囲気。写実的、細部まで精緻、やわらかな光、正方形、花は右寄り。
+
+────────────────────────────────────────
+【潮見・構え 16,800円】英語プロンプト
+────────────────────────────────────────
+
+A single vivid red camellia flower in full bloom with golden stamens, with two small
+folded paper cards resting beside it on soft silk fabric, edges catching golden light.
+A slender golden ribbon band curves gently around the base of the flower. Dreamy bokeh
+background blending blush pink, warm ivory and deep rose. Delicate golden filigree
+swirls and scattered sparkling light particles drift across the scene. Ethereal,
+luminous, elegant Japanese aesthetic. Photorealistic, high detail, soft diffused
+lighting, square composition, flower positioned right of center.
+
+【日本語で指示する場合】
+満開の赤い椿を一輪。そばの絹の上に、小さく折られた札が二枚、ふちが金に光っている。
+花のもとを金の細い帯がゆるやかに巻く。背景はぼかしで、桜色・生成り・深い薔薇色。
+金の細い曲線と光の粒が舞う。幻想的で品のある和の雰囲気。写実的、細部まで精緻、
+やわらかな光、正方形、花は右寄り。
+
+────────────────────────────────────────
+【3枚を並べた時に効く微調整】
+────────────────────────────────────────
+・花の位置と大きさは三枚とも揃える（右寄り・同じくらいの大きさ）。
+　位置がずれると、並べた時に格の差に見える
+・潮見だけ淡い銀青を少し入れる。時間と水の商品やと一目で分かる
+・構えは深い薔薇色を少し足す。ただし「豪華」にはせん。落ち着きの方向で差をつける
+・文字は入れん。既存の一枚に文字が無いから、そこは揃える
+・正方形で作る。noteでも商品ページでも崩れん
+
+【もし写実の絵が用意できん場合】
+CSSで組んだ図案（椿の意匠＋箔＋題字）で三枚を作り直すこともできる。
+その時は既存の一枚も同じ図案で作り直して、三枚とも図案に統一する。
+写実と図案を混ぜるのがいちばん安っぽう見えるからな。

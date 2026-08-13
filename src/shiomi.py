@@ -1,0 +1,289 @@
+"""潮見（9,800円）と潮見・構え（16,800円）——90日の暦を売る商品。
+
+★2026-08-13 新設。
+
+3,980円の鑑定書は「彼が分かる」商品や。処方箋の章に「いつ・何を」は書いてあるが、
+90日を一望する暦は無い。相談の大半が「別れて待つ」「音信不通」——時間の悩みやのに、
+待ち時間そのものには形が与えられてへん。そこを埋めるのが潮見や。
+
+【この商品の生命線】
+暦の各行は必ず「あんたが◯◯する週」の文法で書く。「彼から連絡が来る週」は禁止。
+3人の設計者が独立に同じ弱点を白状した——「日付を売れば、外れが記録される」。
+彼の行動を予言したら外れる。あんたの行動を指定したら、動いた事実が成果になって外れようがない。
+同じ情報を売っとるのに、片方だけが崩れる。せやから src/lint.py の予言文法検査を
+strict で通すまで、この商品は一枚も出さん。
+
+  潮見     9,800円 … 鑑定書＋九十日の暦＋解説
+  構え    16,800円 … 潮見＋視直しの札2枚＋受けの型3〜5枚＋お守り札
+"""
+from __future__ import annotations
+
+import html as _html
+import re
+import shutil
+import subprocess
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+from . import lint
+from .kantei import (CHROME, OUT_DIR, _internal_brief, strip_ai_leak,
+                     strip_instruction_leak, strip_jargon, strip_markdown)
+from .llm import complete
+
+SHIOMI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。個別鑑定書に添える「九十日の暦（潮見表）」を組む。
+
+これは9,800円の納品物の芯になる部分。相談者は、いつ動いていつ待つかが分からんまま毎日を過ごしとる。その待ち時間に形を与えるのがこの暦や。
+
+【最重要・絶対厳守】
+暦に書く行は、すべて主語を相談者にする。「彼から連絡が来る週」「彼が動く時期」のような、彼を主語にした未来の記述は一語も書いてはいけない。書くのは「あんたが動いてええ週」「あんたが手を出さん週」「あんたが自分のことをする週」や。彼については「こういう男は、こういう状態の時に動きやすい」という性質の話までに留める。
+これは表現の好みやのうて、商品の設計や。彼の行動を予言したら外れる。相談者の行動を指定したら、動いた事実そのものが成果になる。
+
+声と文体:
+- 一人称「ウチ」、相手は「あんた」。関西弁。暦の一言は短く、言い切る
+- 慰めの嘘は書かない。ただし突き放さない
+- 相談者の実際の事情（別れた日、彼の予定、記念日、本人の仕事）を暦に反映させる
+
+厳守:
+- 『宿曜』という占術名、宿の名前、専門用語は一切書かない
+- 結果の保証はしない。過度に不安を煽らない。病気・健康・金運の断定はしない
+- マークダウン記号は使わない
+- 自分がAIであることを匂わせる一切を書かない。名乗るのは「椿」だけ
+- 指定された形式を厳密に守って出力する"""
+
+_FMT = """次の形式で、余計な前置きも後書きも付けずに出力してください。
+
+=== 週 ===
+（13行。1行ずつ「週番号|開始日|終了日|潮の名前|一言」を半角の縦棒で区切る。
+　潮の名前は「静」「仕込み」「動」「凪」「守り」から選ぶ。
+　一言は30〜45字。必ず主語を相談者にする）
+1|{d0}|{d6}|静|（一言）
+…13行目まで
+
+=== 動いてええ日 ===
+（8〜10行。「日付|その日にあんたがやること」。日付は{start}から{end}の範囲内。
+　「彼から連絡が来る日」ではなく「あんたが動いてええ日」として書く）
+2026-08-22|（やること）
+
+=== 手を出さん日 ===
+（3〜5行。「日付|なぜその日は動かんのか」。相談者の事情・記念日・彼の予定から選ぶ）
+
+=== 解説 ===
+（900〜1200字。この暦をどう使うか。なぜこの並びになっとるか。
+　最初の窓が来るまでに何を仕込むか。段落の区切りは空行）"""
+
+
+@dataclass
+class Shiomi:
+    weeks: list[tuple[int, str, str, str, str]]   # 週番号, 開始, 終了, 潮, 一言
+    go: list[tuple[str, str]]                     # 日付, やること
+    stay: list[tuple[str, str]]                   # 日付, 理由
+    note: str                                     # 解説
+
+
+def _clean(text: str) -> str:
+    return strip_ai_leak(strip_instruction_leak(strip_markdown(strip_jargon(text))))
+
+
+def _parse(raw: str) -> Shiomi:
+    def block(name: str) -> str:
+        m = re.search(rf"===\s*{name}\s*===\s*(.*?)(?====|\Z)", raw, re.S)
+        return m.group(1).strip() if m else ""
+
+    weeks = []
+    for ln in block("週").splitlines():
+        p = [x.strip() for x in ln.split("|")]
+        if len(p) >= 5 and p[0].isdigit():
+            weeks.append((int(p[0]), p[1], p[2], p[3], p[4]))
+
+    def pairs(name: str) -> list[tuple[str, str]]:
+        out = []
+        for ln in block(name).splitlines():
+            p = [x.strip() for x in ln.split("|")]
+            if len(p) >= 2 and re.search(r"\d", p[0]):
+                out.append((p[0], p[1]))
+        return out
+
+    return Shiomi(weeks, pairs("動いてええ日"), pairs("手を出さん日"), block("解説"))
+
+
+def generate_shiomi(name: str, me_birth: str, him_birth: str, details: str,
+                    today: str | None = None) -> Shiomi:
+    """九十日の暦を生成する。予言文法の検査を通らんかったら一度だけ書き直させる。"""
+    today = today or datetime.now().strftime("%Y-%m-%d")
+    d0 = datetime.strptime(today, "%Y-%m-%d").date()
+    end = d0 + timedelta(days=89)
+    fmt = _FMT.format(d0=today, d6=(d0 + timedelta(days=6)).isoformat(),
+                      start=today, end=end.isoformat())
+    user = (
+        f"=== 内部参考（本文には翻訳して出す。用語・数字は出さない） ===\n"
+        f"{_internal_brief(name, me_birth, him_birth, today)}\n\n"
+        f"=== 相談者から届いた詳細（全文） ===\n{details}\n\n"
+        f"=== 暦が見る期間 ===\n{today} から {end} までの90日\n\n{fmt}"
+    )
+    for attempt in (1, 2):
+        raw = _clean(complete(SHIOMI_SYSTEM, user, max_tokens=4000, temperature=0.7).strip())
+        s = _parse(raw)
+        body = "\n".join(w[4] for w in s.weeks) + "\n" + "\n".join(g[1] for g in s.go) \
+            + "\n" + "\n".join(t[1] for t in s.stay) + "\n" + s.note
+        bad = lint.check_prophecy(body, strict=True)
+        if not bad:
+            return s
+        print(f"  ⚠ 予言文法が{len(bad)}件（{attempt}回目）: {bad[0].text[:40]}")
+        if attempt == 1:
+            user += ("\n\n【書き直しの指示】前回の出力に、彼を主語にした未来の記述が混ざっとった。"
+                     "例：" + bad[0].text[:50] + "。すべての行の主語を相談者にして書き直すこと。")
+    return s
+
+
+# ---------------- 暦の画像 ----------------
+
+_SHIO_COLOR = {"動": "#b3364b", "仕込み": "#c98a3c", "守り": "#5b7c8d",
+               "静": "#8a8f7a", "凪": "#9a9a9a"}
+
+
+def build_calendar_html(name: str, s: Shiomi, today: str) -> str:
+    d0 = datetime.strptime(today, "%Y-%m-%d").date()
+    end = d0 + timedelta(days=89)
+    # ★2026-08-13：ここで「09-05」を lstrip("0") しとったせいで "9/05" になり、
+    #   マス目側の "9/5" と一致せんかった。1桁の日だけ暦に色が付かん事故や
+    #   （生成は正しいのに、絵にだけ出えへん。刷ってから気づく類のやつ）。
+    #   数字に直してから組み直す。
+    def norm(v: str) -> str:
+        m = re.search(r"(\d{1,2})\s*[-/月]\s*(\d{1,2})", v[-6:] if len(v) > 6 else v)
+        return f"{int(m.group(1))}/{int(m.group(2))}" if m else v
+
+    go = {norm(g[0]): g[1] for g in s.go}
+    stay = {norm(t[0]): t[1] for t in s.stay}
+
+    def key(d: date) -> str:
+        return f"{d.month}/{d.day}"
+
+    # 月ごとのマス目
+    months, cur = [], date(d0.year, d0.month, 1)
+    while cur <= end:
+        cells = ""
+        lead = (cur.weekday() + 1) % 7          # 日曜始まり
+        cells += '<i class="pad"></i>' * lead
+        d = cur
+        while d.month == cur.month:
+            k = key(d)
+            cls = "day"
+            if not (d0 <= d <= end):
+                cls += " out"
+            elif k in stay:
+                cls += " stay"
+            elif k in go:
+                cls += " go"
+            cells += f'<i class="{cls}">{d.day}</i>'
+            d += timedelta(days=1)
+        months.append(f'<div class="mo"><h4>{cur.month}月</h4>'
+                      f'<div class="grid"><b>日</b><b>月</b><b>火</b><b>水</b>'
+                      f'<b>木</b><b>金</b><b>土</b>{cells}</div></div>')
+        cur = date(cur.year + (cur.month == 12), (cur.month % 12) + 1, 1)
+
+    rows = "".join(
+        f'<tr><td class="wk">{w[0]}</td>'
+        f'<td class="dt">{w[1][5:].replace("-", "/")}〜{w[2][5:].replace("-", "/")}</td>'
+        f'<td><span class="shio" style="background:{_SHIO_COLOR.get(w[3], "#8a8f7a")}">'
+        f'{_html.escape(w[3])}</span></td>'
+        f'<td class="cm">{_html.escape(w[4])}</td></tr>'
+        for w in s.weeks)
+
+    golist = "".join(f'<li><b>{_html.escape(g[0][5:].replace("-", "/"))}</b>'
+                     f'{_html.escape(g[1])}</li>' for g in s.go)
+    staylist = "".join(f'<li><b>{_html.escape(t[0][5:].replace("-", "/"))}</b>'
+                       f'{_html.escape(t[1])}</li>' for t in s.stay)
+    note = "".join(f"<p>{_html.escape(p.strip())}</p>"
+                   for p in s.note.split("\n") if p.strip())
+
+    return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<title>九十日の暦 {_html.escape(name)}</title><style>
+@page {{ size: A4; margin: 14mm; }}
+body {{ font-family:"Hiragino Mincho ProN","Yu Mincho",serif; color:#241b1d;
+  background:#fdfbf9; margin:0; font-size:10.5px; line-height:1.8; }}
+.head {{ text-align:center; padding:6px 0 16px; border-bottom:2px solid #a52e44; }}
+.head h1 {{ font-size:23px; margin:0 0 4px; letter-spacing:.14em; }}
+.head p {{ margin:0; font-size:10px; color:#7a6a6d; letter-spacing:.06em; }}
+.months {{ display:flex; gap:12px; justify-content:center; margin:16px 0 8px; }}
+.mo h4 {{ text-align:center; font-size:11px; margin:0 0 5px; color:#7a6a6d; font-weight:normal; }}
+.grid {{ display:grid; grid-template-columns:repeat(7,17px); gap:2px; }}
+.grid b {{ font-size:7.5px; color:#a99; text-align:center; font-weight:normal; }}
+.grid i, .grid .pad {{ display:grid; place-items:center; height:17px; font-style:normal;
+  font-size:9px; border-radius:2px; }}
+.day {{ background:#f0ebe6; color:#5c5052; }}
+.day.out {{ background:transparent; color:#d8d0cc; }}
+.day.go {{ background:#a52e44; color:#fff; font-weight:600; }}
+.day.stay {{ background:#fff; color:#a52e44; box-shadow:inset 0 0 0 1.4px #a52e44; }}
+.legend {{ text-align:center; font-size:9px; color:#7a6a6d; margin-bottom:14px; }}
+.legend span {{ display:inline-block; margin:0 7px; }}
+.dot {{ display:inline-block; width:9px; height:9px; border-radius:2px;
+  vertical-align:-1px; margin-right:3px; }}
+table {{ width:100%; border-collapse:collapse; margin-bottom:14px; }}
+td {{ border-bottom:1px solid #e8e0da; padding:4.5px 5px; vertical-align:middle; }}
+.wk {{ width:20px; text-align:center; color:#b0a3a5; font-size:9px; }}
+.dt {{ width:78px; font-size:9.5px; color:#7a6a6d; white-space:nowrap; }}
+.shio {{ display:inline-block; color:#fff; font-size:9px; padding:1.5px 7px;
+  border-radius:2px; white-space:nowrap; }}
+.cm {{ font-size:10px; }}
+.two {{ display:flex; gap:16px; margin-bottom:14px; }}
+.two > div {{ flex:1; }}
+h3 {{ font-size:11px; margin:0 0 5px; padding-bottom:3px; border-bottom:1px solid #a52e44;
+  letter-spacing:.1em; }}
+ul {{ list-style:none; padding:0; margin:0; font-size:9.5px; }}
+li {{ padding:2.5px 0; border-bottom:1px dotted #e8e0da; line-height:1.6; }}
+li b {{ display:inline-block; min-width:34px; color:#a52e44; }}
+.note {{ border-top:2px solid #a52e44; padding-top:10px; }}
+.note p {{ margin:0 0 7px; text-align:justify; font-size:10px; }}
+.foot {{ text-align:center; font-size:8.5px; color:#a99; margin-top:12px; }}
+</style></head><body>
+<div class="head"><h1>九十日の暦</h1>
+<p>{_html.escape(name)}さんのために　{d0.year}年{d0.month}月{d0.day}日 — {end.year}年{end.month}月{end.day}日</p></div>
+<div class="months">{''.join(months)}</div>
+<div class="legend">
+<span><i class="dot" style="background:#a52e44"></i>動いてええ日</span>
+<span><i class="dot" style="background:#fff;box-shadow:inset 0 0 0 1.4px #a52e44"></i>手を出さん日</span>
+<span><i class="dot" style="background:#f0ebe6"></i>ふだんの日</span></div>
+<table>{rows}</table>
+<div class="two">
+<div><h3>動いてええ日</h3><ul>{golist}</ul></div>
+<div><h3>手を出さん日</h3><ul>{staylist}</ul></div>
+</div>
+<div class="note"><h3>この暦の使い方</h3>{note}</div>
+<div class="foot">椿</div>
+</body></html>"""
+
+
+def make_shiomi(name: str, me_birth: str, him_birth: str, details: str,
+                today: str | None = None) -> dict:
+    """九十日の暦を生成してPDFとPNGを出す。鑑定書とセットで潮見（9,800円）になる。"""
+    today = today or datetime.now().strftime("%Y-%m-%d")
+    OUT_DIR.mkdir(exist_ok=True)
+    print("🌊 九十日の暦を組んどる…")
+    s = generate_shiomi(name, me_birth, him_birth, details, today)
+    print(f"  ✓ {len(s.weeks)}週 / 動いてええ日{len(s.go)} / 手を出さん日{len(s.stay)} "
+          f"/ 解説{len(s.note)}字")
+
+    body = "\n".join(w[4] for w in s.weeks) + "\n" + s.note
+    problems = lint.check_prophecy(body, strict=True)
+    problems += lint.check_dates("\n".join(f"{g[0]} {g[1]}" for g in s.go + s.stay),
+                                 today=today, horizon_days=95, scope="all")
+    print("  ✅ 自動検査 問題なし" if not problems else f"  ⚠ 自動検査 {len(problems)}件")
+    for p in problems:
+        print(f"   ・{p}")
+
+    stem = f"九十日の暦_{name}"
+    html_path = OUT_DIR / f"{stem}.html"
+    pdf_path = OUT_DIR / f"{stem}.pdf"
+    html_path.write_text(build_calendar_html(name, s, today), encoding="utf-8")
+    subprocess.run([CHROME, "--headless", "--disable-gpu", "--no-pdf-header-footer",
+                    f"--print-to-pdf={pdf_path}", html_path.resolve().as_uri()],
+                   check=True, capture_output=True, timeout=120)
+    png_path = OUT_DIR / f"{stem}.png"
+    subprocess.run([CHROME, "--headless", "--disable-gpu", "--window-size=1000,1414",
+                    f"--screenshot={png_path}", html_path.resolve().as_uri()],
+                   check=True, capture_output=True, timeout=120)
+    for p in (pdf_path, png_path):
+        shutil.copy2(p, Path.home() / "Downloads" / f"九十日の暦_{name}さん{p.suffix}")
+    print(f"  📜 {pdf_path}\n  🖼 {png_path}")
+    return {"shiomi": s, "pdf": str(pdf_path), "png": str(png_path), "problems": problems}
