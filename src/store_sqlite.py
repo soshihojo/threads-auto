@@ -171,6 +171,12 @@ def mark_reply_seen(reply_id: str, post_id: str, username: str, text: str) -> No
         )
 
 
+def unmark_reply_seen(reply_id: str) -> None:
+    """既読の印を外して、次の巡回で拾い直せるようにする（sheets側と同じ役目）。"""
+    with conn() as c:
+        c.execute("DELETE FROM processed_replies WHERE reply_id=?", (reply_id,))
+
+
 # ---- draft replies ----
 def add_draft(reply_id: str, post_id: str, username: str, in_text: str, draft_text: str) -> None:
     with conn() as c:

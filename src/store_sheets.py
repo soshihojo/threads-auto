@@ -240,6 +240,20 @@ def mark_reply_seen(reply_id: str, post_id: str, username: str, text: str) -> No
                                   "username": username, "text": text, "seen_at": _now()})
 
 
+def unmark_reply_seen(reply_id: str) -> None:
+    """既読の印を外して、次の巡回で拾い直せるようにする。
+
+    ★2026-08-14：返信の生成に失敗した時に使う。
+    先に「見た」と記録してから生成しとるので、生成が落ちるとその人は
+    二度と拾われんまま消える（8/13のAPI過負荷で実際に起きた）。
+    失敗したら印を戻して、次の回にやり直させる。
+    """
+    idx = _find_row("processed_replies", "reply_id", reply_id)
+    if idx:
+        _api(_ws("processed_replies").delete_rows, idx)
+        _CACHE.pop("processed_replies", None)
+
+
 # ---- draft replies ----
 def add_draft(reply_id: str, post_id: str, username: str, in_text: str, draft_text: str) -> None:
     if _find_row("draft_replies", "reply_id", reply_id):

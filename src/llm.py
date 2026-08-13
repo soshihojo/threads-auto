@@ -1,6 +1,8 @@
 """Claude(Anthropic) 呼び出しの共通ヘルパー。"""
 from __future__ import annotations
 
+import time
+
 from anthropic import Anthropic
 
 from .config import env
@@ -75,6 +77,24 @@ def complete(system: str, user: str, *, model: str | None = None, max_tokens: in
     return _create(kwargs, cache=cache and len(system) >= _CACHE_MIN_CHARS)
 
 
+# ★2026-08-14：一時的な過負荷でも巡回が丸ごと死んどった。
+#   実害：8/13 23時台の巡回が anthropic.OverloadedError（529）で落ちて、
+#   その回のコメント返信が全部飛んだ。SDKも既定で2回は再試行するが、
+#   混んどる時はそれでは足りん。間を空けて粘る層をこっちで足す。
+_RETRY_WAITS = (4, 12, 30)          # 秒。これでも駄目なら諦めて例外を上げる
+
+
+def _is_transient(e: Exception) -> bool:
+    """待てば直る類か。過負荷・レート制限・上流の一時障害だけを拾う。
+    入力の間違い（400）まで再試行したら、同じ失敗を繰り返すだけやからな。"""
+    name = type(e).__name__
+    if name in ("OverloadedError", "RateLimitError", "APIConnectionError",
+                "APITimeoutError", "InternalServerError", "APIStatusError"):
+        code = getattr(e, "status_code", None)
+        return code is None or code == 429 or code >= 500
+    return False
+
+
 def _create(kwargs: dict, *, cache: bool) -> str:
     """messages.create の実行。キャッシュ指定が弾かれても本番を止めん。
 
@@ -82,20 +102,31 @@ def _create(kwargs: dict, *, cache: bool) -> str:
     弾かれたら黙って外して投げ直し、以後はこのプロセスでは付けん。
     """
     global _cache_supported
-    if cache and _cache_supported and isinstance(kwargs.get("system"), str):
-        cached = dict(kwargs)
-        cached["system"] = [{"type": "text", "text": kwargs["system"],
-                             "cache_control": {"type": "ephemeral", "ttl": _CACHE_TTL}}]
+    last: Exception | None = None
+    for i, wait in enumerate((0, *_RETRY_WAITS)):
+        if wait:
+            print(f"[llm] 混んどるみたいや。{wait}秒待って投げ直す（{i}回目）: {last}")
+            time.sleep(wait)
         try:
-            msg = client().messages.create(**cached)
+            if cache and _cache_supported and isinstance(kwargs.get("system"), str):
+                cached = dict(kwargs)
+                cached["system"] = [{"type": "text", "text": kwargs["system"],
+                                     "cache_control": {"type": "ephemeral", "ttl": _CACHE_TTL}}]
+                try:
+                    msg = client().messages.create(**cached)
+                    return "".join(b.text for b in msg.content if b.type == "text").strip()
+                except Exception as e:
+                    if not _is_cache_rejection(e):
+                        raise
+                    _cache_supported = False
+                    print(f"[llm] プロンプトキャッシュが使えんかったので無効化した（生成は続行）: {e}")
+            msg = client().messages.create(**kwargs)
             return "".join(b.text for b in msg.content if b.type == "text").strip()
         except Exception as e:
-            if not _is_cache_rejection(e):
+            if not _is_transient(e):
                 raise
-            _cache_supported = False
-            print(f"[llm] プロンプトキャッシュが使えんかったので無効化した（生成は続行）: {e}")
-    msg = client().messages.create(**kwargs)
-    return "".join(b.text for b in msg.content if b.type == "text").strip()
+            last = e
+    raise last  # type: ignore[misc]
 
 
 def _is_cache_rejection(e: Exception) -> bool:

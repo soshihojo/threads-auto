@@ -172,7 +172,17 @@ def process_replies(client: ThreadsClient) -> dict:
                     store.mark_lead_notified(rid)
 
             # --- 返信下書き生成 ---
-            draft = _draft_reply(rtext, ruser, is_lead, recent=_recent)
+            # ★2026-08-14：ここで例外が出ると巡回が丸ごと止まっとった。
+            #   実害：8/13 23時台、APIの過負荷（529）で一人分の生成が落ちた瞬間、
+            #   その回の残りのコメントが全部処理されずに終わった。
+            #   一人の失敗は一人分で済ませる。残りは続ける。
+            try:
+                draft = _draft_reply(rtext, ruser, is_lead, recent=_recent)
+            except Exception as e:
+                stats["errors"] = stats.get("errors", 0) + 1
+                print(f"[replies] 下書きの生成に失敗（この人は次の巡回に回す）: @{ruser} {e}")
+                store.unmark_reply_seen(rid)   # 既読の印を外して、次の回で拾い直す
+                continue
             if not draft:                     # ガードで空になったら送らない
                 print(f"[replies] 下書きが空になったのでスキップ: {rid}")
                 continue
