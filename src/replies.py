@@ -142,14 +142,21 @@ def process_replies(client: ThreadsClient) -> dict:
 
     gap_sec = int(cfg.get("safety", {}).get("min_seconds_between_actions", 30))
     self_reply_threshold = int(cfg["replies"].get("self_reply_threshold", 30))
+
+    # ★2026-08-14：ここは前まで「投稿を新しい順に見て、上限に達したら即return」やった。
+    #   そのせいで、伸びとる最新投稿のコメントだけで毎回の枠を食い潰して、
+    #   古い投稿に付いたコメントが永久に拾われんかった。
+    #   実害：@soreshota1105 の「8月」は、最新投稿にコメントが付き続けとるせいで
+    #   丸一日たっても順番が回ってこんかった（未処理が71件たまっとった）。
+    #   まず全部の投稿から未処理を集めて、古い順に並べてから上限ぶんだけ処理する。
+    #   待たされとる人から先に返す。これやと誰も置き去りにならん。
+    pending: list[tuple[dict, str, str | None]] = []
     for post in posts:
         post_id = post["id"]
         permalink = post.get("permalink")
         all_replies = list(client.replies(post_id, top_level_only=True))
         _maybe_self_reply(client, post_id, len(all_replies), self_reply_threshold, stats)
         for r in all_replies:
-            if stats["new_replies"] >= max_per_run:
-                return stats
             rid = r.get("id")
             rtext = r.get("text", "") or ""
             ruser = r.get("username", "") or ""
@@ -158,52 +165,63 @@ def process_replies(client: ThreadsClient) -> dict:
             if ruser and my_username and ruser == my_username:
                 store.mark_reply_seen(rid, post_id, ruser, rtext)  # 自分の返信は無視
                 continue
+            pending.append((r, post_id, permalink))
 
-            store.mark_reply_seen(rid, post_id, ruser, rtext)
-            stats["new_replies"] += 1
+    pending.sort(key=lambda x: str(x[0].get("timestamp") or ""))
+    if len(pending) > max_per_run:
+        print(f"[replies] 未処理 {len(pending)}件。古い順に {max_per_run}件だけ返す"
+              f"（残り {len(pending) - max_per_run}件は次の巡回）")
 
-            # --- リード検知 ---
-            kw = leads.match_keyword(rtext)
-            is_lead = kw is not None
-            if is_lead and store.add_lead(rid, post_id, ruser, rtext, kw):
-                stats["leads"] += 1
-                ok = notify.chatwork(notify.lead_message(ruser, rtext, kw, permalink))
-                if ok:
-                    store.mark_lead_notified(rid)
+    for r, post_id, permalink in pending[:max_per_run]:
+        rid = r.get("id")
+        rtext = r.get("text", "") or ""
+        ruser = r.get("username", "") or ""
 
-            # --- 返信下書き生成 ---
-            # ★2026-08-14：ここで例外が出ると巡回が丸ごと止まっとった。
-            #   実害：8/13 23時台、APIの過負荷（529）で一人分の生成が落ちた瞬間、
-            #   その回の残りのコメントが全部処理されずに終わった。
-            #   一人の失敗は一人分で済ませる。残りは続ける。
+        store.mark_reply_seen(rid, post_id, ruser, rtext)
+        stats["new_replies"] += 1
+
+        # --- リード検知 ---
+        kw = leads.match_keyword(rtext)
+        is_lead = kw is not None
+        if is_lead and store.add_lead(rid, post_id, ruser, rtext, kw):
+            stats["leads"] += 1
+            ok = notify.chatwork(notify.lead_message(ruser, rtext, kw, permalink))
+            if ok:
+                store.mark_lead_notified(rid)
+
+        # --- 返信下書き生成 ---
+        # ★2026-08-14：ここで例外が出ると巡回が丸ごと止まっとった。
+        #   実害：8/13 23時台、APIの過負荷（529）で一人分の生成が落ちた瞬間、
+        #   その回の残りのコメントが全部処理されずに終わった。
+        #   一人の失敗は一人分で済ませる。残りは続ける。
+        try:
+            draft = _draft_reply(rtext, ruser, is_lead, recent=_recent)
+        except Exception as e:
+            stats["errors"] = stats.get("errors", 0) + 1
+            print(f"[replies] 下書きの生成に失敗（この人は次の巡回に回す）: @{ruser} {e}")
+            store.unmark_reply_seen(rid)   # 既読の印を外して、次の回で拾い直す
+            continue
+        if not draft:                     # ガードで空になったら送らない
+            print(f"[replies] 下書きが空になったのでスキップ: {rid}")
+            continue
+        _recent.append(draft)
+        store.add_draft(rid, post_id, ruser, rtext, draft)
+        stats["drafts"] += 1
+
+        # --- autoモードなら即送信 ---
+        # ★2026-08-12：自動送信に切り替えた。間を空けずに連投すると
+        #   凍結の的になるので、必ず待ってから次を送る。
+        #   config.yaml の safety.min_seconds_between_actions を実際に使う
+        #   （今まで設定だけ書いてあって、コードでは一度も見てへんかった）。
+        if mode == "auto":
+            if stats["auto_sent"]:
+                time.sleep(gap_sec)
             try:
-                draft = _draft_reply(rtext, ruser, is_lead, recent=_recent)
+                client.reply_to(rid, draft)
+                store.set_draft_status(rid, "sent", sent=True)
+                stats["auto_sent"] += 1
+                print(f"[replies] 自動送信 {stats['auto_sent']}件目: @{ruser}")
             except Exception as e:
-                stats["errors"] = stats.get("errors", 0) + 1
-                print(f"[replies] 下書きの生成に失敗（この人は次の巡回に回す）: @{ruser} {e}")
-                store.unmark_reply_seen(rid)   # 既読の印を外して、次の回で拾い直す
-                continue
-            if not draft:                     # ガードで空になったら送らない
-                print(f"[replies] 下書きが空になったのでスキップ: {rid}")
-                continue
-            _recent.append(draft)
-            store.add_draft(rid, post_id, ruser, rtext, draft)
-            stats["drafts"] += 1
-
-            # --- autoモードなら即送信 ---
-            # ★2026-08-12：自動送信に切り替えた。間を空けずに連投すると
-            #   凍結の的になるので、必ず待ってから次を送る。
-            #   config.yaml の safety.min_seconds_between_actions を実際に使う
-            #   （今まで設定だけ書いてあって、コードでは一度も見てへんかった）。
-            if mode == "auto":
-                if stats["auto_sent"]:
-                    time.sleep(gap_sec)
-                try:
-                    client.reply_to(rid, draft)
-                    store.set_draft_status(rid, "sent", sent=True)
-                    stats["auto_sent"] += 1
-                    print(f"[replies] 自動送信 {stats['auto_sent']}件目: @{ruser}")
-                except Exception as e:
-                    print(f"[replies] 自動送信失敗 {rid}: {e}")
+                print(f"[replies] 自動送信失敗 {rid}: {e}")
 
     return stats

@@ -129,9 +129,13 @@ def _ws(name: str):
     sh = _spreadsheet()
     headers = TABLES[name]
     try:
-        ws = sh.worksheet(name)
+        # ★2026-08-14：ここだけ _api を通してへんかった。
+        #   シートの一覧を取る呼び出しもレート制限(429)に当たるのに、素で投げとったせいで
+        #   巡回の一行目で落ちる（実際に「Read requests per minute」で死んだ）。
+        #   一時的な失敗で全部止まるんは、もう他所で潰した型や。ここも同じ扱いにする。
+        ws = _api(sh.worksheet, name)
     except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=name, rows=1000, cols=FIRST_COL + len(headers))
+        ws = _api(sh.add_worksheet, title=name, rows=1000, cols=FIRST_COL + len(headers))
     # ヘッダ行（2行目・B列〜）が空なら入れる
     hdr_rng = f"{_col(0)}{HEADER_ROW}:{_col(len(headers) - 1)}{HEADER_ROW}"
     existing = _api(ws.get, hdr_rng)
