@@ -1466,10 +1466,26 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
             snd(ASK_DEEPER)
             print(f"[line_bot] 上限に到達。オファーの前に本人の意思を聞いた: {user_id}")
             return
-        # もう聞いた。それでも「視てほしい」が出てへん＝今は買う気やない人や。
-        # ここで売りに行っても、実データでは6.8%しか買わん。黙って店主に渡す。
+        # もう聞いた。それでも「視てほしい」がはっきり出てへん人や。
+        # ★2026-08-15：ここは黙って hold にしとった。売らんのは正しい（実データで6.8%）。
+        #   間違うとったんは「売らん」を「返さん」と一緒にしてもうたことや。
+        #   実際に止まっとった18人を読んだら、断りは一人もおらんかった。全員こうやった。
+        #     「視てもらいたいのもあるけど怖い」「見てもらいたいけどお金そんな払えない」
+        #     「視てもらってから動きたいけど料金が高いのなら自分の勘で動きます」
+        #     「お願いします😭」
+        #   ＝断りやのうて、引っかかりを一つ言うただけや。それに一言も返さんのは、
+        #   相談に乗ると言うといて黙ることになる。売らんでも、答えることはできる。
+        #   売りにはいかん。ただし、引っかかりには必ず答えてから店主に渡す。
+        text = _retry(lambda: generate_nurture(user, history[-13:-1], incoming),
+                      "意思確認後の受け止め")
+        if text and _PROMISE_LATER_RE.search(text):
+            # 「あとで返す」は送らん。届ける仕組みが無いからや（オファー後の経路と同じ作法）
+            text = None
+        if text:
+            snd(text)
         store.upsert_line_user(user_id, bot="hold")
-        print(f"[line_bot] 意思確認済みやが希望が出んかったので、売らずにholdした: {user_id}")
+        print(f"[line_bot] 意思確認済みやが希望が出んかったので、"
+              f"売らずに受け止めだけ返してholdした: {user_id}")
         return
 
     transcript = history[-13:]  # 会話プロンプトには直近だけ渡す（最後の1件=今回のメッセージ）
@@ -1515,6 +1531,27 @@ OFFER_FOLLOWUP = (
     "分からんことや引っかかっとることがあったら、遠慮せんと聞いてな。急かす気はないで🌙"
 )
 
+# ★2026-08-15：オファーに行く前に相談者が黙って消える経路には、追いかけが一つも無かった。
+#   実測（8/15時点）：オファー前で12〜120時間止まっとる人が48人。そのうち3人は
+#   二択（ASK_DEEPER）の直後で止まっとった。あと一言で買う瞬間やった人らを、
+#   こっちが何もせんまま落としとったことになる。ここも1回だけ声をかける。
+#   ・売り込まん。リンクも値段も出さん。欲しいのは返事だけや
+#   ・二択で止まっとる人には、二択を軽う言い直す（同じ長文をもう一回は送らん）
+#   ・送ったら最後の発言がこの文に変わるが、それだけやと20時間後にまた条件を満たしてまう。
+#     せやから下の _MARK を会話全体から探して、一度送った人には二度と送らん
+PRE_OFFER_FOLLOWUP_MARK = "あれからどないなった"
+PRE_OFFER_FOLLOWUP = (
+    "あれからどないなった？\n"
+    "彼のこと、なんか動きあったか。一言でええ、聞かせてな。\n"
+    "あんたの状況が変わっとったら、視え方も変わるからな🌙"
+)
+PRE_OFFER_FOLLOWUP_ASKED = (
+    "あれからどないなった？\n"
+    "この前の、自分の勘で動くか、ウチが視てから動くか——\n"
+    "急かす気はないねん。ただ、決めかねとるならその理由の方を聞かせてほしい。\n"
+    "金のことでも、怖いでも、なんでもええで🌙"
+)
+
 
 def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
     """最後が相談者の発言のまま止まっている会話（bot=onのみ）に自動返信する。
@@ -1525,7 +1562,9 @@ def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
     now = datetime.now(ZoneInfo("Asia/Tokyo")).replace(tzinfo=None)
 
     by_user: dict[str, list[dict]] = {}
-    for r in store.all_line_chats(days=max(2, max_age_hours // 24 + 1)):
+    # ★2026-08-15：オファー前の声かけが最長120時間（5日）を見るので、窓を6日に広げた。
+    #   ここが3日のままやと、4日前に止まった人が「そもそも居らん」ことになって拾えん。
+    for r in store.all_line_chats(days=max(6, max_age_hours // 24 + 1)):
         by_user.setdefault(r["user_id"], []).append(r)
 
     replied = 0
@@ -1549,6 +1588,25 @@ def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
                     print(f"[sweep] オファー24hフォロー: {uid}")
                     _send(uid, "", OFFER_FOLLOWUP)
                     replied += 1
+                continue
+            # オファー前に黙って消えた人へ、1回だけの声かけ（詳細は PRE_OFFER_FOLLOWUP の上）
+            if not (timedelta(hours=20) <= age <= timedelta(hours=120)):
+                continue
+            if any(PRE_OFFER_FOLLOWUP_MARK in str(r["text"]) for r in rows):
+                continue                                   # もう一回声をかけた人や
+            if any(_is_offer_text(str(r["text"])) for r in rows):
+                continue                                   # 過去にオファー済み＝この経路の対象外
+            if sum(1 for r in rows if r["role"] == "user") < 3:
+                continue                                   # ほぼ喋ってへん人を追いかけても迷惑なだけや
+            user = store.get_line_user(uid)
+            if not user or (user.get("bot") or "on").strip() != "on":
+                continue                                   # hold/offは店主の対応域。触らん
+            if _is_minor(user):
+                continue                                   # 未成年は追いかけん
+            asked = any(m in str(last["text"]) for m in _ASK_DEEPER_MARKS)
+            print(f"[sweep] オファー前の声かけ（{'二択で停止' if asked else '会話が途切れ'}）: {uid}")
+            _send(uid, "", PRE_OFFER_FOLLOWUP_ASKED if asked else PRE_OFFER_FOLLOWUP)
+            replied += 1
             continue
         if age < timedelta(minutes=min_age_min) or age > timedelta(hours=max_age_hours):
             continue
