@@ -168,11 +168,35 @@ def process_replies(client: ThreadsClient) -> dict:
             pending.append((r, post_id, permalink))
 
     pending.sort(key=lambda x: str(x[0].get("timestamp") or ""))
-    if len(pending) > max_per_run:
-        print(f"[replies] 未処理 {len(pending)}件。古い順に {max_per_run}件だけ返す"
-              f"（残り {len(pending) - max_per_run}件は次の巡回）")
 
-    for r, post_id, permalink in pending[:max_per_run]:
+    # ★2026-08-14：同じ人へ、一回の巡回で二通以上返さんようにする。
+    #   実害：@arale_gassie（「5月生まれ」「5月です」）と @elle_and_naomi（「1月です」×2）に、
+    #   似た返信が二通ずつ並んだ。同じ人が同じ投稿に二回コメントすると、
+    #   コメント単位で処理しとるせいで両方に返してまう。
+    #   コメント欄は誰でも見られる。同じ相手に似た文が並んだ瞬間、
+    #   「同じ形が二回来た＝機械や」と一目で分かる。返信の骨格を毎回変えとる意味が消える。
+    #   二通目以降は既読の印を付けんまま残して、次の巡回に回す
+    #   （※次の巡回でも同じ人が先頭に来たら、また一通だけ返る）。
+    seen_users: set[str] = set()
+    queue: list[tuple[dict, str, str | None]] = []
+    skipped_dup = 0
+    for r, post_id, permalink in pending:
+        u = (r.get("username") or "").strip().lower()
+        if u and u in seen_users:
+            skipped_dup += 1
+            continue
+        if u:
+            seen_users.add(u)
+        queue.append((r, post_id, permalink))
+        if len(queue) >= max_per_run:
+            break
+
+    rest = len(pending) - len(queue) - skipped_dup
+    if rest > 0 or skipped_dup:
+        print(f"[replies] 未処理 {len(pending)}件 → 今回 {len(queue)}件返す"
+              f"（同じ人の二通目以降 {skipped_dup}件は次の巡回、残り {max(0, rest)}件）")
+
+    for r, post_id, permalink in queue:
         rid = r.get("id")
         rtext = r.get("text", "") or ""
         ruser = r.get("username", "") or ""
