@@ -17,6 +17,7 @@ from urllib.parse import quote
 from . import store
 from .config import active_profile
 from .diagnosis import _shuku_distance, honmei_shuku
+from .iiate import iiate
 
 # 番号の有効期限（発行からこの日数を過ぎたらLINE側で受け付けない）
 CODE_TTL_DAYS = 7
@@ -145,6 +146,13 @@ def submit(data: dict) -> dict:
     oa_url = (f"https://line.me/R/oaMessage/%40{basic}/?{quote('鑑定番号' + code)}"
               if basic else "")
     return {"ok": True, "code": code, "type": t, "love": love,
+            # ★2026-08-14：彼の「決め方・動き方の癖」を一文だけ添える（言い当て）。
+            #   実測で、オファー前に「当たってる」が出た人の購入率は14%、出てへん人は8%やった。
+            #   その最初の一撃を、LINEに来る前のここに置く。
+            #   ※生成は使わん。src/iiate.py の手書きの表を引くだけや。
+            #     ここはWebの公開面で、生成物の漏れ検査（strip_ai_leak）の網の外にある。
+            #     8/3に有料の納品物へモデル名が漏れた事故を、全世界が見る画面で再演したら終いや。
+            "iiate": iiate(him, status),
             "line_url": active_profile().get("line_url", ""),
             "line_oa_url": oa_url}
 
@@ -233,6 +241,14 @@ button:disabled { opacity:.5; }
 .card .desc { font-size:14px; text-align:left; color:#e5dbcd; }
 .next { text-align:center; font-size:14.5px; margin-bottom:20px; }
 .next b { color:#d9a441; font-weight:600; }
+/* 言い当ての一枚。縁のカタチの札とは別の見た目にして、
+   「ここだけ椿が直接しゃべっとる」感じを出す */
+.iiate { border-left:3px solid #b08d3e; padding:2px 0 2px 16px; margin:0 0 22px; }
+.iiate .lbl { font-size:11px; letter-spacing:.32em; color:#b08d3e; margin-bottom:8px; }
+.iiate .ii { font-size:16px; line-height:1.95; color:#f0e7da; margin:0 0 14px; }
+.iiate .iichk { font-size:13px; line-height:1.8; color:#a89b8c; margin:0 0 12px; }
+.iiate .iilim { font-size:13px; line-height:1.8; color:#a89b8c; margin:0; }
+.iiate .iilim b { color:#d9a441; font-weight:600; }
 .codebox { border:1px dashed #b08d3e; border-radius:10px; text-align:center; padding:14px; margin-bottom:20px; }
 .codebox .lbl { font-size:12px; color:#b08d3e; letter-spacing:.3em; }
 .codebox .code { font-size:38px; letter-spacing:.3em; color:#fff; font-weight:600; }
@@ -293,6 +309,18 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
        ②鑑定番号の箱をボタンの下に回した。頼む前に「番号を控えろ」いう宿題を見せとった
        ③次への一行を、その人に出た縁の名前で書き換えるようにした（JS側で差し込む）。
          前は誰に対しても同じ抽象文やった -->
+  <!-- ★2026-08-14：言い当ての一枚。ここが最初の「当たってる」を起こす場所や。
+       型は3段で固定する：言い当て → 答え合わせを本人にさせる → 限界の白状。
+       限界を白状するから、当てた部分の信用が上がる（討論の裁定）。 -->
+  <div class="iiate" id="iiatebox" style="display:none">
+    <div class="lbl">彼の生まれから、ひとつだけ</div>
+    <p class="ii" id="iitext"></p>
+    <p class="iichk">当たっとるかは、あんたが一番よう知っとるやろ。<br>
+      外れとる思うなら、それも値打ちのある情報や。</p>
+    <p class="iilim">ここまでは、生まれだけで視えるとこ。<br>
+      彼の<b>「今の心」</b>は、ここからでは視えん。</p>
+  </div>
+
   <p class="next" id="nextline"></p>
   <a class="linebtn" id="lbtn" href="#">LINEで続きを視てもらう</a>
   <p class="step" id="stept">上のボタン押したら、番号は入っとる。<b>送信だけしてな。</b><br>開かん時は、下の番号をコピーして送ってくれたらええで🌙</p>
@@ -393,6 +421,11 @@ document.getElementById("f").addEventListener("submit", async (e)=>{
     document.getElementById("tcatch").textContent="——"+j.type.catch+"——";
     document.getElementById("tdesc").textContent=j.type.desc;
     document.getElementById("code").textContent=j.code;
+    // 言い当ては表引きなので、引けん組み合わせでは空で返る。その時は枠ごと出さん
+    if(j.iiate){
+      document.getElementById("iitext").textContent=j.iiate;
+      document.getElementById("iiatebox").style.display="block";
+    }
     // その人に出た縁の名前を使て、次への一行をその場で作る。
     // 「あんたの結果の続き」やと分かる形にする（前は誰にでも同じ抽象文やった）
     document.getElementById("nextline").innerHTML=
