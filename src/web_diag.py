@@ -327,7 +327,7 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
   <div class="codebox"><div class="lbl">あんたの鑑定番号</div><div class="code" id="code"></div>
     <button type="button" class="copybtn" id="copyb">番号をコピー</button></div>
 
-  <p class="sharelead">当たってたら、友達にも当てて回してみ👇</p>
+  <p class="sharelead">当たってたら、友達にも当てて回してみ🌙</p>
   <div class="share">
     <button type="button" class="x" id="shX">Xでシェア</button>
     <button type="button" class="th" id="shT">スレッズ</button>
