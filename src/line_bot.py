@@ -380,9 +380,34 @@ ASK_DEEPER_MARK = _ASK_DEEPER_MARKS[0]
 
 
 def _asked_deeper(history: list[dict]) -> bool:
-    """もう「深く視てほしいか」を聞いたか。二度は聞かん。文面の新旧どちらも数える。"""
-    return any(any(m in str(h.get("text", "")) for m in _ASK_DEEPER_MARKS)
-               for h in history if h.get("role") == "assistant")
+    """もう「深く視てほしいか」を聞いたか。文面の新旧どちらも数える。"""
+    return _ask_deeper_count(history) > 0
+
+
+# ★2026-08-15（夜）：二択は一回勝負やめて、最大三回まで出す。
+#   一回で打ち切っとった時、四人が会話の途中で止まっとった（詳細は over_limit の分岐に書いた）。
+#   三回出しても言葉にならん人には、こっちからオファーを出して本人に決めてもらう。
+ASK_DEEPER_MAX = int(env("LINE_ASK_DEEPER_MAX") or "3")
+# 二択と二択の間に、最低これだけ普通の返信を挟む。続けざまに聞いたら詰問になる。
+ASK_DEEPER_GAP = int(env("LINE_ASK_DEEPER_GAP") or "3")
+
+
+def _ask_deeper_count(history: list[dict]) -> int:
+    """これまでに二択（意思確認）を何回出したか。"""
+    return sum(1 for h in history if h.get("role") == "assistant"
+               and any(m in str(h.get("text", "")) for m in _ASK_DEEPER_MARKS))
+
+
+def _money_trouble(history: list[dict]) -> bool:
+    """本人が「お金がない」と言うたか。言うた人には売りにいかん（07番の鉄則）。"""
+    return any(_MONEY_TROUBLE_RE.search(str(h.get("text", "")))
+               for h in history if h.get("role") == "user")
+
+
+def _effective_limit(history: list[dict]) -> int:
+    """無料返信の上限。二択を出すたびに枠を足して、次の二択までの間隔を作る。
+    7通で一回目 → さらに3通で二回目 → さらに3通で三回目 → その次でオファー、という刻みや。"""
+    return FREE_REPLY_LIMIT + _ask_deeper_count(history) * ASK_DEEPER_GAP
 
 
 # ★2026-08-15：定型の二択（ASK_DEEPER）を、その人の話に紐づいた一文に差し替える。
@@ -1516,7 +1541,7 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
     bot_replies = sum(1 for h in state_hist
                       if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN
                       and ASK_MARKER not in h["text"])
-    over_limit = bot_replies >= FREE_REPLY_LIMIT
+    over_limit = bot_replies >= _effective_limit(state_hist)
 
     # 生年月日が二人分揃っていて、まだ無料診断を送っていなければ、自動で無料診断を返す
     #（「鑑定してほしい」等の購入ワードが同時に入っていても、診断が先。
@@ -1581,7 +1606,7 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
         bot_replies = sum(1 for h in state_hist
                           if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN
                           and ASK_MARKER not in h["text"])
-        over_limit = bot_replies >= FREE_REPLY_LIMIT
+        over_limit = bot_replies >= _effective_limit(state_hist)
 
     # 無料返信の上限：ナーチャリング返信（全履歴・診断と③④は数えない）が
     # FREE_REPLY_LIMIT通に達していたら停止する。未成年にはオファーを出さずに止めるだけ。
@@ -1601,35 +1626,44 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
             # すでにオファー済みなら二度は送らない（続きは店主が手動で）
             store.upsert_line_user(user_id, bot="hold")
             return
-        if not _asked_deeper(state_hist):
-            # ★上限に達しても、いきなり売らん。まず本人に決めさせる。
+        # ★2026-08-15（夜）：ここは「二択を一回出して、答えが“視てほしい”の形やなかったら
+        #   打ち切ってhold」やった。実際に止まった人を並べたら、全員が会話の途中やった。
+        #     ゆま  「浮気などではないですか？」        ← まっすぐな質問
+        #     やすこ「そんなにすぐ見れるの？」          ← 納期の質問＝買う直前
+        #     みゆき「彼から全然返信来なくなっちゃいましたよ😭」
+        #     waaaa 「どうにかさよならを無しにしたいです」
+        #   四人ともオファーを一度も見てへんまま止まっとった。二択の一回勝負がきつすぎる。
+        #   ★せやから通数では切らず、二択を最大三回まで出す。三回出しても言葉にならん人には、
+        #     こっちからオファーを出して、本人に見て決めてもらう。判断材料を渡さんまま
+        #     幕を引くほうが不親切や。
+        #   ★間隔は空ける（_effective_limit）。二択が続けざまに二回来たら詰問になる。
+        asks = _ask_deeper_count(state_hist)
+        if asks < ASK_DEEPER_MAX:
             #   ここで「視てほしい」と言うてくれたら、その一言が購入サインとして
             #   拾われて（_DECLINE_RE に ASK_DEEPER_MARK を入れてある）、
             #   次のメッセージで上の purchase 分岐がオファーを出す。
             #   bot は on のまま置いとく。返事を受け取らなあかんからな。
             snd(generate_ask_deeper(user, history, incoming))
-            print(f"[line_bot] 上限に到達。オファーの前に本人の意思を聞いた: {user_id}")
+            print(f"[line_bot] 意思確認 {asks + 1}/{ASK_DEEPER_MAX} 回目: {user_id}")
             return
-        # もう聞いた。それでも「視てほしい」がはっきり出てへん人や。
-        # ★2026-08-15：ここは黙って hold にしとった。売らんのは正しい（実データで6.8%）。
-        #   間違うとったんは「売らん」を「返さん」と一緒にしてもうたことや。
-        #   実際に止まっとった18人を読んだら、断りは一人もおらんかった。全員こうやった。
-        #     「視てもらいたいのもあるけど怖い」「見てもらいたいけどお金そんな払えない」
-        #     「視てもらってから動きたいけど料金が高いのなら自分の勘で動きます」
-        #     「お願いします😭」
-        #   ＝断りやのうて、引っかかりを一つ言うただけや。それに一言も返さんのは、
-        #   相談に乗ると言うといて黙ることになる。売らんでも、答えることはできる。
-        #   売りにはいかん。ただし、引っかかりには必ず答えてから店主に渡す。
-        text = _retry(lambda: generate_nurture(user, history[-13:-1], incoming),
-                      "意思確認後の受け止め")
-        if text and _PROMISE_LATER_RE.search(text):
-            # 「あとで返す」は送らん。届ける仕組みが無いからや（オファー後の経路と同じ作法）
-            text = None
-        if text:
-            snd(text)
-        store.upsert_line_user(user_id, bot="hold")
-        print(f"[line_bot] 意思確認済みやが希望が出んかったので、"
-              f"売らずに受け止めだけ返してholdした: {user_id}")
+        # 三回聞いた。ここから先は、金の話が出とるかどうかで分ける。
+        if _money_trouble(state_hist):
+            # 「お金がない」と言うた人には売りにいかん。ここは変えん（07番の鉄則）。
+            #   ただし黙って終わらせもせん。引っかかりに一言返してから店主に渡す。
+            text = _retry(lambda: generate_nurture(user, history[-13:-1], incoming),
+                          "意思確認後の受け止め")
+            if text and _PROMISE_LATER_RE.search(text):
+                text = None                 # 「あとで返す」は届ける仕組みが無いので送らん
+            if text:
+                snd(text)
+            store.upsert_line_user(user_id, bot="hold")
+            print(f"[line_bot] 三回聞いたが金の事情が出とるので、売らずに受け止めた: {user_id}")
+            return
+        # 判断材料としてオファーを出す。買うか買わんかは本人が決めたらええ。
+        if snd(generate_offer(user, history, incoming)):
+            _send_offer_after(user_id, snd)
+            store.upsert_line_user(user_id, bot="hold")
+            print(f"[line_bot] 意思確認を{ASK_DEEPER_MAX}回。判断材料としてオファーを出した: {user_id}")
         return
 
     transcript = history[-13:]  # 会話プロンプトには直近だけ渡す（最後の1件=今回のメッセージ）
