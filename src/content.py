@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from .config import ROOT, active_profile, load_config
+from .diagnosis import RESPECT_GUARD, soften_rude
 from .llm import complete
 
 # 型ファイルから抽出する型の見出し（02_templates.md の "## 型①〜" を想定）
@@ -54,6 +55,10 @@ def sanitize(text: str) -> str:
     # 行頭の見出し記号（#, ##…）と箇条書き記号（- , * , ・の直後空白）を除去
     text = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", text)
     text = re.sub(r"(?m)^\s{0,3}[*\-]\s+", "", text)
+    # 彼を雑に呼ぶ語（「あの男」「この男」「あいつ」等）を直す。
+    # ★2026-08-17：投稿にも4件出とった（「あいつはもう自分を見てへん」等）。
+    #   読者にとっては大事な相手や。投稿・返信・鑑定書で同じ網を通す。
+    text = soften_rude(text)
     return _ensure_line_url(text.strip())
 
 
@@ -254,7 +259,8 @@ def generate_post(type_hint: str | None = None, region: str | None = None,
         f"=== ルール集 ===\n{rules_block}\n\n"
         f"=== 今回の指示 ===\n" + "\n".join(f"- {x}" for x in instructions)
     )
-    system = profile.get("system_prompt") or SYSTEM
+    # ★2026-08-17：呼び方のガードは、プロファイル独自の指示文を使う場合も必ず効かせる
+    system = (profile.get("system_prompt") or SYSTEM) + RESPECT_GUARD
     return sanitize(complete(system, user, max_tokens=800, temperature=1.0))
 
 
