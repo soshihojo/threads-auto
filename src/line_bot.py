@@ -1884,10 +1884,39 @@ def _auto_reply(user_id: str, user: dict, incoming: str, reply_token: str = "", 
 LATE_PREFIX = "遅うなってごめんな、順番に視てたんや。\n\n"
 
 # オファー送付後24時間反応が無い人への、1回だけの声かけ（売り込まない・急かさない）
+# 一度フォローを送った人に二度送らんための印（会話全体から探す）
+OFFER_FOLLOWUP_MARK = "この前の話、そのままになっとるな"
+# ★2026-08-19：文面を「見てくれたか？」の一言から、状況確認＋オファー再送に替えた。
+#   実測：オファー後に一度も返事が無い人のうち、直前に自分から「視てほしい」と
+#   言うてくれとった人が大半やった（27人中ほぼ全員）。いちばん購入に近い層が、
+#   案内を一回見ただけで止まっとる。声をかけるだけやのうて、買う道をもう一回渡す。
+# ★「案内はこれで最後にする」を必ず入れる。しつこうせん姿勢を明示すると同時に、
+#   下の _final 判定に引っかかって、二度目の追いフォローが止まる仕組みにもなっとる。
 OFFER_FOLLOWUP = (
-    "この前渡した話、見てくれたか？\n"
-    "分からんことや引っかかっとることがあったら、遠慮せんと聞いてな。急かす気はないで🌙"
+    "この前の話、そのままになっとるな。\n\n"
+    "催促しに来たんやない。あんたが「視てほしい」て言うてくれたこと、ウチはちゃんと覚えとる。\n"
+    "せやから一回だけ、今どうなっとるか聞かせてほしい。\n\n"
+    "・バタバタしとって、それどころやなかったか\n"
+    "・状況の方が動いて、聞きたいことが変わったんか\n\n"
+    "どれでも、一言でええ。それに合わせて、こっちも動き方を変えるからな。\n\n"
+    "ほんで、案内はこれで最後にする。もう一回だけ、ここに置いとくで🌙"
 )
+
+
+def _resend_offer(uid: str, rows: list[dict], offer_idx: int) -> None:
+    """24hフォローの本体。状況確認 → 前に送ったオファー本文 → 番号の段取り、の三通。
+
+    ★オファー本文は新しく作らん。その人に前に送ったもんをそのまま再掲する。
+      目次はその人の相談から組んだもんやから、作り直すより精度が高い。
+      「もう一回だけ置いとく」いう言い方とも噛み合う。
+    """
+    _send(uid, "", OFFER_FOLLOWUP)
+    body = str(rows[offer_idx].get("text") or "").strip()
+    if body:
+        time.sleep(random.uniform(4, 8))     # 続けざまに届くと機械らしいので間を置く
+        _send(uid, "", body)
+        time.sleep(random.uniform(4, 8))
+        _send(uid, "", OFFER_AFTER)
 
 # ★2026-08-15：オファーに行く前に相談者が黙って消える経路には、追いかけが一つも無かった。
 #   実測（8/15時点）：オファー前で12〜120時間止まっとる人が48人。そのうち3人は
@@ -1976,16 +2005,34 @@ def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
             continue
         age = now - t
         if last["role"] != "user":
-            # 最後がこちらのオファーのまま24〜72時間反応なし → 1回だけ声かけ
-            #（声かけ後は最後の発言がフォロー文に変わるので、二度は送られない）
-            if (_is_offer_text(str(last["text"]))
-                    and "これで最後" not in str(last["text"])  # 「案内はこれで最後」と書いた再オファーには追いフォローしない
-                    and timedelta(hours=24) <= age <= timedelta(hours=72)):
-                user = store.get_line_user(uid)
-                if user and (user.get("bot") or "on").strip() == "hold":
-                    print(f"[sweep] オファー24hフォロー: {uid}")
-                    _send(uid, "", OFFER_FOLLOWUP)
-                    replied += 1
+            # オファーを出して24〜72時間、本人から一言も無い人へ、1回だけ声かけ。
+            # ★2026-08-19：条件が「最後の発言がオファー本文か」やった。
+            #   せやけどオファーの直後には、必ず段取り文（オーダー番号の送り方＋見本のURL）を
+            #   続けて送る作りになっとる。★せやから最後の発言は、いつも段取り文の方や。
+            #   ★この条件は、一度も真にならんかった。
+            #   実測（2026-08-19）：24〜72時間で無反応の37人のうち、フォローが飛んだんは0人。
+            #   仕組みとして置いたつもりのもんが、まるごと動いてへんかった。
+            #   ★判定を「最後のオファーからの経過時間」に変える。最後の発言が何かは見ん。
+            _offer_idx = max((i for i, x in enumerate(rows)
+                              if x["role"] == "assistant" and _is_offer_text(str(x["text"]))),
+                             default=None)
+            if _offer_idx is not None and not any(
+                    x["role"] == "user" for x in rows[_offer_idx + 1:]):
+                try:
+                    _ot = datetime.fromisoformat(str(rows[_offer_idx]["created_at"]).replace(" ", "T"))
+                except ValueError:
+                    _ot = None
+                _oage = (now - _ot) if _ot else None
+                _sent = any(OFFER_FOLLOWUP_MARK in str(x["text"]) for x in rows[_offer_idx + 1:])
+                # 「案内はこれで最後」と書いた再オファーには、追いフォローを重ねん
+                _final = any("これで最後" in str(x["text"]) for x in rows[_offer_idx:])
+                if (_oage is not None and not _sent and not _final
+                        and timedelta(hours=24) <= _oage <= timedelta(hours=72)):
+                    user = store.get_line_user(uid)
+                    if user and (user.get("bot") or "on").strip() == "hold":
+                        print(f"[sweep] オファー24hフォロー（状況確認＋再送）: {uid}")
+                        _resend_offer(uid, rows, _offer_idx)
+                        replied += 1
                 continue
             # オファー前に黙って消えた人へ、1回だけの声かけ（詳細は PRE_OFFER_FOLLOWUP の上）
             if not (timedelta(hours=20) <= age <= timedelta(hours=120)):
