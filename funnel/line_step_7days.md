@@ -146,7 +146,7 @@ https://1aksbkdokn31q1trp81e.stores.jp/items/6a777f09db80bae422c65694
 
 ※見本と受けた子らの声（note）は、この一通には入れん。4〜8秒あけて別便で送る。
 　一通にリンクは一本。オーダー番号の案内と一緒に回す。
-https://note.com/tsubaki_honne/n/n24b6aed96bf2
+https://note.com/tsubaki_honne/n/nbc7be8398a19
 
 ### (2-2) 数量限定の開示（オファーに必ず添える）
 「この値段は相談に乗る縁ができたあんただけの数量限定の割引。先着十人で埋まったら通常の9,980円に戻す」
@@ -277,7 +277,7 @@ https://buy.stripe.com/6oU9ASfJ41mr82Ubeq53O03
 「ほんまに当たるん？」——疑うのは当然や。お金払うんやから、慎重になってええ。
 せやから、実際にウチが視た子らの声、ここにまとめてある。読んでから決めてくれてええ。
 ▼お客様の声
-https://note.com/tsubaki_honne/n/n24b6aed96bf2
+https://note.com/tsubaki_honne/n/nbc7be8398a19
 
 涙が止まらんかった子、不安が消えた子、彼の本音にやっと気づけた子——
 みんな最初は、今のあんたと同じように悩んでた子らや。
