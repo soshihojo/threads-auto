@@ -26,7 +26,7 @@ from datetime import datetime
 
 from . import store, web_diag
 from .config import active_profile, env
-from .diagnosis import (AI_LEAK_RE, JARGON, RESPECT_GUARD, TIME_GUARD, _Z2H,
+from .diagnosis import (AI_LEAK_RE, JARGON, NAME_GUARD, RESPECT_GUARD, TIME_GUARD, _Z2H,
                         find_birthdates, generate_reading, honmei_shuku,
                         now_context, parse_free_input, soften_rude,
                         strip_ai_leak, strip_jargon)
@@ -716,7 +716,7 @@ NURTURE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば
 - 『宿曜』の語・宿の名前・占い専門用語は出さない。「ウチが視たら」でよい
 - 復縁や結果を保証しない。過度に不安を煽らない。病気・健康・金運の断定をしない
 - 危険な行動（突撃・監視・自傷等）だけは毒舌でなく真剣に止める
-- 誤字は書かない。出力は返信本文のみ（説明や注釈は不要）""" + TIME_GUARD + RESPECT_GUARD
+- 誤字は書かない。出力は返信本文のみ（説明や注釈は不要）""" + TIME_GUARD + RESPECT_GUARD + NAME_GUARD
 
 # 生年月日は届いたが状況が分からないときの定型ヒアリング（生成なし・トークン消費ゼロ）
 # 番号はあいさつメッセージ（①②=生年月日）の続き＝③④で揃えている

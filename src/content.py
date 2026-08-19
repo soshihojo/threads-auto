@@ -254,13 +254,17 @@ def generate_post(type_hint: str | None = None, region: str | None = None,
             "全パート合計でも300字以内。各パートは単体でも読みやすい塊にする。"
         )
 
+    # ★2026-08-19：ルール集は毎回まったく同じ19,000字や。それをuserに置いとったせいで、
+    #   1本生成するたびに全文が課金されとった（124本なら約119万トークン相当）。
+    #   プロンプトキャッシュはsystem側にしか効かん作りなんで、静的な部分はsystemへ移す。
+    #   ★渡す中身は1字も変わらん。置き場所だけの話や。質には一切影響せん。
     user = (
         "以下のルールに従って、Threads投稿を1つ作ってください。\n\n"
-        f"=== ルール集 ===\n{rules_block}\n\n"
         f"=== 今回の指示 ===\n" + "\n".join(f"- {x}" for x in instructions)
     )
     # ★2026-08-17：呼び方のガードは、プロファイル独自の指示文を使う場合も必ず効かせる
-    system = (profile.get("system_prompt") or SYSTEM) + RESPECT_GUARD
+    system = ((profile.get("system_prompt") or SYSTEM) + RESPECT_GUARD
+               + f"\n\n=== ルール集（毎回これに従う） ===\n{rules_block}")
     return sanitize(complete(system, user, max_tokens=800, temperature=1.0))
 
 

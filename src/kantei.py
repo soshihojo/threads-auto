@@ -20,8 +20,8 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import ROOT
-from .diagnosis import (RESPECT_GUARD, _shuku_distance, honmei_shuku,
-                        soften_rude, strip_ai_leak, strip_jargon)
+from .diagnosis import (NAME_GUARD, RESPECT_GUARD, _shuku_distance, add_honorific,
+                        honmei_shuku, soften_rude, strip_ai_leak, strip_jargon)
 from .llm import complete
 
 OUT_DIR = ROOT / "kantei_out"
@@ -63,7 +63,7 @@ KANTEI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば�
 - 毒舌と愛は半々。慰めの嘘は書かないが、突き放さない。相談者の味方として書く
 - 相談文の言葉・固有のエピソード（日付・出来事）を具体的に引用して、この人だけの鑑定にする
 
-厳守:""" + RESPECT_GUARD + """
+厳守:""" + RESPECT_GUARD + NAME_GUARD + """
 - 『宿曜』という占術名、宿の名前（井宿・張宿など）、「距離」「命・業・胎」などの専門用語は一切書かない。内部参考の性質は、誰でも分かる日常の言葉に翻訳して「ウチが視たあんた（彼）はこういう人や」と語る
 - 結果の保証はしない（「必ず戻る」「絶対うまくいく」は書かない）。ただし曖昧に逃げず、椿としての見立ては言い切る
 - 病気・健康・金運の断定はしない。過度に不安を煽らない
@@ -75,9 +75,14 @@ KANTEI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば�
 　②「申します」は丁寧語で、関西弁・タメ口の椿の声が一行目で崩れる。
 　実害：2026-08-16に作った8件のうち4件が「はじめまして。椿と申します。」で始まっとって、毎回手で削っとる。
 　まえがきは、名乗りも前置きもなしに、いきなり中身から書き始める。
-- 【呼びかけに「さん」を付けない】相談者は、指定された呼び名でそのまま呼ぶ。
-　「◯◯さん」とさん付けせん。椿はタメ口で「あんた」と呼ぶ人物や。
-　実害：1件で相談者を20か所「さん」付けしとって、丁寧語のキャラに化けとった。
+- 【相談者の名前には必ず「さん」を付ける】★2026-08-19に方針を変えた。
+　以前は「さん付けせん」やったが、実際に相談者から
+　「なんで呼び捨てですか？さんかちゃんとかつけてほしいです」と言われた。
+　★タメ口で距離を詰めるんと、名前を呼び捨てにするんは、別の話や。
+　指定された呼び名が「まいか」なら「まいかさん」と書く。一箇所も呼び捨てにせん。
+　★二人称の「あんた」はそのまま使う。タメ口も変えん。変えるんは名前の呼び方だけや。
+　★彼の呼び名には さん を足さん。相談者が指定したそのままにする
+　　（「ひろくん」「ようちゃん」はそのまま。足したら「ひろくんさん」になって壊れる）。
 - 【本文に作業のメモを書かない】「（この章は約1430字）」のような字数の控えや、
 　「いや、締めはまだ早いな」のような書き手の独り言を、本文に絶対に残さん。出力は鑑定書の本文だけ。
 - 【数えられる数字は必ず検算する】年数・日数・期間・回数を書く時は、相談文の事実から計算し直す。
@@ -462,14 +467,21 @@ def generate_chapters(name: str, me_birth: str, him_birth: str, details: str,
     def _fill(t: str) -> str:
         return t.format(me=name, him=him_name) if "{" in t else t
     toc = "\n".join(f"・{_fill(t)}" for _, t, _, _ in CHAPTERS)
+    # ★2026-08-19：内部参考・詳細・全体構成は、八章ぜんぶで同じ中身や。
+    #   それをuserに置いとったせいで、詳細（1万字前後）が章の数だけ課金されとった。
+    #   プロンプトキャッシュはsystem側にしか効かんので、静的な部分はここへ寄せる。
+    #   ★渡す中身は1字も変わらん。置き場所だけや。質には一切影響せん。
+    chapter_system = (
+        KANTEI_SYSTEM
+        + f"\n\n=== 内部参考（本文には翻訳して出す。用語・数字は出さない） ===\n{brief}"
+        + f"\n\n=== 相談者から届いた詳細（全文） ===\n{details}"
+        + f"\n\n=== 鑑定書の全体構成 ===\n{toc}"
+    )
     done: list[dict] = []
     for key, raw_title, chars, instruction in CHAPTERS:
         title = _fill(raw_title)
         prev = "\n".join(f"【{d['title']}】{d['body'][:150]}…" for d in done) or "（まだ無い。これが最初の章）"
         user = (
-            f"=== 内部参考（本文には翻訳して出す。用語・数字は出さない） ===\n{brief}\n\n"
-            f"=== 相談者から届いた詳細（全文） ===\n{details}\n\n"
-            f"=== 鑑定書の全体構成 ===\n{toc}\n\n"
             f"=== ここまでに書いた章の冒頭（重複を避ける参考） ===\n{prev}\n\n"
             f"=== 今回書く章 ===\n章タイトル: {title}\n目安の分量: {chars}字（±2割）\n\n"
             "=== この章の書き方（※重要な読み方の注意） ===\n"
@@ -484,8 +496,8 @@ def generate_chapters(name: str, me_birth: str, him_birth: str, details: str,
             "本文だけを出力してください。"
         )
         # 宿名が漏れることがあるので、納品物に入る前に必ず最終ガードを通す
-        body = soften_rude(strip_jargon(
-            complete(KANTEI_SYSTEM, user, max_tokens=3000, temperature=0.7).strip()))
+        body = add_honorific(soften_rude(strip_jargon(
+            complete(chapter_system, user, max_tokens=3000, temperature=0.7).strip())), name)
         # モデル名・署名が混じった行を落とす（納品PDFに入ったら取り返しがつかない）。
         # 落として空になったら一度だけ書き直させる
         body = strip_markdown(body)
