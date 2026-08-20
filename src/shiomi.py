@@ -37,7 +37,9 @@ SHIOMI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば�
 これは9,800円（通常29,800円）の納品物の芯になる部分。相談者は、いつ動いていつ待つかが分からんまま毎日を過ごしとる。その待ち時間に形を与えるのがこの暦や。
 
 【最重要・絶対厳守】
-暦に書く行は、すべて主語を相談者にする。「彼から連絡が来る週」「彼が動く時期」のような、彼を主語にした未来の記述は一語も書いてはいけない。書くのは「あんたが動いてええ週」「あんたが手を出さん週」「あんたが自分のことをする週」や。彼については「こういう男は、こういう状態の時に動きやすい」という性質の話までに留める。
+暦に書く行は、すべて主語を相談者にする。「彼から連絡が来る週」「彼が動く時期」のような、彼を主語にした未来の記述は一語も書いてはいけない。
+★★ただし、毎行を「あんたは」で始めないこと。十三行が同じ言葉で始まったら読みにくい。主語は省いて、動詞から書き出す。相談者がやることだけを書けば、それで主語は伝わる。
+★★★主語を省いてよいのは【相談者の行動】だけ。「連絡が来る週」「返事が来る」のような到来の表現は、主語を省いても彼の未来を書いたことになる。一語も書かない。書くのは「あんたが動いてええ週」「あんたが手を出さん週」「あんたが自分のことをする週」や。彼については「こういう男は、こういう状態の時に動きやすい」という性質の話までに留める。
 これは表現の好みやのうて、商品の設計や。彼の行動を予言したら外れる。相談者の行動を指定したら、動いた事実そのものが成果になる。
 
 声と文体:
@@ -57,21 +59,47 @@ _FMT = """次の形式で、余計な前置きも後書きも付けずに出力�
 === 週 ===
 （13行。1行ずつ「週番号|開始日|終了日|潮の名前|一言」を半角の縦棒で区切る。
 　潮の名前は「静」「仕込み」「動」「凪」「守り」から選ぶ。
-　一言は30〜45字。必ず主語を相談者にする）
+　一言は30〜45字。
+　★★★主語の「あんたは」を毎行つけないこと。十三行ぜんぶ同じ言葉で始まったら読みにくい。
+　　主語を省いて、いきなり動詞から書く。相談者がやることだけを書けば、それで主語は伝わる。
+　　○「こっちからは何も送らん。手が届かん場所におるんが守りになる週や」
+　　×「あんたは今週、こっちから何も送らん。手が届かん場所におるんが守りになる」
+　★ただし主語を省いてええんは【相談者の行動】だけや。
+　　「連絡が来る週」「返事が来る」のような到来の書き方は、主語を省いても予言になる。一語も書かない）
 1|{d0}|{d6}|静|（一言）
 …13行目まで
 
 === 動いてええ日 ===
-（8〜10行。「日付|その日にあんたがやること」。日付は{start}から{end}の範囲内。
-　「彼から連絡が来る日」ではなく「あんたが動いてええ日」として書く）
-2026-08-22|（やること）
+（8〜10行。「日付|その日にやること」。日付は{start}から{end}の範囲内。
+　★★★ここがこの暦でいちばん使われるとこや。読んだ人がその場で手を動かせるように書く。
+　　「答えを求めん一通を置く」だけでは、何を書いたらええか分からんまま終わる。
+　　★送る日には、送る文の見本を「」で必ず添える。相談者の事情に合う、短い一文にする。
+　　★動く日には、何をどこまでやるかを具体的に書く。
+　　○「平日の21時台に短い一通だけ置く。『暑いね、体だけ気ぃつけてな』——この温度で。送ったら追わん」
+　　○「アプリをログアウトするか消す。通知も切る。開ける道を物理的に塞いでまう」
+　　×「答えを求めん一通を送る」
+　　×「自分の時間を大事にする」
+　　一行は45〜75字。主語の「あんたは」は付けん）
+2026-08-22|（やること。送る日なら見本の文も「」で入れる）
 
 === 手を出さん日 ===
-（3〜5行。「日付|なぜその日は動かんのか」。相談者の事情・記念日・彼の予定から選ぶ）
+（3〜5行。「日付|なぜその日は動かんのか」。相談者の事情・記念日・彼の予定から選ぶ。
+　★なぜ動かんのかの理由を書く。「動かん」だけで終わらせん。
+　★主語の「あんたは」は付けん。一行は35〜60字）
+
+★★★日付の書き方（両方の欄に共通。ここを外したら暦の絵が壊れる）
+・必ず 2026-08-24 の形で、一日ずつ書く。
+・「8月18日以降の週末」「毎週土日」のような範囲や繰り返しは書かない。絵のマス目に置けんくなる。
+　週の話をしたいときは、=== 週 === の一言の方に書く。
+・{start} から {end} の範囲の外の日付を書かない。過ぎた日も書かない。
+・★★同じ日付を「動いてええ日」と「手を出さん日」の両方に入れない。読む人 が矛盾で止まる。
+　その日に何かをするなら「動いてええ日」に、何もせんのなら「手を出さん日」に、どちらか一方だけ置く。
 
 === 解説 ===
 （900〜1200字。この暦をどう使うか。なぜこの並びになっとるか。
-　最初の窓が来るまでに何を仕込むか。段落の区切りは空行）"""
+　最初の窓が来るまでに何を仕込むか。段落の区切りは空行。
+　★ここでも、初めて動く日に送る一通は、そのまま送れる見本の文を「」で入れる。
+　　何を書いたらあかんかも、一緒に書く）"""
 
 
 @dataclass
@@ -200,9 +228,16 @@ def build_calendar_html(name: str, s: Shiomi, today: str) -> str:
 
     return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <title>九十日の暦 {_html.escape(name)}</title><style>
-@page {{ size: A4; margin: 14mm; }}
+/* ★★2026-08-20：余白の直し。
+   @page の margin は【印刷（PDF）にしか効かん】。
+   スクショで出しとるPNGは screen メディアやから、body の margin:0 のまんまで
+   端まで文字が行っとった。★LINEで送るんはPNGの方が多いのに、そっちだけ詰まっとった。
+   せやから body に padding を持たせて、印刷のときだけ @page に任せて外す。 */
+@page {{ size: A4; margin: 16mm; }}
 body {{ font-family:"Hiragino Mincho ProN","Yu Mincho",serif; color:#241b1d;
-  background:#fdfbf9; margin:0; font-size:10.5px; line-height:1.8; }}
+  background:#fdfbf9; margin:0; padding:26px 30px 30px; box-sizing:border-box;
+  font-size:10.5px; line-height:1.8; }}
+@media print {{ body {{ padding:0; }} }}
 .head {{ text-align:center; padding:6px 0 16px; border-bottom:2px solid #a52e44; }}
 .head h1 {{ font-size:23px; margin:0 0 4px; letter-spacing:.14em; }}
 .head p {{ margin:0; font-size:10px; color:#7a6a6d; letter-spacing:.06em; }}
@@ -227,16 +262,20 @@ td {{ border-bottom:1px solid #e8e0da; padding:4.5px 5px; vertical-align:middle;
 .shio {{ display:inline-block; color:#fff; font-size:9px; padding:1.5px 7px;
   border-radius:2px; white-space:nowrap; }}
 .cm {{ font-size:10px; }}
-.two {{ display:flex; gap:16px; margin-bottom:14px; }}
-.two > div {{ flex:1; }}
+/* ★2026-08-20：ここは二段組をやめた。
+   行に送る文の見本を入れる作りにしたんで、一行が45〜75字になる。
+   細い二段に流し込んだら折り返しだらけで読めん。縦に並べる方が、手が動く。 */
+.two {{ display:block; margin-bottom:14px; }}
+.two > div {{ margin-bottom:12px; }}
 h3 {{ font-size:11px; margin:0 0 5px; padding-bottom:3px; border-bottom:1px solid #a52e44;
   letter-spacing:.1em; }}
-ul {{ list-style:none; padding:0; margin:0; font-size:9.5px; }}
-li {{ padding:2.5px 0; border-bottom:1px dotted #e8e0da; line-height:1.6; }}
-li b {{ display:inline-block; min-width:34px; color:#a52e44; }}
+ul {{ list-style:none; padding:0; margin:0; font-size:10px; }}
+li {{ padding:4px 0 4px 44px; border-bottom:1px dotted #e8e0da; line-height:1.75;
+  text-indent:-44px; }}
+li b {{ display:inline-block; min-width:40px; color:#a52e44; text-indent:0; }}
 .note {{ border-top:2px solid #a52e44; padding-top:10px; }}
 .note p {{ margin:0 0 7px; text-align:justify; font-size:10px; }}
-.foot {{ text-align:center; font-size:8.5px; color:#a99; margin-top:12px; }}
+.foot {{ text-align:center; font-size:8.5px; color:#a99; margin:14px 0 4px; }}
 </style></head><body>
 <div class="head"><h1>九十日の暦</h1>
 <p>{_html.escape(name)}さんのために　{d0.year}年{d0.month}月{d0.day}日 — {end.year}年{end.month}月{end.day}日</p></div>
@@ -253,6 +292,46 @@ li b {{ display:inline-block; min-width:34px; color:#a52e44; }}
 <div class="note"><h3>この暦の使い方</h3>{note}</div>
 <div class="foot">椿</div>
 </body></html>"""
+
+
+def check_daylists(s: "Shiomi", today: str, horizon: int = 89) -> list[str]:
+    """動いてええ日／手を出さん日の突き合わせ。
+
+    ★2026-08-20 新設。生成に「同じ日を両方に入れるな」と書いても、実際に入ってきた。
+      八月二十四日が「動いてええ日」と「手を出さん日」の両方に載って、
+      読む人がどっちを信じたらええか分からん紙になっとった。
+    ★★もう一つ、「8月18日以降の週末」みたいな範囲で書かれる事故もあった。
+      build_calendar_html の norm() は一日ぶんの日付しか読めんので、
+      こう書かれるとマス目に色が付かん。★文章には出るのに、絵には出えへん。
+      刷ってから気づく類やから、ここで止める。
+    """
+    d0 = datetime.strptime(today, "%Y-%m-%d").date()
+    end = d0 + timedelta(days=horizon)
+    out: list[str] = []
+
+    def parse(v: str) -> date | None:
+        m = re.fullmatch(r"\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*", v)
+        if not m:
+            return None
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+
+    seen: dict[date, str] = {}
+    for label, rows in (("動いてええ日", s.go), ("手を出さん日", s.stay)):
+        for raw, _ in rows:
+            d = parse(raw)
+            if d is None:
+                out.append(f"{label}の日付が一日ぶんの形になっとらん（絵に出えへん）: {raw!r}")
+                continue
+            if not (d0 <= d <= end):
+                out.append(f"{label}の日付が九十日の外や: {d.isoformat()}")
+                continue
+            if d in seen and seen[d] != label:
+                out.append(f"{d.isoformat()} が「動いてええ日」と「手を出さん日」の両方に入っとる")
+            seen[d] = label
+    return out
 
 
 # ---------------- 暦の納品文 ----------------
@@ -365,6 +444,7 @@ def make_shiomi(name: str, me_birth: str, him_birth: str, details: str,
     problems = lint.check_prophecy(body, strict=True)
     problems += lint.check_dates("\n".join(f"{g[0]} {g[1]}" for g in s.go + s.stay),
                                  today=today, horizon_days=95, scope="all")
+    problems += check_daylists(s, today)
     print("  ✅ 自動検査 問題なし" if not problems else f"  ⚠ 自動検査 {len(problems)}件")
     for p in problems:
         print(f"   ・{p}")
