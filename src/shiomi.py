@@ -27,7 +27,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import lint
-from .kantei import (CHROME, OUT_DIR, _internal_brief, strip_ai_leak,
+from .kantei import (CHROME, OUT_DIR, DELIVERY_CLOSING, _internal_brief,
+                     add_honorific, soften_rude, strip_ai_leak,
                      strip_instruction_leak, strip_jargon, strip_markdown)
 from .llm import complete
 
@@ -254,6 +255,102 @@ li b {{ display:inline-block; min-width:34px; color:#a52e44; }}
 </body></html>"""
 
 
+# ---------------- 暦の納品文 ----------------
+#
+# ★2026-08-20 新設。潮見を二人に納品して、二回とも同じ穴が開いた。
+#   kantei 側の納品文は【鑑定書一枚】を前提に書かれとるんで、暦のことを一行も書かん。
+#   そのまま送ったら、9,800円の半分を占める暦が「おまけの画像」として流される。
+#   ★★ほんで暦は、使い方を知らんかったら機能せん紙や。
+#     「行の主語が全部あんたやから外れようがない」いう設計も、
+#     動く日と手を止める日の見どころも、説明せんかったら伝わらん。
+#   ★★★せやから、暦には暦の納品文を別便で付ける。鑑定書の便とは分けて送る。
+#     一通にまとめたら長すぎて、後半（＝暦の説明）から確実に読み飛ばされるからや。
+
+CAL_NOTE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。
+九十日の暦（潮見表）を納品するときに、LINEで送る案内文の【見どころ】の部分だけを書く。
+
+声と文体:
+- 一人称「ウチ」、相手は「あんた」。関西弁。毒舌7：愛3の姉御肌
+- 標準語のビジネス敬語にせん。テンプレの一斉配信調にせん
+
+書くこと:
+渡された暦の中から、その人にとって特に大事な日を【三つ】選んで、一つずつ短い段落で説明する。
+各段落は「一つ。」「二つ。」「三つ。」で始める。
+
+選ぶ基準:
+- 一つ目は、いちばん近い山場か、本人の事情で特別な意味を持つ日
+- 二つ目は、この九十日で初めてこっちから動く日（暦の「動」の週にある日）
+- 三つ目は、いちばん先にある着地点の日
+それぞれ、なんでその日なのかを、その人の事情に触れて書く。
+
+【絶対厳守】
+- 主語は必ず相談者にする。「彼から連絡が来る」「彼が動く」のような、彼を主語にした
+  未来の記述は一語も書かない。書くのは相談者が何をするかだけ
+- 「必ず戻る」「きっと会える」の類の保証を書かない。日付に「会える」と書かない
+- 商品名・価格・決済リンクを一切書かない
+- Markdown記号（**、#、- 、`）を一文字も使わない
+- 『宿曜』という占術名、宿の名前、専門用語を書かない
+- 見出しや前置きを書かない。三つの段落だけを出す
+"""
+
+# ★★この固定文の中で、予言の例を挙げるときは【彼を主語にせん】こと。
+#   「彼から連絡が来る週」と書いてもうたら、否定文脈（＝一行も書いてへん）やのに
+#   lint.check_prophecy が拾う。lint は文脈を見んし、見んでええ。ここは商品の生命線やから
+#   検査は厳しいままにしといて、こっちの言い回しの方を避ける。
+_CAL_NOTE_HEAD = """ほんで、九十日の暦の方や。ここは読み方があるから、先に言うとく。
+
+まず、この紙は「待て」と言う紙やない。待つ時間に、形をつける紙や。
+
+線が無いまま毎日を過ごすと、通知を開いては確かめて、そのたびに削れる。
+それを九十日続けたら、向こうがどうこう言う前に、あんたの方が保たん。
+せやから、先に線を引いとく。今日は動く日か、手を止める日か。
+それが決まってたら、画面を見ても意味が変わる。
+
+ほんで、この暦のいちばん大事なとこを言うとく。
+
+書いてある行は、ぜんぶ主語が【あんた】や。
+
+「◯月の◯週に連絡が来る」みたいな、彼を主語にした先の話は、一行も書いてへん。
+ウチは彼の動きを予言せん。外れるからや。
+書いたんは「この週は手を出さん」「この日は動いてええ」——
+全部、あんたが決めて、あんたが動く話や。せやからこの暦は、外れようがない。
+あんたが動いた事実が、そのまま結果になる。
+
+見どころを三つだけ、先に言うとく。
+"""
+
+_CAL_NOTE_TAIL = """読んだら、感想を聞かせてな。
+どこが一番刺さったか、逆にどこが腑に落ちんかったか。
+それが分かると、次にあんたを視るときの精度が変わるんや。だから遠慮せんと、正直に返してくれ。
+"""
+
+
+def generate_calendar_note(name: str, s: "Shiomi", details: str) -> str:
+    """九十日の暦に添える納品文。★鑑定書の納品文とは別便で送るための一通。"""
+    weeks = "\n".join(f"{w[1]}〜{w[2]} [{w[3]}] {w[4]}" for w in s.weeks)
+    go = "\n".join(f"{g[0]} {g[1]}" for g in s.go)
+    stay = "\n".join(f"{t[0]} {t[1]}" for t in s.stay)
+    user = (
+        f"=== 相談者から届いた詳細（全文） ===\n{details}\n\n"
+        f"=== 組んだ暦・週ごと ===\n{weeks}\n\n"
+        f"=== 動いてええ日 ===\n{go}\n\n"
+        f"=== 手を出さん日 ===\n{stay}\n\n"
+        "この暦の見どころを三つ、書いてください。"
+    )
+    for attempt in (1, 2):
+        raw = complete(CAL_NOTE_SYSTEM, user, max_tokens=1200, temperature=0.8).strip()
+        mid = add_honorific(soften_rude(strip_jargon(strip_markdown(
+            strip_ai_leak(strip_instruction_leak(raw))))), name).strip()
+        bad = lint.check_prophecy(mid, strict=True)
+        if not bad:
+            break
+        print(f"  ⚠ 納品文に予言文法が{len(bad)}件（{attempt}回目）: {bad[0].text[:40]}")
+        if attempt == 1:
+            user += ("\n\n【書き直しの指示】前回の出力に、彼を主語にした未来の記述が混ざっとった。"
+                     "例：" + bad[0].text[:50] + "。すべての行の主語を相談者にして書き直すこと。")
+    return f"{_CAL_NOTE_HEAD}\n{mid}\n\n{_CAL_NOTE_TAIL}\n{DELIVERY_CLOSING}"
+
+
 def make_shiomi(name: str, me_birth: str, him_birth: str, details: str,
                 today: str | None = None) -> dict:
     """九十日の暦を生成してPDFとPNGを出す。鑑定書とセットで潮見（29,800円→9,800円）になる。"""
@@ -286,4 +383,13 @@ def make_shiomi(name: str, me_birth: str, him_birth: str, details: str,
     for p in (pdf_path, png_path):
         shutil.copy2(p, Path.home() / "Downloads" / f"九十日の暦_{name}さん{p.suffix}")
     print(f"  📜 {pdf_path}\n  🖼 {png_path}")
-    return {"shiomi": s, "pdf": str(pdf_path), "png": str(png_path), "problems": problems}
+
+    # ★暦の納品文は、鑑定書の納品文とは別便や。ここで必ず出す（2026-08-20ルール化）。
+    #   「あとで書く」にしたら、暦がおまけの画像として流れる。二回それをやった。
+    print("✍️ 暦の納品文を生成中…")
+    cal_note = generate_calendar_note(name, s, details)
+    note_path = OUT_DIR / f"納品文_{name}_暦.txt"
+    note_path.write_text(cal_note, encoding="utf-8")
+    print(f"  💬 暦の納品文: {note_path}")
+    return {"shiomi": s, "pdf": str(pdf_path), "png": str(png_path),
+            "note": cal_note, "note_path": str(note_path), "problems": problems}

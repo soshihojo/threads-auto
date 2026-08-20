@@ -209,6 +209,44 @@ def cmd_kantei(args: argparse.Namespace) -> None:
     print(_DELIVERY_REMINDER)
 
 
+def cmd_shiomi(args: argparse.Namespace) -> None:
+    """潮見（29,800円→9,800円）: 個別鑑定書＋九十日の暦を、まとめて一回で作る。
+
+    ★2026-08-20 新設。それまでは kantei を叩いてから shiomi を python -c で直接呼んどった。
+      二段構えやと、暦を作り忘れる／暦の納品文が抜ける、いう事故が起きる。実際に起きた。
+      潮見は【三点セット】で一つの商品や。作るのも一回にする。
+    """
+    from . import kantei, shiomi
+    details = Path(args.details_file).read_text(encoding="utf-8")
+
+    res = kantei.make_kantei(args.name, args.me, args.him, details)
+    cal = shiomi.make_shiomi(args.name, args.me, args.him, details)
+
+    print("\n" + "━" * 72)
+    print("📦 潮見は三点セットや。この順番で送る:")
+    print(f"   1) 個別鑑定書 PDF … {res['pdf']}")
+    print(f"   2) 九十日の暦 PDF … {cal['pdf']}")
+    print(f"      （LINEで開きやすいんは画像の方や … {cal['png']}）")
+    print("━" * 72)
+
+    print("\n" + "━" * 20 + " 納品文①（鑑定書と一緒に貼る） " + "━" * 20)
+    print(res["note"])
+    print("\n" + "━" * 20 + " 納品文②（暦と一緒に貼る・別便） " + "━" * 20)
+    print(cal["note"])
+    print("━" * 72)
+    if cal["problems"]:
+        print(f"⚠ 暦の自動検査に{len(cal['problems'])}件。中身を確かめてから送ること")
+        for x in cal["problems"]:
+            print(f"   ・{x}")
+    print(_DELIVERY_REMINDER)
+    print("★潮見だけの追加確認")
+    print("  ・暦の行の主語が、全部あんた（相談者）になっとるか")
+    print("  ・「彼から連絡が来る週」の類が一行も無いか")
+    print("  ・暦に出る日付が、今日から九十日の範囲に収まっとるか（過去日が混じる事故があった）")
+    print("  ・★納品文は二通ある。鑑定書だけ送って暦の便を忘れんこと")
+    print("━" * 72)
+
+
 def _clean_member_name(nickname: str) -> str:
     """会員の登録名から管理用の連番・括弧書きを落として、客に見せる呼び名にする。
     例: 「美-02(月初ミニ鑑定)」→「美」 / 「03-田中麻衣(月初ミニ鑑定)」→「田中麻衣」"""
@@ -295,6 +333,12 @@ def main() -> None:
     p_kan.add_argument("--him", required=True, help="彼の生年月日 YYYY-MM-DD")
     p_kan.add_argument("--details-file", required=True, help="悩み詳細のテキストファイル")
     p_kan.set_defaults(func=cmd_kantei)
+    p_shi = sub.add_parser("shiomi", help="潮見＝鑑定書＋九十日の暦を一回で作る")
+    p_shi.add_argument("--name", required=True, help="購入者の呼び名（表紙に載る）")
+    p_shi.add_argument("--me", required=True, help="購入者の生年月日 YYYY-MM-DD")
+    p_shi.add_argument("--him", required=True, help="彼の生年月日 YYYY-MM-DD")
+    p_shi.add_argument("--details-file", required=True, help="悩み詳細のテキストファイル")
+    p_shi.set_defaults(func=cmd_shiomi)
     p_tsu = sub.add_parser("tsukiyomi")
     p_tsu.add_argument("--member", required=True, help="👥会員に登録済みのニックネーム（検索用）")
     p_tsu.add_argument("--name", default="",
