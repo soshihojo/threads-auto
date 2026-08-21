@@ -1010,8 +1010,12 @@ def push_text(user_id: str, text: str) -> bool:
     r = requests.post(f"{LINE_API}/message/push", headers=_headers(),
                       data=json.dumps({"to": user_id, "messages": msgs}),
                       timeout=15)
-    if r.ok:
-        _record_sent(user_id, "\n".join(_split_bubbles(text)))
+    # ★★★2026-08-21：ここでは記録せん。呼び出し元の _send が、reply でも push でも
+    #   成功した時に一回だけ store.add_line_chat を呼ぶ作りになっとるからや。
+    #   ★一度ここにも記録を足してもうたら、_send 経由の分が【二重に記録】された。
+    #     客には一通しか届いてへんのに、履歴に同じ本文が二行入る。
+    #     ★★ダッシュボードも会員相談も履歴を数えとるんで、そこがぜんぶ狂う。
+    #   ★★★記録は「送信の一番外側」で一回だけ。ここは中身の送信だけに徹する。
     return r.ok
 
 
