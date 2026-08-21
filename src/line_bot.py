@@ -1003,6 +1003,8 @@ def push_text(user_id: str, text: str) -> bool:
     r = requests.post(f"{LINE_API}/message/push", headers=_headers(),
                       data=json.dumps({"to": user_id, "messages": msgs}),
                       timeout=15)
+    if r.ok:
+        _record_sent(user_id, "\n".join(_split_bubbles(text)))
     return r.ok
 
 
@@ -1024,7 +1026,27 @@ def push_long_text(user_id: str, text: str) -> bool:
                       timeout=20)
     if not r.ok:
         print(f"[line_bot] push_long_text 失敗 {r.status_code}: {r.text[:200]}")
+    else:
+        _record_sent(user_id, body)
     return r.ok
+
+
+def _record_sent(user_id: str, text: str) -> None:
+    """こっちから送った分を、会話の記録に残す。
+
+    ★★★2026-08-21：ここが抜けとった。push で送った返信が一件も記録に入ってへんかった。
+      そのせいで、シート上は「客が最後に喋ったまま」に見え続ける。
+      ★ダッシュボードの「🔴 返信で止まっとる人」も、会員相談の未返信数も、
+        ぜんぶこの記録を見て数えとる。★★記録が入らんかったら、返した人がずっと赤いままや。
+      ★★★実害：返したのに未返信に見えるんで、目視で確かめ直すことになる。
+        目視は漏れる。げんに、返信待ちの会員を数えたら、既に返した人が混ざっとった。
+      送信が失敗した時は呼ばん。★送ってへんもんを送った事にしたら、もっと悪い。
+    """
+    try:
+        from . import store
+        store.add_line_chat(user_id, "assistant", text)
+    except Exception as e:      # 記録に失敗しても、送信そのものは成立しとる。落とさん
+        print(f"[line_bot] 送信は成功したが記録に失敗: {e}")
 
 
 def get_display_name(user_id: str) -> str:

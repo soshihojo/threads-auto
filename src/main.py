@@ -291,6 +291,82 @@ def cmd_tsukiyomi(args: argparse.Namespace) -> None:
     print(_DELIVERY_REMINDER)
 
 
+def cmd_join(args: argparse.Namespace) -> None:
+    """月詠みに入ってくれた人を、会員として登録する。
+
+    ★2026-08-21 新設。それまでは手でシートに足しとった。
+      せやから登録が遅れる。実際、ゆきえは入会した朝の時点でまだ会員表に無かった。
+      ★会員表に無い＝ダッシュボードの「返信で止まっとる人」に出てこん、いうことや。
+      入会したその日にいちばん手厚うせなあかん人が、リストから漏れる。逆さまや。
+
+    やること三つを、一回で済ませる。
+      1) 会員表に足す（番号は自動。呼び名はLINEの表示名をそのまま使う）
+      2) 生年月日を line_users から拾うて入れる（★ここが会員とLINEの紐付けの鍵になる）
+      3) 納品済みの鑑定書があったら、返信生成の参照資料として一緒に入れる
+    """
+    import re as _re
+    from datetime import datetime
+    from . import store
+    from .kantei import OUT_DIR
+
+    users = store.list_line_users() if hasattr(store, "list_line_users") else []
+    if not users:
+        from . import store_sheets
+        users = store_sheets._records("line_users")
+    hit = [u for u in users if str(u.get("display_name", "")).strip() == args.line_name]
+    if len(hit) != 1:
+        print(f"❌ LINEの表示名『{args.line_name}』が {len(hit)} 件見つかった。1件やないと登録できん")
+        for u in hit:
+            print(f"   - {u.get('display_name')} / {u.get('user_id')}")
+        return
+    u = hit[0]
+    me = args.me or str(u.get("me_birth", "")).strip()
+    him = args.him or str(u.get("him_birth", "")).strip()
+    if not (me and him):
+        print("❌ 生年月日が足りん。--me と --him で渡すか、先にWeb診断を通してもらうこと")
+        return
+
+    # 番号は「既にある nickname の頭の数字」の次にする。表示名はLINEのものをそのまま使う
+    nums = []
+    for m in store.list_members():
+        mm = _re.search(r"(\d{1,3})", str(m.get("nickname", "")))
+        if mm:
+            nums.append(int(mm.group(1)))
+    nickname = f"{max(nums) + 1 if nums else 1:02d}-{args.line_name}"
+
+    note = f"月詠み入会 {datetime.now().strftime('%Y-%m-%d')}"
+    if args.plan:
+        note += f"／{args.plan}"
+    mid = store.add_member(nickname, me, him, note)
+    print(f"✅ 会員登録: id={mid}  {nickname}")
+    print(f"   生年月日 あんた={me} / 彼={him}  ← これでLINEと自動で紐付く")
+
+    # 鑑定書を参照資料として入れる。★これが有ると無いとで、返信の精度がまるで変わる
+    stem = args.kantei_name or args.line_name
+    src_html = OUT_DIR / f"個別鑑定_{stem}.html"
+    if not src_html.exists():
+        print(f"⚠️ 鑑定書が見つからん（{src_html.name}）。--kantei-name で納品時の呼び名を渡してや")
+        print("   例: --kantei-name ゆきえ")
+    else:
+        body = _re.sub(r"<(style|script)[^>]*>.*?</\1>", "", src_html.read_text(encoding="utf-8"),
+                       flags=_re.S)
+        body = _re.sub(r"<[^>]+>", "\n", body)
+        body = _re.sub(r"\n{3,}", "\n\n", body).strip()
+        store.add_reading(mid, "個別鑑定書", "（納品済み個別鑑定PDFの全文）", body)
+        print(f"📜 鑑定書を控えに入れた（{len(body)}字）")
+        cal = OUT_DIR / f"九十日の暦_{stem}.html"
+        if cal.exists():
+            c = _re.sub(r"<(style|script)[^>]*>.*?</\1>", "", cal.read_text(encoding="utf-8"),
+                        flags=_re.S)
+            c = _re.sub(r"<[^>]+>", "\n", c)
+            c = _re.sub(r"\n{3,}", "\n\n", c).strip()
+            store.add_reading(mid, "九十日の暦", "（納品済みの潮見の暦）", c)
+            print(f"🌊 九十日の暦も控えに入れた（{len(c)}字）")
+            print("   ★この人は潮見の人や。月詠みは【5,980円】の方やで")
+
+    print("\n→ ダッシュボードの💬会員相談に、この人が出るようになった")
+
+
 def cmd_line_sweep(args: argparse.Namespace) -> None:
     """LINEの未返信（最後が相談者の発言のまま）を拾って自動返信する（bot=onのみ）。"""
     from . import line_bot
@@ -358,6 +434,13 @@ def main() -> None:
     p_ls.add_argument("--min-age", type=int, default=3, help="この分数より新しい未返信は触らない")
     p_ls.add_argument("--max-age", type=int, default=48, help="この時間より古い未返信は触らない")
     p_ls.set_defaults(func=cmd_line_sweep)
+    p_join = sub.add_parser("join", help="月詠みに入ってくれた人を会員として登録する")
+    p_join.add_argument("--line-name", required=True, help="LINEの表示名（そのままの綴りで）")
+    p_join.add_argument("--kantei-name", help="鑑定書を作った時の呼び名（省略時はLINEの表示名）")
+    p_join.add_argument("--me", help="本人の生年月日。省略時は line_users から拾う")
+    p_join.add_argument("--him", help="彼の生年月日。省略時は line_users から拾う")
+    p_join.add_argument("--plan", help="月詠みの値段のメモ（例: 5,980円）")
+    p_join.set_defaults(func=cmd_join)
     sub.add_parser("refresh-token").set_defaults(func=cmd_refresh_token)
     args = parser.parse_args()
     args.func(args)
