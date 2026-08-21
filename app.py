@@ -1,11 +1,14 @@
-"""Threads運用ダッシュボード（Streamlit）。
+"""椿の会員ダッシュボード（Streamlit）。
 
-機能:
-- ポスト候補を生成 → 編集 → 投稿日時を指定して予約（or 今すぐ投稿）
-- 無料診断（椿の鑑定文を生成）
+★2026-08-21：画面を会員まわりの二つだけに絞った。
+　　💬 会員相談 … 会員から届いた相談に、その子専用の返信を作って、そのままLINEへ送る
+　　👥 会員　　 … 会員の登録と、納品済み鑑定書の控え
 
-予約の自動投稿は別途 `python -m src.main run-due` を GitHub Actions が定期実行して行う。
-（このダッシュボードを閉じていても予約時刻に投稿される）
+　コメント返信と無料診断の画面は、運用で使わんようになったんで外した。
+　★消えたんは「人が見る窓」だけや。裏の仕組みは今までどおり動いとる：
+　　・コメントの巡回と下書き作り → poll.yml（GitHub Actions）
+　　・無料診断そのもの　　　　　 → line_app.py（Webのフォームから直に届く）
+　　・予約投稿　　　　　　　　　 → scheduler.yml が run-due を叩く
 
 起動: streamlit run app.py
 """
@@ -13,7 +16,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import date, datetime, timedelta
+from datetime import datetime
 
 import streamlit as st
 
@@ -139,190 +142,13 @@ st.caption(f"プロファイル: {profile['name']}　|　返信モード: 下書
 
 # st.tabsは全タブの中身を毎回描画する（遅い・操作後に先頭タブへ戻る）ため、
 # 選んだ画面だけを描画する完全切り替え式にする。選択はセッションに保持される。
-VIEW_REPLIES, VIEW_DIAG, VIEW_CONSULT, VIEW_MEMBERS = VIEWS = [
-    "↩️ コメント返信", "🔮 無料診断", "💬 会員相談", "👥 会員"]
+# ★2026-08-21：「↩️ コメント返信」と「🔮 無料診断」の画面をやめた。
+#   どっちも運用で使わんようになったんで、置いといても画面が重いだけや。
+#   ★消したんは画面だけ。コメント巡回も無料診断そのものも、裏では今までどおり動いとる
+#     （poll.yml と line_app.py の側）。ここで消えたんは「人が見る窓」だけやからな。
+VIEW_CONSULT, VIEW_MEMBERS = VIEWS = ["💬 会員相談", "👥 会員"]
 view = st.radio("画面", VIEWS, horizontal=True, key="view", label_visibility="collapsed")
 st.divider()
-
-
-# ---------------- コメント返信の承認 ----------------
-if view == VIEW_REPLIES:
-    st.caption("投稿へのコメントに、椿の声で個別に返信します（DMではなく公開リプライ＝BAN安全）。"
-               "手挙げコメントへの招待返信がLINE集客の主エンジンです。上から順に確認して送ってください。")
-    try:
-        _drafts = store.pending_drafts()
-    except Exception as e:
-        st.warning(f"下書きの読み込みに失敗しました（{e}）")
-        _drafts = []
-    _drafts = sorted(_drafts, key=lambda d: str(d["created_at"]), reverse=True)
-    if not _drafts:
-        st.info("承認待ちの返信はありません。コメントが付くと自動で下書きが溜まります（3時間ごとに巡回）。")
-    else:
-        top = st.columns([2, 1])
-        top[0].write(f"承認待ち {len(_drafts)} 件（新しい順）")
-        if top[1].button(f"🚀 {min(len(_drafts), 40)}件まとめて送信", type="primary", use_container_width=True):
-            from src.main import make_client
-            _client = make_client()
-            _bar = st.progress(0.0, text="送信中…")
-            _ok = _ng = 0
-            _targets = _drafts[:40]
-            for _i, _d in enumerate(_targets):
-                # 画面で編集済みの文面があればそれを使う
-                _text = st.session_state.get(f"rep_{_d['reply_id']}", _d["draft_text"])
-                try:
-                    _client.reply_to(_d["reply_id"], _text)
-                    store.set_draft_status(_d["reply_id"], "sent", sent=True)
-                    _ok += 1
-                except Exception as _e:
-                    _ng += 1
-                    st.warning(f"@{_d['username']} への返信失敗: {_e}")
-                _bar.progress((_i + 1) / len(_targets),
-                              text=f"送信中… {_i + 1}/{len(_targets)}（成功{_ok}）")
-                if _i + 1 < len(_targets):
-                    time.sleep(8)  # 連投とみなされない間隔（凍結対策）
-            _bar.empty()
-            st.success(f"送信 {_ok}件 / 失敗 {_ng}件")
-            time.sleep(1.5)
-            st.rerun()
-        for d in _drafts[:40]:
-            with st.container(border=True):
-                st.markdown(f"**@{d['username']}**　<span style='color:gray'>{str(d['created_at'])[:16]}</span>",
-                            unsafe_allow_html=True)
-                st.caption(f"コメント: {d['in_text']}")
-                rtext = st.text_area("返信（編集可）", value=d["draft_text"],
-                                     key=f"rep_{d['reply_id']}", height=80)
-                c1, c2 = st.columns(2)
-                if c1.button("↩️ この内容で返信する", key=f"rep_send_{d['reply_id']}", use_container_width=True):
-                    try:
-                        from src.main import make_client
-                        make_client().reply_to(d["reply_id"], rtext)
-                        store.set_draft_status(d["reply_id"], "sent", sent=True)
-                        st.success("返信しました")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"返信に失敗しました（{e}）")
-                if c2.button("🗑 スキップ", key=f"rep_skip_{d['reply_id']}", use_container_width=True):
-                    store.set_draft_status(d["reply_id"], "skipped")
-                    st.rerun()
-
-
-# ---------------- 無料診断 ----------------
-def _jp_birthday(label: str, key: str, default_year: int):
-    """年/月/日の日本語セレクトで生年月日を選ばせ 'YYYY-MM-DD' を返す。無効な日付ならNone。"""
-    st.markdown(f"**{label}**")
-    years = list(range(date.today().year, 1954, -1))
-    cy, cm, cd = st.columns(3)
-    y = cy.selectbox("年", years, index=years.index(default_year) if default_year in years else 0,
-                     key=f"{key}_y", format_func=lambda v: f"{v}年")
-    m = cm.selectbox("月", list(range(1, 13)), key=f"{key}_m", format_func=lambda v: f"{v}月")
-    d = cd.selectbox("日", list(range(1, 32)), key=f"{key}_d", format_func=lambda v: f"{v}日")
-    try:
-        return date(y, m, d).strftime("%Y-%m-%d")
-    except ValueError:
-        st.warning(f"「{label}」の{y}年{m}月{d}日は存在しません。日を選び直してください。")
-        return None
-
-
-def _in_range(ts: str, lo: str, hi: str) -> bool:
-    """作成日時文字列が期間内か（sqlite=スペース区切り/sheets=T区切りの揺れを吸収）。"""
-    t = str(ts or "").replace(" ", "T")
-    return bool(t) and lo <= t <= hi
-
-
-def _uniq_people(events: list[dict], name: str, lo: str, hi: str) -> int:
-    """期間内のイベントを「人数」で数える（vid=訪問者の匿名IDでユニーク化。
-    vidが取れなかった端末は1イベント=1人として加算）。"""
-    vids, anon = set(), 0
-    for r in events:
-        if r.get("event") != name or not _in_range(r.get("created_at"), lo, hi):
-            continue
-        v = str(r.get("vid") or "").strip()
-        if v:
-            vids.add(v)
-        else:
-            anon += 1
-    return len(vids) + anon
-
-
-if view == VIEW_DIAG:
-    # Web診断「椿の縁視」のファネル計測（固定投稿・プロフのA/Bテストの判定材料）
-    with st.expander("🌐 縁視ファネル計測（訪問した人 → 診断した人 → LINE追加した人）", expanded=True):
-        fc1, fc2 = st.columns(2)
-        _f_from = fc1.date_input("開始", value=now_jst().date() - timedelta(days=13), key="wf_from")
-        _f_to = fc2.date_input("終了", value=now_jst().date(), key="wf_to")
-        _lo, _hi = f"{_f_from}T00:00:00", f"{_f_to}T23:59:59"
-        try:
-            _ev = store.list_web_events()
-            _wd = store.list_web_diag()
-            visitors_n = _uniq_people(_ev, "view", _lo, _hi)
-            diagnosed_n = _uniq_people(_ev, "submit", _lo, _hi)
-            follows_n = sum(1 for r in _ev if r.get("event") == "line_follow"
-                            and _in_range(r.get("created_at"), _lo, _hi))
-            clicks_n = _uniq_people(_ev, "line_click", _lo, _hi)
-            redeems_n = sum(1 for r in _wd if str(r.get("used") or "0").lower() in ("1", "true")
-                            and _in_range(r.get("used_at"), _lo, _hi))
-
-            def _pct(a: int, b: int) -> str:
-                return f"{a * 100 // b}%" if b else "—"
-
-            m1, m2, m3 = st.columns(3)
-            m1.metric("診断ページを訪問した人", visitors_n)
-            m2.metric("診断を実行した人", diagnosed_n,
-                      _pct(diagnosed_n, visitors_n) + " ←訪問から", delta_color="off")
-            m3.metric("LINEを追加した人", follows_n,
-                      _pct(follows_n, diagnosed_n) + " ←診断から", delta_color="off")
-            st.caption(
-                f"補助指標：LINEボタン押下 {clicks_n}人 ／ LINEで番号使用 {redeems_n}件"
-                "　※人数計測は2026-07-13夜の計測開始以降。LINE追加は友だち追加の実イベント"
-                "（診断以外の経路の追加も含む）。"
-            )
-        except Exception as e:
-            st.warning(f"計測データの読み込みに失敗しました（{e}）")
-    st.caption("DMやLINEで届いた文章をそのまま貼るだけ。生年月日（1つ目=相談者、2つ目=彼）・状況・期間は自動で読み取ります。")
-    raw = st.text_area(
-        "届いた文章を貼り付け",
-        key="diag_raw", height=240,
-        placeholder=(
-            "例：\n"
-            "・1995年4月3日\n"
-            "・1993.08.21\n"
-            "①復縁したい\n"
-            "②1ヶ月以上\n"
-            "未読無視が続いてて、彼に新しい女がいそうで不安です…"
-        ),
-    )
-    if st.button("🔮 鑑定する", type="primary", key="diag_run"):
-        p = diagnosis.parse_free_input(raw)
-        if not p["me"] or not p["him"]:
-            st.error("生年月日が2つ見つかりませんでした。貼り付け文に「相談者→彼」の順で2つ入っているか確認してください。")
-        else:
-            try:
-                with st.spinner("椿が視てます…"):
-                    res = diagnosis.generate_reading(
-                        p["me"], p["him"],
-                        p["status"] or "（相談文から読み取る）",
-                        p["period"] or "（相談文から読み取る）",
-                        raw,  # 貼り付け全文を相談内容として渡す（取りこぼしゼロ）
-                    )
-                # 結果は「どの入力から作ったか」とセットで保存（入力が変われば表示しない）
-                st.session_state["diag_result"] = {"input": (raw or "").strip(), "parsed": p, "res": res}
-            except Exception as e:
-                st.error(f"鑑定の生成に失敗しました（{e}）。少し待って再度お試しください。")
-
-    _dr = st.session_state.get("diag_result")
-    if _dr and _dr["input"] != (raw or "").strip():
-        st.session_state.pop("diag_result", None)  # 入力が書き換わったら前の結果は破棄（誤送信防止）
-        _dr = None
-    if _dr:
-        p, res = _dr["parsed"], _dr["res"]
-        st.caption(
-            f"読み取り結果：あなた {p['me']} ／ 彼 {p['him']} ／ "
-            f"状況: {p['status'] or '本文から判断'} ／ 期間: {p['period'] or '本文から判断'}"
-        )
-        st.markdown(f"**あなた: {res['me_shuku']}　/　彼: {res['him_shuku']}　/　縁の距離: {res['distance']}**")
-        # keyを鑑定文の内容から作る＝古い表示が新しい結果を上書きする事故を構造的に防ぐ
-        st.text_area("鑑定文（コピーして相談者に送れます）", value=res["reading"], height=320,
-                     key=f"diag_out_{abs(hash(res['reading'])) % 10**8}")
 
 
 # ---------------- 会員相談（相談し放題の返信生成＋LINE送信） ----------------
