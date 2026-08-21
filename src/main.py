@@ -207,6 +207,12 @@ def cmd_kantei(args: argparse.Namespace) -> None:
     print(res["note"])
     print("━" * 72)
     print(_DELIVERY_REMINDER)
+    # ★2026-08-21：月詠みの案内は、買うた商品で値段が分かれる。ここで一度だけ念を押す。
+    print("🌙 感想が返ってきた時の月詠みは【月3,980円】や")
+    print("   https://buy.stripe.com/6oU9ASfJ41mr82Ubeq53O03")
+    print("   ★ただし、この人が潮見（九十日の暦つき）を買うとったら【5,980円】の方や。")
+    print("     kantei_out に『九十日の暦_名前.pdf』があるかどうかで見分ける")
+    print("━" * 72)
 
 
 def cmd_shiomi(args: argparse.Namespace) -> None:

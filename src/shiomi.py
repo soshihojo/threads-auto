@@ -32,6 +32,16 @@ from .kantei import (CHROME, OUT_DIR, DELIVERY_CLOSING, _internal_brief,
                      strip_instruction_leak, strip_jargon, strip_markdown)
 from .llm import complete
 
+# ★★★2026-08-21：潮見を買うた人の月詠みは、本鑑定の人とは別のプランや。
+#   本鑑定（3,980円）を買うた人 → 月詠み 3,980円
+#   潮見（9,800円）を買うた人   → 月詠み 5,980円  ←★こっち
+#   ★感想が返ってくるんは納品の何日もあとや。その頃には、何を買うた人か忘れとる。
+#     LINEのやりとりを遡っても、オーダー番号しか残ってへんから商品は分からん。
+#   ★★せやから【kantei_out に九十日の暦があるか】が、いちばん確実な見分け方になる。
+#     暦がある＝潮見の人＝5,980円。★ここを間違えて安い方を送ったら、あとから値上げは言えん。
+URL_TSUKIYOMI_SHIOMI = "https://buy.stripe.com/fZubJ09kGfdhab2fuG53O08"
+TSUKIYOMI_SHIOMI_PRICE = "月5,980円"
+
 SHIOMI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。個別鑑定書に添える「九十日の暦（潮見表）」を組む。
 
 これは9,800円（通常29,800円）の納品物の芯になる部分。相談者は、いつ動いていつ待つかが分からんまま毎日を過ごしとる。その待ち時間に形を与えるのがこの暦や。
@@ -334,6 +344,35 @@ def check_daylists(s: "Shiomi", today: str, horizon: int = 89) -> list[str]:
     return out
 
 
+
+# ★★★2026-08-21：潮見を買うた人の名簿。
+#   月詠みの案内は、感想が返ってきてからやから、納品の何日もあとになる。
+#   その頃には、この人が何を買うたか忘れとる。★LINEにはオーダー番号しか残ってへん。
+#   ★★暦のファイルが有るかどうかで見分けよう、と最初は考えた。せやけどそれは危ない。
+#     試しに作った暦が混ざるからや。実際、8月13日に「あや」「ゆき」で試作したもんが残っとって、
+#     ファイル名だけ見たら、買うてもない人が潮見の人に見えとった。
+#   ★★★せやから、名簿を別に持つ。作った時に、ここへ一行足す。
+#     試作の時は、この行を手で消す。それだけの手間で、取り違えが消える。
+#   ★★名簿は kantei_out の中に置く。つまり .gitignore の対象で、git には上がらん。
+#     客の名前が入るからや。これは意図してそうしとる。バックアップは手元だけ。
+#     ★別のパソコンで作業する時は、名簿がそっちに無い。その時は kantei_out ごと持っていくこと。
+SHIOMI_LEDGER = OUT_DIR / "_潮見を買うた人.txt"
+
+
+def record_shiomi_buyer(name: str, today: str) -> None:
+    """潮見の名簿に一行足す。★同じ名前が二回来ても、重ねて書かん。"""
+    SHIOMI_LEDGER.parent.mkdir(exist_ok=True)
+    line = f"{today}\t{name}\t月詠みは5,980円"
+    old = SHIOMI_LEDGER.read_text(encoding="utf-8") if SHIOMI_LEDGER.exists() else ""
+    if any(l.split("\t")[1:2] == [name] for l in old.splitlines() if l.strip()):
+        return
+    head = ("# 潮見（9,800円）を買うた人の名簿。\n"
+            "# ★この人らの月詠みは【月5,980円】や。本鑑定だけの人（3,980円）とちゃう。\n"
+            "# ★★試しに作っただけの分は、この行を手で消しといて。\n"
+            "# 日付\t名前\t月詠みの値段\n") if not old else ""
+    SHIOMI_LEDGER.write_text(old + head + line + "\n", encoding="utf-8")
+
+
 # ---------------- 暦の納品文 ----------------
 #
 # ★2026-08-20 新設。潮見を二人に納品して、二回とも同じ穴が開いた。
@@ -471,5 +510,13 @@ def make_shiomi(name: str, me_birth: str, him_birth: str, details: str,
     note_path = OUT_DIR / f"納品文_{name}_暦.txt"
     note_path.write_text(cal_note, encoding="utf-8")
     print(f"  💬 暦の納品文: {note_path}")
+    # ★★2026-08-21：潮見を買うた人の月詠みは【5,980円】や。本鑑定の人（3,980円）とちゃう。
+    #   感想が返ってきた時に案内するんやが、その頃には何を買うた人か忘れとる。
+    #   ★せやから、作った時点でここに出しとく。あとで kantei_out を見返す時の証拠にもなる。
+    record_shiomi_buyer(name, today)
+    print(f"  🌙 この人の月詠みは【{TSUKIYOMI_SHIOMI_PRICE}】や（本鑑定の人とはちゃう）")
+    print(f"     名簿に足しといた: {SHIOMI_LEDGER}")
+    print(f"     {URL_TSUKIYOMI_SHIOMI}")
     return {"shiomi": s, "pdf": str(pdf_path), "png": str(png_path),
-            "note": cal_note, "note_path": str(note_path), "problems": problems}
+            "note": cal_note, "note_path": str(note_path),
+            "tsukiyomi_url": URL_TSUKIYOMI_SHIOMI, "problems": problems}
