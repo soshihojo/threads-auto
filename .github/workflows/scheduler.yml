@@ -5,6 +5,17 @@ on:
     - cron: "*/15 * * * *"   # 15分おき
   workflow_dispatch: {}
 
+# ★★★2026-08-22：同時に走らんようにする。ここが二重投稿の原因やった。
+#   GitHub Actions の cron は、混んどると遅れて走る。遅れた回と次の回が重なると、
+#   両方が同じ「まだ scheduled の行」を掴んで、二本とも投稿してまう。
+#   ★実際、8/17〜18で同じ本文が10本、15秒〜2分ちがいで二重に出とった。
+#   ★★schedule.run_due には was_posted_before いう保険があるが、あれは
+#     「前の回の投稿が posts に書かれた後」やないと効かん。同時に走ったら両方すり抜ける。
+#   ★★★せやから、そもそも重ねん。走っとる間に来た回は、待たせんと捨てる（投稿は次の回で拾える）。
+concurrency:
+  group: threads-scheduler
+  cancel-in-progress: false
+
 jobs:
   run-due:
     runs-on: ubuntu-latest

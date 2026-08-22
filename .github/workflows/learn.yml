@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write            # 学習結果をpushするために必要
 
+# ★2026-08-22：学習も重ねん。同じ集計を二回書き込む事故を防ぐ。
+concurrency:
+  group: threads-learn
+  cancel-in-progress: false
+
 jobs:
   learn:
     runs-on: ubuntu-latest

@@ -10,6 +10,11 @@ on:
     - cron: "0 * * * *"     # 毎時0分（24時間）
   workflow_dispatch: {}
 
+# ★2026-08-22：巡回も重ねん。重なると、同じコメントに二回返す事故になる。
+concurrency:
+  group: threads-poll
+  cancel-in-progress: false
+
 jobs:
   poll:
     runs-on: ubuntu-latest
