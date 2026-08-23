@@ -181,7 +181,7 @@ def _backend_attr(name: str):
 
 
 @st.cache_data(ttl=25, show_spinner=False)
-def _consult_board() -> tuple[str, list[dict]]:
+def _consult_board() -> tuple[str, list[dict], dict]:
     """会員ごとの「LINEの今」を、シートの読み込み3回だけでまとめて作る。
 
     会員とLINEの紐付けは生年月日2つの一致で自動（紐付け作業は要らん）。
@@ -192,12 +192,26 @@ def _consult_board() -> tuple[str, list[dict]]:
     """
     members = store.list_members()
     by_births = {}
+    # ★★★2026-08-23：ここは【他人の会話が混ざる】いちばん危ない所や。
+    #   前は by_births[key] = u と後勝ちで入れとった。
+    #   ★もし二人の相談者の生年月日が二つとも同じやったら、後から読んだ方に上書きされて、
+    #     会員は【別人のLINE会話】で返信を作られる。相手の彼の名前も、揉めた話も、全部混ざる。
+    #   ★★今はまだ0組やけど、人が増えたら必ずぶつかる（誕生日は365通りしかない）。
+    #     ほんで、ぶつかっても画面には何も出んから、こっちは気づけん。
+    #   ★★★せやから、ぶつかったら【紐付けん】。黙って間違うより、繋がらん方が百倍ましや。
+    _clash = {}
     _list_users = _backend_attr("list_line_users")
     if _list_users:
+        _cand = {}
         for u in _list_users():
             key = (str(u.get("me_birth") or "").strip(), str(u.get("him_birth") or "").strip())
             if all(key):
-                by_births[key] = u
+                _cand.setdefault(key, []).append(u)
+        for key, us in _cand.items():
+            if len(us) == 1:
+                by_births[key] = us[0]
+            else:
+                _clash[key] = [str(x.get("display_name") or x.get("user_id")) for x in us]
     else:
         # 最後の逃げ道：会員ごとに引く（人数ぶんシートを読むので遅いが、画面は動く）
         for m in members:
@@ -260,6 +274,16 @@ def _consult_board() -> tuple[str, list[dict]]:
             "uid": uid, "line_name": str(u.get("display_name") or "") if u else "",
             "waiting": "\n".join(waiting),
             "waiting_recent": "\n".join(str(r.get("text") or "") for r in recent),
+            # ★★★2026-08-23：日時つきの版も持っとく。
+            #   相談欄は本文だけを入れとった＝椿には【いつ届いたか】が分からん。
+            #   実測：未返信の塊874件のうち75件が丸一日以上またいどる。
+            #   最長はMadokaさんの25件で19.7日ぶん。★これが一かたまりの「今の相談」に見える。
+            #   ★★ほんで、十九日前の話を「さっき言うてたやん」と今の話みたいに扱う。
+            #     逆に、いちばん新しい一行（＝ほんまに答えてほしい話）が埋もれる。
+            #   ★★★せやから、何時間もまたいどる時だけ、頭に日時を足す。
+            #     数分のうちの連投は、足しても読みにくうなるだけやから足さん。
+            "waiting_ts": [(str(r.get("created_at") or ""), str(r.get("text") or "")) for r in wrows],
+            "waiting_recent_ts": [(str(r.get("created_at") or ""), str(r.get("text") or "")) for r in recent],
             "n_waiting": len(wrows), "n_recent": len(recent),
             "recent_from": str(recent[0].get("created_at") or "")[:16] if recent else "",
             "last_ts": str(chats[-1].get("created_at") or "")[:16] if chats else "",
@@ -269,7 +293,7 @@ def _consult_board() -> tuple[str, list[dict]]:
         })
     board.sort(key=lambda b: b["last_ts"], reverse=True)
     board.sort(key=lambda b: 0 if b["waiting"] else 1)   # 未返信を上に（安定ソート）
-    return f"{now_jst():%H:%M:%S}", board
+    return f"{now_jst():%H:%M:%S}", board, _clash
 
 
 if view == VIEW_CONSULT:
@@ -286,10 +310,16 @@ if view == VIEW_CONSULT:
         st.session_state.pop("con_result", None)
         st.rerun()
     try:
-        _fetched_at, _board = _consult_board()
+        _fetched_at, _board, _clash_keys = _consult_board()
     except Exception as e:
         st.warning(f"会員リストの読み込みに失敗（{e}）")
-        _fetched_at, _board = "", []
+        _fetched_at, _board, _clash_keys = "", [], {}
+    if _clash_keys:
+        # 紐付けを止めた組は、必ず目に見せる（黙って繋がらんのは、黙って間違うのの次に悪い）
+        st.error("⚠️ 生年月日が二つとも同じ人が複数おるため、LINEの紐付けを止めました。"
+                 "この人たちは返信生成にLINEの会話が渡りません。会員のニックネームか"
+                 "生年月日を見直してください：\n"
+                 + "\n".join(f"・{a}／{b} → {'、'.join(v)}" for (a, b), v in _clash_keys.items()))
     if not _board:
         st.info("会員がいません。👥会員の画面で登録してください。")
     else:
@@ -337,13 +367,26 @@ if view == VIEW_CONSULT:
                     st.markdown(f"{_who}　<span style='color:gray;font-size:0.85em'>"
                                 f"{str(_r.get('created_at'))[:16]}</span>", unsafe_allow_html=True)
                     st.text(str(_r.get("text") or ""))
-            if cb["waiting"] and st.button("✓ これはもうLINEアプリで返した（対応済みにする）",
-                                           key=f"con_done_{cb['id']}"):
-                # LINE公式アプリから手で送った返信はWebhookに流れてこず記録が残らんので、
-                # 印だけ残して🔴を消す。会員の発言やないので、返信生成の材料には入らん
-                store.add_line_chat(cb["uid"], "assistant", "［店主がLINEアプリから手動で返信］")
-                _consult_board.clear()
-                st.rerun()
+            if cb["waiting"]:
+                # ★★★2026-08-23：前は印だけ残しとった。
+                #   せやけど、それやと【何を返したか】が記録に残らん。
+                #   ★次に返信を作る時、椿は自分が何を言うたか分からんまま書くことになる。
+                #     ほんで、前と逆のことを言うたり、同じ話をもう一回したりする。
+                #   ★★実際、七件も「中身なし」が入っとった（田中麻衣さん2件ほか）。
+                #   ★★★せやから、手で返した本文を貼れるようにした。
+                #     貼らんでも印は押せる（急いどる時に手間で止まったら本末転倒やからな）。
+                with st.expander("✓ これはもうLINEアプリで返した（対応済みにする）"):
+                    _manual = st.text_area(
+                        "送った文面を貼っといて（次の返信がここを踏まえる）",
+                        key=f"con_manual_{cb['id']}", height=120,
+                        placeholder="LINEアプリからコピーして貼るだけでええ。空でも印は押せるが、"
+                                    "貼っといた方が次の返信がずれん")
+                    if st.button("対応済みにする", key=f"con_done_{cb['id']}"):
+                        _txt = (_manual or "").strip() or "［店主がLINEアプリから手動で返信（本文は未登録）］"
+                        store.add_line_chat(cb["uid"], "assistant", _txt)
+                        st.session_state.pop(f"con_manual_{cb['id']}", None)
+                        _consult_board.clear()
+                        st.rerun()
         else:
             st.warning("この会員のLINEが見つかりません（line_usersに登録された生年月日2つが"
                        "会員登録と一致していない）。返信文は作れますが、送信ボタンは出ません。")
@@ -401,7 +444,20 @@ if view == VIEW_CONSULT:
                      f"未返信ぜんぶ（{cb['n_waiting']}件）"]
             _scope_i = _opts.index(st.radio(
                 "どこまで相談欄に入れる？", _opts, key=f"con_scope_{cb['id']}", horizontal=True))
+        _rows_ts = cb.get("waiting_ts") if _scope_i else (cb.get("waiting_recent_ts") or cb.get("waiting_ts"))
         _fill = cb["waiting"] if _scope_i else (cb["waiting_recent"] or cb["waiting"])
+        _span_h = 0.0
+        if _rows_ts and len(_rows_ts) >= 2:
+            try:
+                _span_h = (datetime.fromisoformat(_rows_ts[-1][0])
+                           - datetime.fromisoformat(_rows_ts[0][0])).total_seconds() / 3600
+            except Exception:
+                _span_h = 0.0
+        if _span_h >= 3:
+            # ［08/21 09:59］のかたちで頭に足す。本文はそのまま残る＝後の突き合わせも効く
+            _fill = "\n".join(f"［{t[5:16].replace('T', ' ')}］{x}" for t, x in _rows_ts)
+            st.caption(f"🕒 この相談は {_span_h/24:.1f}日ぶん（{len(_rows_ts)}件）にまたがるので、"
+                       "各行の頭に届いた日時を入れました（椿が古い話を『今の話』と取り違えんように）")
         # keyに範囲を含める＝切り替えたら中身が入れ替わる（widgetが古い値を握るのを避ける）
         incoming = st.text_area(
             "会員から届いた相談" + ("（LINEから自動で入れました。編集できます）" if cb["waiting"] else ""),
@@ -419,20 +475,48 @@ if view == VIEW_CONSULT:
                     #   ・椿の返信 800字 → 10%が尻切れ。★前に自分が出した指示が、途中で消える
                     #   ★★過去の指示が見えんまま次を書くから、前と逆のことを言う。
                     #     日付も入れとく（★「いつ言うたか」が分からんと、順番を取り違える）
+                    # ★2026-08-23：いま答えよとする相談そのものは、履歴から外す。
+                    #   作り直した時、同じ相談文の控えが残っとる＝【前回のやりとり】に
+                    #   自分の前の返信が並ぶ。★椿は「この話はもう答えた」と思て、
+                    #   「さっき言うたとおりや」と、初回みたいに答えてくれん。
+                    _past = [h for h in chist[:13]
+                             if str(h.get('worry') or '').strip() != incoming.strip()][:12]
                     hist_str = "\n\n".join(
                         f"◆{str(h['created_at'])[:16]} 会員の相談: {str(h['worry'])[:800]}\n"
                         f"　椿の返信: {str(h['reading'])[:1600]}"
-                        for h in reversed(chist[:12])
+                        for h in reversed(_past)
                     )
-                    if _line_recent:
-                        hist_str += ("\n\n◆会員から最近LINEに届いたメッセージ（新しい順ではなく時系列。"
-                                     "[画像を送付]は画像の自動読み取り内容）:\n" + _line_recent)
+                    # ★★★2026-08-23：ここで【いま答えよとする相談】を履歴から外す。
+                    #   相談欄は未返信ぶんを自動で入れとる＝LINE直近と中身が丸かぶりや。
+                    #   実測：ema shimotsumaさん8/8件、riyoさん5/5件、なつみさん4/4件が重複しとった。
+                    #   ★重なったまま渡すと、椿には【今の相談】と【前にも来とった同じ話】の
+                    #     二回に見える。ほんで「さっきも言うてたな」「その話は前に聞いた」と、
+                    #     ★★初めて聞いた話を二度目みたいに扱う。これが不自然さの正体のひとつ。
+                    #   ★★★せやから、相談欄に入っとる文はここから落とす。残りは「それより前の話」。
+                    _cur = incoming.strip()
+                    _before = [h for h in _lmsgs
+                               if str(h.get('text') or '').strip() not in _cur]
+                    _line_before = "\n".join(
+                        f"・{str(h.get('created_at'))[:16]} {str(h.get('text') or '')[:1500]}"
+                        for h in _before)
+                    if _line_before:
+                        hist_str += ("\n\n◆それより前に会員からLINEに届いとったメッセージ（時系列。"
+                                     "[画像を送付]は画像の自動読み取り内容）。"
+                                     "★これは【今の相談】より前の話や。今の相談と混同せんこと:\n"
+                                     + _line_before)
                     # ★相談以外の資料（ヒアリング原文・訂正・最新の意向・暦）は、
                     #   古うても必ず渡す。ここが落ちると、直したはずの間違いがまた出る
                     if _refs:
                         hist_str += "\n\n◆この会員についての、消したらあかん資料（古うても必ず踏まえる）:\n" + \
                             "\n\n".join(f"【{str(h['month'])}】\n{str(h['reading'])[:4000]}" for h in _refs)
                     # ★★★呼び名の指定は、いちばん上に置く。ここを外すと事故る
+                    if _span_h >= 3:
+                        hist_str += ("\n\n◆★今の相談の各行の頭の［08/21 09:59］は、"
+                                     "その一行が届いた日時や。"
+                                     f"この相談は{_span_h/24:.1f}日ぶんが溜まったもんで、"
+                                     "★下の行ほど新しい。"
+                                     "古い行を『今さっきの話』として扱わんこと。"
+                                     "★★いちばん答えてほしいんは、たいてい【いちばん下の行】や。")
                     _who = (cb.get("line_name") or cb["nickname"]).strip()
                     _memo = str(cmem.get("note") or "").strip()
                     hist_str = (
