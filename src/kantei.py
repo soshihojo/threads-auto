@@ -118,14 +118,51 @@ _EXAMPLE_FACTS = (
 )
 
 
+def _strip_example_from_instruction(instruction: str) -> str:
+    """章の書き方の指示から、見本の一件が入っとる文だけを落とす。
+
+    ★★★2026-08-23：まなかさんの回で、書き直しを二回やっても混入が消えんかった。
+      第二章どころか、まえがきにまで見本の人の名前（怜）が出てきた。
+      ★なんでか。章の指示そのものが、見本の人の事実で書いてあるからや。
+        「二十歳の頃、バイト先に来た七人の飲み会に…」——これが毎回そのまま渡っとる。
+      ★★普段は生成が上手いこと抽象化してくれる。せやけど、似た人が来たら飲まれる。
+        まなかさんは夜の仕事で、会食も酒も出てくる。見本と語彙がまるかぶりや。
+        『見本を持ち込むな』と何回注意しても、目の前に置いてあったら混ざる。
+      ★★★せやから、書き直しの時は【見本の文ごと外す】。狙いと構成の文だけ残る。
+        章が少し薄うなるかもしれんが、他人の話が混じった紙を渡すよりは、なんぼでもましや。
+    """
+    bad = _EXAMPLE_WORDS + _EXAMPLE_FACTS
+    kept = [t for t in instruction.split("。") if t and not any(w in t for w in bad)]
+    return "。".join(kept) + ("。" if kept else "")
+
+
+# ★★★2026-08-23：酒がらみの語は【まとめて】判定する。
+#   前は一語ずつ「その言葉が details に有るか」で見とった。せやから、
+#   ★相談者の話に「酔って」は出るのに「素面」は出えへん、いう時に引っかかる。
+#   ★★実際、まなかさんの第六章がこれで三回とも止まった。本文を読んだら混入は一つも無うて、
+#     彼女自身の話（酔って言うた「大好き」が記憶に残らん／後輩へのキスも「覚えてない」）から
+#     「これからの一手は素面で打て」いう処方に辿り着いとっただけや。★正しい鑑定を弾いとった。
+#   ★★★もともとの狙いは「ほんまに酒がらみの相談なら通す」やった。その狙いどおりに直す。
+#     詳細のどこかに酒の気配があったら、この組はまとめて通す。
+_ALCOHOL_FACTS = ("酔って", "酒の力", "酒の勢い", "素面")
+_ALCOHOL_HINTS = ("酒", "酔", "飲み", "会食", "ホステス", "キャバ", "居酒屋", "バー", "呑")
+
+
 def _example_leaks(body: str, details: str) -> list[str]:
     """見本の一件が本文に流れ込んでへんか調べる。混入した語を返す（空なら綺麗）。
 
     名前は無条件でアウト。それ以外は「相談者の詳細に無い＝作り話」の時だけアウトにする。
     こうしとかんと、ほんまに酒の話が出てくる相談で永遠に書き直すことになる。
     """
+    det = details or ""
+    drinking = any(h in det for h in _ALCOHOL_HINTS)
     hits = [w for w in _EXAMPLE_WORDS if w in body]
-    hits += [w for w in _EXAMPLE_FACTS if w in body and w not in (details or "")]
+    for w in _EXAMPLE_FACTS:
+        if w not in body or w in det:
+            continue
+        if drinking and w in _ALCOHOL_FACTS:
+            continue          # 酒の話が出とる相談や。この語はこの人の言葉として通す
+        hits.append(w)
     return sorted(set(hits))
 
 _G = ("【この章でも守ること】怜を責めん。酔った勢いの過去も、告白の記憶が無いことも裁かん。"
@@ -511,15 +548,24 @@ def generate_chapters(name: str, me_birth: str, him_birth: str, details: str,
         body = cleaned or strip_jargon(strip_ai_leak(
             complete(KANTEI_SYSTEM, user, max_tokens=3000, temperature=0.7).strip()))
         # 例文（怜と真翔の一件）の中身が、そのまま別の人の鑑定書に流れ込む事故を止める。
-        # 詳細は _EXAMPLE_LEAK_RE の上に書いた。最大2回まで書き直させる
-        for attempt in range(2):
+        # 詳細は _EXAMPLE_LEAK_RE の上に書いた。
+        # ★2026-08-23：2回 → 3回に増やした。まなかさんの回で、二回目（見本を外した一回目）でも
+        #   まだ残っとった。見本を外した状態でもう一回やらせたら通る見込みがある。
+        #   ★書き直しは混入した時しか走らん。普段の回は一度も余分に叩かん。
+        for attempt in range(3):
             hits = _example_leaks(body, details)
             if not hits:
                 break
             print(f"  ⚠ {title}: 例文の一件が混入（{'・'.join(hits)}）。{attempt + 1}回目の書き直し")
+            # ★2回目は、見本の文を指示から丸ごと外して渡す（上の関数の説明を見よ）
+            _u = user
+            if attempt >= 1:
+                _clean = _strip_example_from_instruction(instruction)
+                _u = user.replace(instruction, _clean)
+                print(f"     ↳ 見本の文を指示から外した（{len(instruction)}字 → {len(_clean)}字）")
             body = strip_jargon(strip_ai_leak(strip_markdown(complete(
                 KANTEI_SYSTEM,
-                user + "\n\n=== 厳重注意 ===\n"
+                _u + "\n\n=== 厳重注意 ===\n"
                 "直前の生成で、書き方の見本として渡した『別の相談者の一件』の中身が、"
                 "そのままこの人の鑑定書に混ざってもうた。見本は文体と密度の参考であって、"
                 "事実やない。この人の名前・年数・出来事・台詞だけで書き直すこと。\n"
