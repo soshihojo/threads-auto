@@ -1055,6 +1055,18 @@ def _record_sent(user_id: str, text: str) -> None:
     """
     try:
         from . import store
+        # ★★★2026-08-23：直前の一行と同じ本文やったら、書かん。
+        #   経路を整理しても、どこかでまた二回呼ばれる日が来る。その時の最後の砦や。
+        #   ★実際、8/22に line_bot 側を直したあとも、app.py 側が残っとって53件重なった。
+        #   ★★人が気をつける、では止まらん。機械で止める。
+        try:
+            recent = store.recent_line_chats(user_id, limit=1)
+            if recent and str(recent[-1].get("role")) == "assistant" \
+                    and str(recent[-1].get("text", "")).strip() == text.strip():
+                print("[line_bot] 直前と同じ本文やったんで、記録は足さん（二重防止）")
+                return
+        except Exception:
+            pass    # 直前が読めんかったら、記録の方を優先する（残さんより残す）
         store.add_line_chat(user_id, "assistant", text)
     except Exception as e:      # 記録に失敗しても、送信そのものは成立しとる。落とさん
         print(f"[line_bot] 送信は成功したが記録に失敗: {e}")

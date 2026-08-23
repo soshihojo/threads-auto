@@ -440,8 +440,13 @@ if view == VIEW_CONSULT:
                             # 古いモジュールが残っていても送れるように push_text へ落とす
                             _push = getattr(_lb, "push_long_text", None) or _lb.push_text
                             if _push(cb["uid"], edited):
-                                # 会話ログに残す＝次の生成もダッシュボードの表示も、送った文面を前提にできる
-                                store.add_line_chat(cb["uid"], "assistant", edited)
+                                # ★★★2026-08-23：ここで add_line_chat を呼ぶんは、やめた。
+                                #   8/22に line_bot 側の push_long_text / push_text へ
+                                #   「送ったら記録する」を入れた。★せやから、ここでも呼んだら二回入る。
+                                #   ★★実害：会員の画面に同じ返信が二回並ぶ。8/22以降で53件出とった。
+                                #     絵麻さんとなつみさんから「なんか変」と言われたんは、これや。
+                                #   ★★★記録は push した側で一回だけ。ここは送信の後始末だけやる。
+                                pass
                                 # 控えは「実際に送った文面」で上書きする（編集ぶんを取りこぼさない）
                                 if cr.get("reading_id"):
                                     try:
