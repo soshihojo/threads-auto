@@ -532,10 +532,28 @@ def find_line_user_by_births(me_birth: str, him_birth: str) -> dict | None:
 
 
 def get_line_user(user_id: str) -> dict | None:
-    for r in _records("line_users"):
-        if r.get("user_id") == user_id:
-            return r
-    return None
+    """★★★2026-08-23：同じ user_id の行が二つある人がおる（実測3人）。
+    Webhookが同時に二本走った時、upsert の「探す→無ければ足す」が競って、
+    片方が【中身の無い bot=on の行】を足してまうためや。
+    ★もし空の行を先に拾たら、生年月日が無い＝会員判定が外れ、bot も on に見える。
+      ★★店主が黙らせた相手（未来さん bot=off）や、手で対応中の相手
+        （よしかわさん bot=hold）に、機械が喋り出す。
+    ★★★せやから、一致する行を全部見て【中身の詰まっとる方】を返す。
+      今は並び順のおかげで助かっとるが、順番に頼るんは運任せや。"""
+    hits = [r for r in _records("line_users") if r.get("user_id") == user_id]
+    if not hits:
+        return None
+    if len(hits) == 1:
+        return hits[0]
+
+    def _filled(r: dict) -> tuple:
+        # 生年月日が入っとる方を最優先。次に、黙らせる指示（off/hold）が入っとる方
+        n = sum(1 for k in ("me_birth", "him_birth", "display_name", "note")
+                if str(r.get(k) or "").strip())
+        quiet = 1 if str(r.get("bot") or "on").strip() in ("off", "hold") else 0
+        return (n, quiet, str(r.get("updated_at") or ""))
+
+    return max(hits, key=_filled)
 
 
 def list_line_users() -> list[dict]:
