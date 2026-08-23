@@ -234,6 +234,10 @@ def _consult_board() -> tuple[str, list[dict]]:
         waiting = [str(r.get("text") or "") for r in wrows]
         board.append({
             "id": str(m["id"]), "nickname": str(m["nickname"]),
+            # ★2026-08-23：会員メモも持ってくる。呼び名の指定がここに入っとる
+            #   （例：「必ず『なつみさん』。呼び捨て禁止」）。生成に渡さんかったら、
+            #   ★実際に「なんで呼び捨てですか」と言われた事故が、また起きる。
+            "note": str(m.get("note") or ""),
             "me_birth": str(m["me_birth"]), "him_birth": str(m["him_birth"]),
             "uid": uid, "line_name": str(u.get("display_name") or "") if u else "",
             "waiting": "\n".join(waiting),
@@ -283,7 +287,7 @@ if view == VIEW_CONSULT:
                    f"{'' if b['uid'] else '（LINE未リンク）'}　{b['last_ts']}" for b in _board]
         cpick = st.selectbox("会員を選ぶ", _labels, key="con_pick", label_visibility="collapsed")
         cb = _board[_labels.index(cpick)]
-        cmem = {"id": cb["id"], "nickname": cb["nickname"],
+        cmem = {"id": cb["id"], "nickname": cb["nickname"], "note": cb.get("note", ""),
                 "me_birth": cb["me_birth"], "him_birth": cb["him_birth"]}
 
         # ★2026-08-10：LINEに新しい発言が来ていたら、画面に残っとる前回の入力を捨てる。
@@ -330,7 +334,15 @@ if view == VIEW_CONSULT:
         # 納品済みの個別鑑定書（👥会員でPDF登録したもの）は、履歴とは別に返信生成の参照資料にする
         _kantei_rows = [h for h in _all_hist if h["month"] == "個別鑑定書"]
         kantei_text = str(_kantei_rows[0]["reading"]) if _kantei_rows else ""
-        chist = [h for h in _all_hist if h["month"] != "個別鑑定書"][:5]
+        # ★★★2026-08-23：5件 → 12件に増やした。
+        #   5件やと、よう相談してくれる人ほど記憶が短うなる。実測したらこうやった：
+        #     田中麻衣さん … 控え113件。5件で遡れるんは【19時間】ぶんだけ
+        #     絵麻さん　　 … 控え 33件。5件で【21時間】ぶん
+        #     ゆきえさん　 … 控え 11件。5件で【8時間】ぶん
+        #   ★一日に何回も来る人ほど、前の日に話したことが見えん。
+        #     ほんで「前に言うたやろ」が通じん返信になる。矛盾や記憶違いの正体はここや。
+        #   ★★12件にすると、上の三人でだいたい二〜四日ぶんを見渡せる。
+        chist = [h for h in _all_hist if h["month"] != "個別鑑定書"][:12]
         if kantei_text:
             st.caption("📎 個別鑑定書 登録済み — 返信はこの鑑定の内容（性質の読み・時期・処方箋）と矛盾しない形で生成されます")
         # 会員からLINEに届いた直近のメッセージ（画像の読み取り内容含む）も返信生成が参照する。
@@ -372,14 +384,29 @@ if view == VIEW_CONSULT:
                 try:
                     # 直近5件を「古い順・フル文脈」で渡す（60字要約だと過去の指示が見えず
                     # 矛盾や事実の取り違えが起きた実害があった）
+                    # ★2026-08-23：切り詰めを緩めた。実測で、こんだけ捨てとった：
+                    #   ・会員の相談文 300字 → 26%が尻切れ（中央値151字やが、長い回ほど大事な話が入る）
+                    #   ・椿の返信 800字 → 10%が尻切れ。★前に自分が出した指示が、途中で消える
+                    #   ★★過去の指示が見えんまま次を書くから、前と逆のことを言う。
+                    #     日付も入れとく（★「いつ言うたか」が分からんと、順番を取り違える）
                     hist_str = "\n\n".join(
-                        f"◆{str(h['created_at'])[:10]} 会員の相談: {str(h['worry'])[:300]}\n"
-                        f"　椿の返信: {str(h['reading'])[:800]}"
-                        for h in reversed(chist[:5])
+                        f"◆{str(h['created_at'])[:16]} 会員の相談: {str(h['worry'])[:800]}\n"
+                        f"　椿の返信: {str(h['reading'])[:1600]}"
+                        for h in reversed(chist[:12])
                     )
                     if _line_recent:
                         hist_str += ("\n\n◆会員から最近LINEに届いたメッセージ（新しい順ではなく時系列。"
                                      "[画像を送付]は画像の自動読み取り内容）:\n" + _line_recent)
+                    # ★★★呼び名の指定は、いちばん上に置く。ここを外すと事故る
+                    _who = (cb.get("line_name") or cb["nickname"]).strip()
+                    _memo = str(cmem.get("note") or "").strip()
+                    hist_str = (
+                        f"◆この会員の呼び名：{_who}"
+                        + (f"\n◆この会員についての決まりごと：{_memo}" if _memo else "")
+                        + "\n★呼び名は、ここに書いてあるとおりに書くこと。"
+                          "『さん』を勝手に足したり外したりせん。\n\n"
+                        + hist_str
+                    )
                     with st.spinner("椿が視てます…"):
                         res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str,
                                                          kantei=kantei_text)
@@ -524,7 +551,10 @@ if view == VIEW_MEMBERS:
                         if len(text) < 200:
                             st.error("PDFから本文を読み取れませんでした（画像化されたPDFの可能性）")
                         else:
-                            store.add_reading(m["id"], "個別鑑定書", "（納品済み個別鑑定PDFの全文）", text[:15000])
+                            # ★2026-08-23：15,000字で切っとった。tomokoさんの鑑定書が
+                            #   ちょうど15,000字＝【末尾が落ちとる】。鑑定書の後ろは
+                            #   第七章（やったらあかんこと）と第八章や。★いちばん効く処方が消える。
+                            store.add_reading(m["id"], "個別鑑定書", "（納品済み個別鑑定PDFの全文）", text)
                             st.success(f"鑑定書を登録しました（{len(text)}字）")
                             st.rerun()
                     except Exception as e:
