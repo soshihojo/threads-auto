@@ -988,12 +988,36 @@ def _plain_text(text: str) -> str:
     return strip_ai_leak(text)
 
 
+# LINEの1通の上限は5,000字。余裕を見てここで切る
+_BUBBLE_MAX_CHARS = 4900
+
+
 def _split_bubbles(text: str) -> list[str]:
-    """「---」だけの行で吹き出しを分割（最大3つ）。人間らしい複数メッセージ送信用。"""
+    """「---」だけの行で吹き出しを分割（最大3つ）。人間らしい複数メッセージ送信用。
+
+    ★★★2026-08-23：前は parts[:3] やった。★四つ目から先が【黙って消えとった】。
+      モデルが「---」を三つ以上書いた回は、後ろの話がまるごと届かん。
+      ★消えても誰も気づかん（送信は成功しとるし、記録にも三つ分しか残らん）。
+      ★★受け取る側からしたら、話が途中で終わっとる。返事もかみ合わんようになる。
+      ★★★せやから、捨てるんやのうて【最後の吹き出しにくっつける】。
+        吹き出しは三つのままや。ほんで、一通が5,000字を超えたらLINEが弾くんで、
+        そこも守る（超えた分は続きの通へ回す）。
+    """
     text = _maybe_split_bubble(text)   # モデルが分けてこん時は、こちらで3回に1回だけ分ける
     parts = [_plain_text(p).strip() for p in re.split(r"\n\s*---\s*\n", text) if p.strip()]
     parts = [p for p in parts if p]
-    return parts[:3] if parts else [_plain_text(text)]
+    if not parts:
+        return [_plain_text(text)]
+    if len(parts) > 3:
+        parts = parts[:2] + ["\n\n".join(parts[2:])]
+    out: list[str] = []
+    for p in parts:
+        while len(p) > _BUBBLE_MAX_CHARS:
+            out.append(p[:_BUBBLE_MAX_CHARS])
+            p = p[_BUBBLE_MAX_CHARS:]
+        if p:
+            out.append(p)
+    return out[:5]     # LINEは1回のリクエストで5通まで
 
 
 def reply_text(reply_token: str, text: str) -> bool:
