@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from datetime import datetime
 
@@ -178,6 +179,36 @@ def _backend_attr(name: str):
         return getattr(importlib.import_module(mod_name), name, None)
     except Exception:
         return None
+
+
+# ★★★2026-08-23：PDFから抜いた本文には「康熙部首」いう別の字が混ざる。
+#   見た目は同じでも中身が違う字や：本⾳（正しくは本音）、⼆⼈（二人）、⽉（月）。
+#   ★実測で、会員8人の鑑定書に5,875個も入っとった（まいかさん928個、絵麻さん838個）。
+#   ★★この鑑定書が、毎回の返信の土台になる。日付も名前も、崩れた字で椿に渡っとった。
+#   ★★★登録する時に直す。ここで直さんかったら、また同じ字が入ってくる。
+_RADICAL_EXTRA = {"⻑": "長", "⻤": "鬼", "⻭": "歯"}   # NFKCで戻らん字は手で持つ
+
+
+def _norm_doc(text: str) -> str:
+    """突き合わせ用に、空白と表記ゆれを落とす（PDF由来の崩れも吸う）。"""
+    import unicodedata
+    return re.sub(r"\s", "", unicodedata.normalize("NFKC", _unmangle(text)))
+
+
+def _unmangle(text: str) -> str:
+    import unicodedata
+    out = []
+    for c in text:
+        o = ord(c)
+        if 0x2E80 <= o <= 0x2FDF or o == 0xFE30:
+            if c in _RADICAL_EXTRA:
+                out.append(_RADICAL_EXTRA[c])
+                continue
+            n = unicodedata.normalize("NFKC", c)
+            out.append(n if len(n) == 1 else c)
+        else:
+            out.append(c)
+    return "".join(out)
 
 
 @st.cache_data(ttl=25, show_spinner=False)
@@ -418,6 +449,14 @@ if view == VIEW_CONSULT:
         chist = [h for h in _all_hist if h["month"] == "相談"][:12]
         if kantei_text:
             st.caption("📎 個別鑑定書 登録済み — 返信はこの鑑定の内容（性質の読み・時期・処方箋）と矛盾しない形で生成されます")
+        else:
+            # ★2026-08-23：田中麻衣さんは相談50件・やりとり382件の常連やのに、
+            #   鑑定書が登録されとらんかった（PDFは手元にあった）。
+            #   ★土台なしで返信を作っとった＝彼の性質も、動く時期も、処方も見えん。
+            #   黙って足りんかったから、誰も気づかん。せやから、ここで言う。
+            st.warning("📎 この会員の個別鑑定書が登録されていません。"
+                       "返信は鑑定の見立て（彼の性質・時期・処方箋）を踏まえずに作られます。"
+                       "👥会員の画面からPDFを登録してください。")
         # 会員からLINEに届いた直近のメッセージ（画像の読み取り内容含む）も返信生成が参照する。
         # 上でまとめて読んだ会話をそのまま使う＝ここでシートを読み直さない
         _lmsgs = [h for h in cb["chats"] if str(h.get("role")) == "user"][-8:]
@@ -667,15 +706,53 @@ if view == VIEW_MEMBERS:
                     try:
                         from pypdf import PdfReader
                         text = "\n".join((pg.extract_text() or "") for pg in PdfReader(up).pages).strip()
+                        text = _unmangle(text)
                         if len(text) < 200:
                             st.error("PDFから本文を読み取れませんでした（画像化されたPDFの可能性）")
                         else:
-                            # ★2026-08-23：15,000字で切っとった。tomokoさんの鑑定書が
-                            #   ちょうど15,000字＝【末尾が落ちとる】。鑑定書の後ろは
-                            #   第七章（やったらあかんこと）と第八章や。★いちばん効く処方が消える。
-                            store.add_reading(m["id"], "個別鑑定書", "（納品済み個別鑑定PDFの全文）", text)
-                            st.success(f"鑑定書を登録しました（{len(text)}字）")
-                            st.rerun()
+                            # ★★★2026-08-23：登録先を間違えても、今までは何も出んかった。
+                            #   実害：ａｉｒｉさんの鑑定書と訂正メモ4件が、絵麻さんの控えに
+                            #   入っとった（2026-08-16）。★訂正メモは「最優先で参照する」いう
+                            #   札つきで、絵麻さんへの返信に毎回渡っとった。共同親権も、離婚届も、
+                            #   3歳の娘も、ぜんぶ別の人の話や。★★「なんか噛み合わん」の正体はこれ。
+                            #   ★★★せやから、鑑定書の中の名前と、この会員の名前を突き合わせる。
+                            #     食い違うたら、登録する前に必ず止めて訊く。
+                            # 宛名の字面で照合するんは当てにならん（ローマ字の会員は必ず食い違うし、
+                            # 訂正を頭に足した版は宛名が後ろへずれる）。せやから【同じ文書が
+                            # 他の会員にも入っとらんか】で見る。実際の事故がまさにこれやった。
+                            _owner = ""
+                            _probe = [_norm_doc(text)[i:i + 60]
+                                      for i in range(0, min(len(text), 6000), 600)]
+                            _probe = [x for x in _probe if len(x) == 60]
+                            for _om in store.list_members():
+                                if str(_om["id"]) == str(m["id"]):
+                                    continue
+                                for _oh in store.list_readings(_om["id"], limit=60):
+                                    if str(_oh["month"]) != "個別鑑定書":
+                                        continue
+                                    _ob = _norm_doc(str(_oh["reading"]))
+                                    if _probe and sum(1 for x in _probe if x in _ob) >= max(2, len(_probe) // 2):
+                                        _owner = str(_om["nickname"])
+                                        break
+                                if _owner:
+                                    break
+                            _ck2 = f"mem_pdf_ok_{m['id']}"
+                            if _owner and not st.session_state.get(_ck2):
+                                st.session_state[_ck2] = True
+                                st.error(f"⚠️ この鑑定書は、すでに「{_owner}」さんの控えに入っている"
+                                         f"のと同じ中身です。登録先は「{m['nickname']}」で合っていますか？"
+                                         "（別の人の鑑定書が混ざると、その人の話が"
+                                         "毎回の返信に渡ってしまいます）"
+                                         "合っている場合は、もう一度ボタンを押すと登録します。")
+                            else:
+                                st.session_state.pop(_ck2, None)
+                                # ★2026-08-23：15,000字で切っとった。tomokoさんの鑑定書が
+                                #   ちょうど15,000字＝【末尾が落ちとる】。鑑定書の後ろは
+                                #   第七章（やったらあかんこと）と第八章や。★いちばん効く処方が消える。
+                                store.add_reading(m["id"], "個別鑑定書", "（納品済み個別鑑定PDFの全文）", text)
+                                st.success(f"鑑定書を登録しました（{len(text)}字"
+                                           + (f"・宛名「{_to} 様へ」" if _to else "") + "）")
+                                st.rerun()
                     except Exception as e:
                         st.error(f"登録に失敗しました（{e}）")
                 if _normal:

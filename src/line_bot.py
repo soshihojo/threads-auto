@@ -1609,8 +1609,23 @@ def _reply_after_offer(user_id: str, user: dict, incoming: str, snd, history: li
     #   月詠みを案内する唯一のタイミングやのに、機械が先に喋ると場が潰れる。
     #   実害（satoi.yさん 2026-08-10 23:56）：鑑定書の感想に機械が割り込み、
     #   しかも「ちゃんと視て、返すな」と、届かん約束までしてもうた。
-    if any(h["role"] == "user" and _ORDER_NO_RE.search(str(h["text"])) for h in history):
+    # ★★★2026-08-23：ここを history（＝呼び出し側が渡す直近200件）だけで見とった。
+    #   ★よう喋る人ほど、買うた時の注文番号が窓から押し出されて「買うてない人」に見える。
+    #   実測：MAKIKOさん306件・ema shimotsumaさん285件は、全体には注文番号があるのに
+    #   直近200件には無い。★買うてくれた人ほど、よけが外れる作りやった。本末転倒や。
+    #   せやから、判定は【全部のやりとり】から探す。読むんはキャッシュ済みの表やから重ならん。
+    _hist_all = history
+    try:
+        _hist_all = store.recent_line_chats(user_id, limit=5000) or history
+    except Exception:
+        pass
+    if any(h["role"] == "user" and _ORDER_NO_RE.search(str(h["text"])) for h in _hist_all):
         print(f"[line_bot] 購入者なので自動返信しない（店主が対応）: {user_id}")
+        return
+    # ★月額会員は、注文番号があろうがなかろうが機械に喋らせん（例：田中麻衣さん・くみこさんは
+    #   注文番号がそもそも履歴に無い）。疑わしきは黙る＝unknownも会員側に倒す
+    if _member_status(user) != "free":
+        print(f"[line_bot] 会員なので自動返信しない（店主が対応）: {user_id}")
         return
     if detect_signal(incoming) == "danger":
         snd(DANGER_REPLY)
@@ -2095,6 +2110,17 @@ def _post_offer_sweep(uid: str, user: dict, last: dict, age) -> bool:
         return False                      # 日付の床。導入前の分には絶対に届かせん
     if _is_minor(user):
         return False                      # 未成年は追いかけん
+    # ★★★2026-08-23：月額会員には、この経路からも一切喋らせん。
+    #   ここは hold の人を拾い直す口や。★会員は全員 hold やから、まともに素通りする。
+    #   会員よけは下の _reply_after_offer に任せとったが、あっちの判定は
+    #   「直近200件のやりとりの中に注文番号があるか」だけや。
+    #   ★★実測：会員13人のうち4人（田中麻衣さん・くみこさん・MAKIKOさん・
+    #     ema shimotsumaさん）で、その判定が効かん。よう喋る人ほど注文番号が
+    #     窓から押し出されて「買うてない人」に見える。田中麻衣さんは382件も溜まっとる。
+    #   ★★★月額を払てくれとる人に、機械が売り文句の続きを喋る。これ以上の事故はない。
+    if _member_status(user) != "free":
+        print(f"[sweep] 会員なので拾わん（店主の対応域）: {uid}")
+        return False
     if not _offer_already_sent(uid):
         return False                      # オファー前のholdは店主の対応域。触らん
     history = store.recent_line_chats(uid, limit=200)
