@@ -2204,9 +2204,16 @@ def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
                 except ValueError:
                     _ot = None
                 _oage = (now - _ot) if _ot else None
-                _sent = any(OFFER_FOLLOWUP_MARK in str(x["text"]) for x in rows[_offer_idx + 1:])
-                # 「案内はこれで最後」と書いた再オファーには、追いフォローを重ねん
-                _final = any("これで最後" in str(x["text"]) for x in rows[_offer_idx:])
+                # ★★★2026-08-23：この二つを rows[_offer_idx:] で探しとった。それが穴やった。
+                #   _resend_offer は「状況確認 → オファー本文 → 番号の段取り」の三通を送る。
+                #   ★送った瞬間、いちばん新しいオファーはこの再送分になる。つまり _offer_idx が
+                #     後ろへずれて、直前に置いた印（この前の話／これで最後）が判定の外へ出る。
+                #   ★★ほんで翌日、また同じ条件を満たす。毎日繰り返す作りやった。
+                #     実害：ある相談者には四日続けて飛んで、毎回「これで最後にする」と書いてあった。
+                #     いちばん多い人で七回。信用が削れるだけや。
+                #   ★★★せやから、印は【会話ぜんぶ】から探す。一遍送った人には、二度と送らん。
+                _sent = any(OFFER_FOLLOWUP_MARK in str(x["text"]) for x in rows)
+                _final = any("これで最後" in str(x["text"]) for x in rows)
                 if (_oage is not None and not _sent and not _final
                         and timedelta(hours=24) <= _oage <= timedelta(hours=72)):
                     user = store.get_line_user(uid)
