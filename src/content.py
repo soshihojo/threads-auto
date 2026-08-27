@@ -59,7 +59,54 @@ def sanitize(text: str) -> str:
     # ★2026-08-17：投稿にも4件出とった（「あいつはもう自分を見てへん」等）。
     #   読者にとっては大事な相手や。投稿・返信・鑑定書で同じ網を通す。
     text = soften_rude(text)
+    text = _break_bullets(text)
     return _ensure_line_url(text.strip())
+
+
+# ★★2026-08-26：番号や中黒の並びを、一行に詰めて出しとった。
+#   「番号だけでええ。①別れ話のあとで止まっとる ②急に冷たなった ③ずっと片思い」——
+#   これがThreadsやと一本の帯になって、選択肢が【選べる形】に見えん。
+#   選ばせるCTAなんやから、選択肢は縦に並べて、目で拾える形にする。
+_BULLET = "①②③④⑤⑥⑦⑧⑨"
+
+
+def _break_bullets(text: str) -> str:
+    """一行に詰まった ①②③ / ・ の並びを、改行して縦に並べる。"""
+    out = []
+    for line in text.split("\n"):
+        s = line.rstrip()
+        # ①②③ が同じ行に2つ以上あったら、番号の手前で割る
+        if sum(s.count(c) for c in _BULLET) >= 2:
+            # 先頭の導入（「番号だけでええ。」など）は残して、そこで一回切る
+            head, sep, rest = s.partition(_first_bullet(s))
+            head = head.strip()
+            body = sep + rest
+            parts = re.split(rf"\s*(?=[{_BULLET}])", body)
+            parts = [p.strip() for p in parts if p.strip()]
+            if head:
+                out.append(head)
+                out.append("")
+            out.extend(parts)
+            continue
+        # ・が同じ行に2つ以上でも同じ扱い
+        if s.count("・") >= 2 and not s.startswith("・"):
+            head, sep, rest = s.partition("・")
+            head = head.strip()
+            parts = [p.strip() for p in ("・" + rest).split("・") if p.strip()]
+            if head:
+                out.append(head)
+                out.append("")
+            out.extend("・" + p for p in parts)
+            continue
+        out.append(s)
+    return "\n".join(out)
+
+
+def _first_bullet(s: str) -> str:
+    for c in s:
+        if c in _BULLET:
+            return c
+    return ""
 
 
 _NATURAL_FREE = "最初は無料で視たるで。"

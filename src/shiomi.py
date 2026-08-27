@@ -39,7 +39,7 @@ from .llm import complete
 #     LINEのやりとりを遡っても、オーダー番号しか残ってへんから商品は分からん。
 #   ★★せやから【kantei_out に九十日の暦があるか】が、いちばん確実な見分け方になる。
 #     暦がある＝潮見の人＝5,980円。★ここを間違えて安い方を送ったら、あとから値上げは言えん。
-URL_TSUKIYOMI_SHIOMI = "https://buy.stripe.com/fZubJ09kGfdhab2fuG53O08"
+URL_TSUKIYOMI_SHIOMI = "https://buy.stripe.com/dRmdR88gCghlbf682e53O09"
 TSUKIYOMI_SHIOMI_PRICE = "月5,980円"
 
 SHIOMI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。個別鑑定書に添える「九十日の暦（潮見表）」を組む。

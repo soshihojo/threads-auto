@@ -232,9 +232,10 @@ def _consult_board() -> tuple[str, list[dict], dict]:
     #   ★★★せやから、ぶつかったら【紐付けん】。黙って間違うより、繋がらん方が百倍ましや。
     _clash = {}
     _list_users = _backend_attr("list_line_users")
+    _all_users = list(_list_users()) if _list_users else []
     if _list_users:
         _cand = {}
-        for u in _list_users():
+        for u in _all_users:
             key = (str(u.get("me_birth") or "").strip(), str(u.get("him_birth") or "").strip())
             if all(key):
                 _cand.setdefault(key, []).append(u)
@@ -253,9 +254,30 @@ def _consult_board() -> tuple[str, list[dict], dict]:
     for r in store.all_line_chats(days=45):
         chats_by_uid.setdefault(str(r.get("user_id") or ""), []).append(r)
 
+    # ★★★2026-08-26：会員に line_user_id が入っとったら、そっちを先に使う。
+    #   生年月日2つの一致だけで繋いどった頃は、会員が「新しい人を視てほしい」いうて
+    #   別の人の生年月日を送った瞬間に line_users.him_birth が上書きされて、紐付けが切れとった。
+    #   （実例：みきさん。純平さん1990-02-23で入会 → なるとさん1996-09-11を送ってきて切れた）
+    #   恋の相手が替わるんは相手の人生の側の話や。それでこっちが連絡でけへんなる作りがおかしい。
+    #   ★user_id は替わらん。せやからそっちを本線にして、生年月日は保険に落とす。
+    _by_uid = {str(u.get("user_id")): u for u in _all_users}
+    # ★逃げ道の経路（list_line_users が無い時）は _all_users が空になる。
+    #   そこで黙って生年月日に落ちてもうたら、この直しが効かんまま元の事故に戻る。
+    #   せやから、会員が持っとる user_id は一件ずつでも引きにいく。
+    if not _by_uid:
+        _get1 = _backend_attr("get_line_user")
+        for m in members:
+            _mu = str(m.get("line_user_id") or "").strip()
+            if _mu and _get1:
+                _u1 = _get1(_mu)
+                if _u1:
+                    _by_uid[_mu] = _u1
+
     board = []
     for m in members:
-        u = by_births.get((str(m["me_birth"]).strip(), str(m["him_birth"]).strip()))
+        u = _by_uid.get(str(m.get("line_user_id") or "").strip()) if m.get("line_user_id") else None
+        if u is None:
+            u = by_births.get((str(m["me_birth"]).strip(), str(m["him_birth"]).strip()))
         uid = str(u["user_id"]) if u else ""
         chats = chats_by_uid.get(uid, []) if uid else []
         # 末尾から続く「会員の発言」＝まだこっちが返せてないぶん
@@ -535,8 +557,22 @@ if view == VIEW_CONSULT:
                     _cur = incoming.strip()
                     _before = [h for h in _lmsgs
                                if str(h.get('text') or '').strip() not in _cur]
+                    # ★★★2026-08-25：検索画面のスクショに、機械で印を付ける。
+                    #   MAKIKOさんの回で事故った。昼に届いた八枚のスクショは全部
+                    #   【トーク内検索】の画面で、読み取り内容にも「検索窓に『文才』と入力」
+                    #   「検索結果 1/1」と、はっきり書いてあった。★過去を掘り返した画面や。
+                    #   ★★それを椿は「今日の掛け合い」として読んで、半年前の言葉
+                    #     （70まで頑張る／はやくしなきゃ）を今日の球として返した。
+                    #   ★★★会員に三回訂正させた。しかも一回認めたのに、次の返信でまた戻した。
+                    #     材料には答えが書いてあった。読み落としただけや。
+                    #     せやから、読み落としようがないように、こっちで印を付ける。
+                    def _mark(t: str) -> str:
+                        if any(k in t for k in ("検索窓", "検索バー", "検索欄", "トーク内検索", "検索モード")):
+                            return ("【★これはトーク内検索の画面や。過去を掘り返して見せてくれとる。"
+                                    "今日のやりとりやない。いつの話かは、必ず本人に確かめること】\n" + t)
+                        return t
                     _line_before = "\n".join(
-                        f"・{str(h.get('created_at'))[:16]} {str(h.get('text') or '')[:1500]}"
+                        f"・{str(h.get('created_at'))[:16]} {_mark(str(h.get('text') or ''))[:1600]}"
                         for h in _before)
                     if _line_before:
                         hist_str += ("\n\n◆それより前に会員からLINEに届いとったメッセージ（時系列。"
@@ -549,6 +585,29 @@ if view == VIEW_CONSULT:
                         hist_str += "\n\n◆この会員についての、消したらあかん資料（古うても必ず踏まえる）:\n" + \
                             "\n\n".join(f"【{str(h['month'])}】\n{str(h['reading'])[:4000]}" for h in _refs)
                     # ★★★呼び名の指定は、いちばん上に置く。ここを外すと事故る
+                    # ★★★2026-08-25：訂正が、次の返信で元に戻る事故を止める。
+                    #   MAKIKOさんの回。「2月の話だから今じゃない」と訂正されて、
+                    #   椿は22:45に「ごっちゃにした、拾い直すわ」と一回認めた。
+                    #   ★ところが23:16の次の返信で、また「今日また口にしとる」に戻した。
+                    #   ★★訂正は控えに残っとるのに、次の生成では他の材料に埋もれてまう。
+                    #   ★★★せやから、訂正の言葉を機械で拾て、いちばん上に立てる。
+                    #     一度直したことを、二度と戻さんために。
+                    _FIXWORDS = ("ちがいます", "違います", "ちゃいます", "そうじゃなく", "そうではなく",
+                                 "ですから", "前の話", "半年前", "昔の話", "今じゃない", "今の話やない",
+                                 "訂正", "間違って", "間違えて", "誤解", "ではありません", "ではないです")
+                    _fixes = [h for h in _lmsgs
+                              if any(w in str(h.get("text") or "") for w in _FIXWORDS)]
+                    if _fixes:
+                        hist_str = (
+                            "◆★★★会員から【訂正】が入っとる。ここを最優先で読むこと。\n"
+                            "　一度直したことを、次の返信で元に戻したらあかん。"
+                            "戻したら、会員は同じことを三回言わされることになる（実際に起きた）。\n"
+                            + "\n".join(f"　・{str(h.get('created_at'))[5:16]} 「{str(h.get('text') or '').strip()[:180]}」"
+                                        for h in _fixes)
+                            + "\n\n" + hist_str
+                        )
+                        st.warning(f"⚠️ 直近のやりとりに、会員からの訂正らしき発言が {len(_fixes)}件あります。"
+                                   "生成された返信が、その訂正を踏まえているか必ず確かめてください。")
                     if _span_h >= 3:
                         hist_str += ("\n\n◆★今の相談の各行の頭の［08/21 09:59］は、"
                                      "その一行が届いた日時や。"
@@ -671,7 +730,17 @@ if view == VIEW_MEMBERS:
                 st.error("生年月日を正しく選んでください。")
             else:
                 try:
-                    store.add_member(nick, reg_me, reg_him, memo)
+                    # ★2026-08-26：登録の時点でLINEのuser_idを控える（生年月日は後で替わる）
+                    _u = None
+                    try:
+                        _u = store.find_line_user_by_births(reg_me, reg_him)
+                    except Exception:
+                        pass
+                    try:
+                        store.add_member(nick, reg_me, reg_him, memo,
+                                         line_user_id=str(_u.get("user_id")) if _u else "")
+                    except TypeError:
+                        store.add_member(nick, reg_me, reg_him, memo)
                     st.success(f"「{nick}」を登録しました")
                     st.rerun()
                 except Exception as e:

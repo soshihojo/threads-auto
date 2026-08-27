@@ -208,8 +208,8 @@ def cmd_kantei(args: argparse.Namespace) -> None:
     print("━" * 72)
     print(_DELIVERY_REMINDER)
     # ★2026-08-21：月詠みの案内は、買うた商品で値段が分かれる。ここで一度だけ念を押す。
-    print("🌙 感想が返ってきた時の月詠みは【月3,980円】や")
-    print("   https://buy.stripe.com/6oU9ASfJ41mr82Ubeq53O03")
+    print("🌙 感想が返ってきた時の月詠みは【月5,980円】や（★2026-08-26に一本化）")
+    print("   https://buy.stripe.com/dRmdR88gCghlbf682e53O09")
     print("   ★ただし、この人が潮見（九十日の暦つき）を買うとったら【5,980円】の方や。")
     print("     kantei_out に『九十日の暦_名前.pdf』があるかどうかで見分ける")
     print("━" * 72)
@@ -337,9 +337,26 @@ def cmd_join(args: argparse.Namespace) -> None:
     note = f"月詠み入会 {datetime.now().strftime('%Y-%m-%d')}"
     if args.plan:
         note += f"／{args.plan}"
-    mid = store.add_member(nickname, me, him, note)
+    # ★2026-08-26：入会の時点でLINEの user_id を控えとく。
+    #   生年月日は、あとで会員が「新しい人を視てほしい」と送ってきた時に上書きされる。
+    #   user_id は替わらんので、そっちを本線にする。
+    _u = None
+    try:
+        _u = store.find_line_user_by_births(me, him)
+    except Exception:
+        pass
+    _uid = str(_u.get("user_id")) if _u else ""
+    try:
+        mid = store.add_member(nickname, me, him, note, line_user_id=_uid)
+    except TypeError:          # 古いバックエンド（sqlite）向けの逃げ道
+        mid = store.add_member(nickname, me, him, note)
     print(f"✅ 会員登録: id={mid}  {nickname}")
-    print(f"   生年月日 あんた={me} / 彼={him}  ← これでLINEと自動で紐付く")
+    print(f"   生年月日 あんた={me} / 彼={him}")
+    if _uid:
+        print(f"   LINE紐付け: 「{_u.get('display_name')}」 {_uid[:16]}… ← user_idで固定した")
+    else:
+        print("   ⚠️ LINEが見つからん。生年月日が診断の時と違う可能性がある。")
+        print("      あとで手当てする時は store.set_member_line_user(会員id, user_id)")
 
     # 鑑定書を参照資料として入れる。★これが有ると無いとで、返信の精度がまるで変わる
     stem = args.kantei_name or args.line_name

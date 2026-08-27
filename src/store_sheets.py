@@ -48,7 +48,7 @@ TABLES = {
     "draft_replies": ["reply_id", "post_id", "username", "in_text", "draft_text", "status", "created_at", "sent_at"],
     "leads": ["reply_id", "post_id", "username", "text", "keyword", "notified", "created_at"],
     "scheduled_posts": ["id", "text", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at"],
-    "members": ["id", "nickname", "me_birth", "him_birth", "note", "created_at"],
+    "members": ["id", "nickname", "me_birth", "him_birth", "note", "created_at", "line_user_id"],
     "readings": ["id", "member_id", "month", "worry", "reading", "created_at"],
     "line_users": ["user_id", "display_name", "me_birth", "him_birth", "bot", "note", "created_at", "updated_at"],
     "line_chats": ["id", "user_id", "role", "text", "created_at"],
@@ -443,11 +443,35 @@ def _next_id_for(name: str) -> int:
 
 
 # ---- members（サブスク会員） ----
-def add_member(nickname: str, me_birth: str, him_birth: str, note: str = "") -> int:
+def add_member(nickname: str, me_birth: str, him_birth: str, note: str = "",
+               line_user_id: str = "") -> int:
+    """★★★2026-08-26：line_user_id を持たせるようにした。
+
+    それまでは【生年月日2つの一致】だけで会員とLINEを繋いどった。
+    せやけど、会員が「新しい人を視てほしい」いうて別の人の生年月日を送ると、
+    line_users.him_birth がその新しい人のもんに上書きされる。
+    そうなった瞬間、会員との紐付けが切れて、画面に
+    「この会員のLINEが見つかりません」が出て、送信ボタンが消える。
+    （実例：みきさん。純平さん 1990-02-23 で入会したあと、
+      なるとさん 1996-09-11 を視てほしいと送ってきて、その場で切れた）
+    ★恋の相手が替わるんは、こっちの都合やのうて相手の人生の側の話や。
+      それで連絡が取れんようになる作りの方がおかしい。
+      せやから、替わらんもん（user_id）で繋ぐ。生年月日は保険に落とす。
+    """
     new_id = _next_id_for("members")
     _append("members", {"id": new_id, "nickname": nickname, "me_birth": me_birth,
-                        "him_birth": him_birth, "note": note, "created_at": _now()})
+                        "him_birth": him_birth, "note": note, "created_at": _now(),
+                        "line_user_id": line_user_id})
     return new_id
+
+
+def set_member_line_user(member_id, line_user_id: str) -> bool:
+    """会員に LINE の user_id を結びつける（後からの手当て・付け替え用）。"""
+    idx = _find_row("members", "id", member_id)
+    if not idx:
+        return False
+    _update_cells("members", idx, {"line_user_id": str(line_user_id).strip()})
+    return True
 
 
 def list_members() -> list[dict]:
