@@ -1,0 +1,22 @@
+name: send-pending-replies
+# ★pending のまま取り残された返信を、手で送るためのワークフロー。
+#   窓（lookback_posts）の外に落ちた投稿のコメントは、巡回では拾えん。
+#   ★手元のトークンは切れとることがあるんで、ここ（Actions）から送る。
+on:
+  workflow_dispatch: {}
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    env:
+      STORE_BACKEND: sheets
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_KEY: ${{ secrets.GOOGLE_SHEET_KEY }}
+      THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+      THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - run: python tools/send_pending.py
