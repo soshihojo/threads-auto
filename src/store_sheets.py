@@ -181,14 +181,24 @@ def _append(name: str, row: dict) -> None:
     _CACHE.pop(name, None)  # 書き込みでキャッシュ無効化
 
 
-def _find_row(name: str, key_col: str, key_val) -> int | None:
-    """key_col==key_val の実シート行番号（1始まり）を返す。無ければNone。"""
+def _find_rows(name: str, key_col: str, key_val) -> list[int]:
+    """key_col==key_val の実シート行番号を「全部」返す。
+
+    ★2026-08-29 新設。巡回が同時に走ると、同じ reply_id が2行積まれることがある
+    （add_draft の重複チェックと _append の間に隙間があるせい）。
+    そのとき1行目だけ触っとると、2行目が pending のまま居座って「未返信」に化ける。
+    実際に @smiling0801・@sachiko.8018 の二件がそれで、送信済みなのに台帳がずれた。
+    """
     headers = TABLES[name]
     col_idx = headers.index(key_col)
-    for i, row in enumerate(_data_rows(name)):
-        if col_idx < len(row) and str(row[col_idx]) == str(key_val):
-            return FIRST_DATA_ROW + i
-    return None
+    return [FIRST_DATA_ROW + i for i, row in enumerate(_data_rows(name))
+            if col_idx < len(row) and str(row[col_idx]) == str(key_val)]
+
+
+def _find_row(name: str, key_col: str, key_val) -> int | None:
+    """key_col==key_val の実シート行番号（1始まり）を返す。無ければNone。"""
+    rows = _find_rows(name, key_col, key_val)
+    return rows[0] if rows else None
 
 
 def _update_cells(name: str, row_idx: int, updates: dict) -> None:
@@ -280,17 +290,17 @@ def recent_sent_drafts(limit: int = 12) -> list[str]:
     return [str(r["draft_text"]) for r in rows[:limit]]
 
 def set_draft_status(reply_id: str, status: str, *, sent: bool = False) -> None:
-    idx = _find_row("draft_replies", "reply_id", reply_id)
-    if idx:
-        updates = {"status": status}
-        if sent:
-            updates["sent_at"] = _now()
+    updates = {"status": status}
+    if sent:
+        updates["sent_at"] = _now()
+    # ★同じ reply_id の行が二重に積まれとることがある。1行目だけ直したら
+    #   残りが pending のまま居座って「未返信」に化ける。全部そろえる。
+    for idx in _find_rows("draft_replies", "reply_id", reply_id):
         _update_cells("draft_replies", idx, updates)
 
 
 def update_draft_text(reply_id: str, draft_text: str) -> None:
-    idx = _find_row("draft_replies", "reply_id", reply_id)
-    if idx:
+    for idx in _find_rows("draft_replies", "reply_id", reply_id):
         _update_cells("draft_replies", idx, {"draft_text": draft_text})
 
 
