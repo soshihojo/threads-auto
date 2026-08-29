@@ -22,9 +22,11 @@ from src import store                                 # noqa: E402
 
 def main() -> int:
     store.init_db()
-    pend = [r for r in store.list_drafts(status="pending")] \
-        if hasattr(store, "list_drafts") else \
-        [r for r in store._records("draft_replies") if str(r.get("status")) == "pending"]
+    # ★store は `from .store_sheets import *` で名前を配っとる。
+    #   アンダースコア始まりの _records は * で入らんので、実体を直に見に行く。
+    from src import store_sheets as _ss
+    _ss._CACHE.clear()
+    pend = [r for r in _ss._records("draft_replies") if str(r.get("status")) == "pending"]
     print(f"pending {len(pend)}件")
     if not pend:
         print("送るもんは無い。")
