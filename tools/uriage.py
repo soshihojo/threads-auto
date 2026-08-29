@@ -26,7 +26,13 @@ from src import store_sheets as ss  # noqa: E402
 KANTEI, SHIOMI = 3980, 9800
 LEDGER = Path(__file__).resolve().parents[1] / "kantei_out" / "_潮見を買うた人.txt"
 # オファーを送ったかどうかの目印（本文が変わっても拾えるように複数持つ）
-OFFER_MARKS = ("9,980円 → 3,980円", "29,800円 → 9,800円")
+# ★★★2026-08-30：オファーの数え方を【商品URL】に変えた。
+#   前は「9,980円 → 3,980円」の文字で数えとった。★この表記は8/15からのもんで、
+#   8/7〜8/14 に出したオファーが丸ごと抜けとった（実測で227回ぶん）。
+#   値引き表記は今後も変わる。★URLは商品そのものやから、書き方が変わっても残る。
+KANTEI_URLS = ("6a777f09db80bae422c65694", "6a75ab0eae8e9e00447387f2")  # 二つ目は旧URL
+SHIOMI_URL = "6a7d88b780c8d813567b3a3f"
+OFFER_MARKS = KANTEI_URLS + (SHIOMI_URL,)
 NEW_OFFER_MARK = "ウチが薦めるんは、こっちや"      # ★新しい型の目印
 
 
@@ -94,7 +100,11 @@ def main() -> int:
             continue
         t = str(r.get("text") or "")
         if r.get("role") == "user":
-            if re.fullmatch(r"\d{10}", t.strip()):
+            # ★★2026-08-30：前は fullmatch やった＝「番号だけ」の人しか数えられん。
+            #   実際は「オーダー番号 9763585092」「購入しました\n8137027212」と
+            #   書いてくる人がぎょうさんおる。★実測で28件が抜けとった。
+            m = re.search(r"(?<!\d)\d{10}(?!\d)", re.sub(r"[\s\-]", "", t))
+            if m:
                 buys.append((d, r["user_id"]))
         else:
             if any(m in t for m in OFFER_MARKS):
