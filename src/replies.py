@@ -246,6 +246,17 @@ def process_replies(client: ThreadsClient) -> dict:
                 stats["auto_sent"] += 1
                 print(f"[replies] 自動送信 {stats['auto_sent']}件目: @{ruser}")
             except Exception as e:
-                print(f"[replies] 自動送信失敗 {rid}: {e}")
+                # ★★★2026-08-29：ここで既読の印を外す。
+                #   ★前は、送信に失敗しても processed_replies の印が残ったままやった。
+                #     ★★せやから次の巡回で拾い直されん。★永久に取り残される。
+                #   ★実害：8/12・8/14×2・8/23 の四件が pending のまま半月放置されとった。
+                #     下書きは出来とるのに、誰にも届いてへん。
+                #   ★★下書きの生成に失敗した時は unmark しとる（上の except）。
+                #     ★送信の失敗だけ、なんでか外してへんかった。★同じ扱いにする。
+                print(f"[replies] 自動送信失敗（既読を外して次の巡回で拾い直す） {rid}: {e}")
+                try:
+                    store.unmark_reply_seen(rid)
+                except Exception as e2:
+                    print(f"[replies] 既読の解除にも失敗（この一件は手で見る）: {e2}")
 
     return stats
