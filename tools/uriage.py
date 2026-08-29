@@ -49,6 +49,11 @@ def _is_shiomi(display: str, ledger: set[str]) -> bool:
     return _norm(display) in ledger if display else False
 
 
+def is_shiomi_row(user_id: str, display: str, ledger: set[str]) -> bool:
+    """user_id が台帳にあればそれで、無ければ表示名で判定する。"""
+    return (str(user_id) in ledger) or _is_shiomi(display, ledger)
+
+
 def _shiomi_names() -> set[str]:
     if not LEDGER.exists():
         return set()
@@ -58,7 +63,12 @@ def _shiomi_names() -> set[str]:
             continue
         parts = ln.split("\t")
         if len(parts) >= 2:
-            # 二列目＝呼び名、三列目＝LINEの表示名。両方を照合に使う
+            # ★2026-08-29：四列目に user_id があったら、それだけを使う。
+            #   表示名が同じ人が二人おる時（実例「じゅんこ」）、名前で照合したら別人まで拾う。
+            if len(parts) >= 4 and parts[3].strip().startswith("U"):
+                out.add(parts[3].strip())
+                continue
+            # 無い時は今まで通り、呼び名と表示名で照合する
             for cell in parts[1:3]:
                 if cell.strip():
                     out.add(_norm(cell))
@@ -107,7 +117,7 @@ def main() -> int:
     for d in days:
         o = len(off_day.get(d, ()))
         us = buy_day.get(d, [])
-        s = sum(1 for u in us if _is_shiomi(users.get(u, ""), shiomi))
+        s = sum(1 for u in us if is_shiomi_row(u, users.get(u, ""), shiomi))
         y = s * SHIOMI + (len(us) - s) * KANTEI
         rate = f"{100*len(us)/o:5.1f}%" if o else "    —"
         print(f"{d}  {o:7d}  {len(us):5d}  {s:6d}  {y:9,d}  {rate}")

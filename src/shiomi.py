@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import lint
-from .kantei import (CHROME, OUT_DIR, DELIVERY_CLOSING, _internal_brief,
+from .kantei import (CHROME, OUT_DIR, _internal_brief,
                      add_honorific, soften_rude, strip_ai_leak,
                      strip_instruction_leak, strip_jargon, strip_markdown)
 from .llm import complete
@@ -437,10 +437,15 @@ _CAL_NOTE_HEAD = """ほんで、九十日の暦の方や。ここは読み方が
 見どころを三つだけ、先に言うとく。
 """
 
-_CAL_NOTE_TAIL = """読んだら、感想を聞かせてな。
-どこが一番刺さったか、逆にどこが腑に落ちんかったか。
-それが分かると、次にあんたを視るときの精度が変わるんや。だから遠慮せんと、正直に返してくれ。
-"""
+# ★★★2026-08-28：ここに「感想を聞かせてな」と月詠みの線引きを入れとったが、外した。
+#   ★鑑定書の納品文（＝一通目）に、まったく同じ文が入っとる。
+#     二通続けて送るんやから、読む側には同じ締めが二回来る形になっとった。
+#     （実際、千佳さんの回で「感想依頼」と「線引き」が一字一句おんなじで二回出た）
+#   ★★二通目は、一通目の続きや。締めは一通目で済んどる。
+#     二通目は【暦にしか無い話】だけで終わらせる。
+#   ★★★感想依頼と月詠みの線引きは、必ず【一通目にだけ】置く。
+_CAL_NOTE_TAIL = """この暦は、今日から手元に置いといたらええ。
+今日が動く日か、手を止める日か——迷た時は、それだけ見てくれたらええからな🌙"""
 
 
 def generate_calendar_note(name: str, s: "Shiomi", details: str) -> str:
@@ -466,7 +471,8 @@ def generate_calendar_note(name: str, s: "Shiomi", details: str) -> str:
         if attempt == 1:
             user += ("\n\n【書き直しの指示】前回の出力に、彼を主語にした未来の記述が混ざっとった。"
                      "例：" + bad[0].text[:50] + "。すべての行の主語を相談者にして書き直すこと。")
-    return f"{_CAL_NOTE_HEAD}\n{mid}\n\n{_CAL_NOTE_TAIL}\n{DELIVERY_CLOSING}"
+    # ★DELIVERY_CLOSING（月詠みの線引き）は付けん。一通目に入っとる。上のコメント参照
+    return f"{_CAL_NOTE_HEAD}\n{mid}\n\n{_CAL_NOTE_TAIL}"
 
 
 def make_shiomi(name: str, me_birth: str, him_birth: str, details: str,

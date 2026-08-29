@@ -113,6 +113,8 @@ def check(text: str, name: str = "", allow_plain: bool = False) -> list[str]:
                     f"「{base}」→「{name}」に直すこと"
                 )
     bad += _check_hearing_escapes(text)
+    bad += _check_time_greeting(text)
+    bad += _check_foreign_junk(text)
     return bad
 
 
@@ -132,6 +134,62 @@ _ESCAPES = (
     (r"答えられるとこだけ|書けるとこだけ|埋まるとこだけ", "虫食いを先に許可せん。相手が「書けん」と言うてきた時だけ緩める"),
     (r"[2２]営業日", "納期はこっちから言わん。聞かれた時だけ答える（特商法とオファー文には残す）"),
 )
+
+
+# ★★★2026-08-28：夜の22時に「おはようさん」で始まる文を三通も書いた。
+#   ★なんでか。時刻を一回も見んと、「昨日の話の続きやから朝やろ」で決めつけたからや。
+#   ★★ほんで、時刻を合わせるだけでは足りん。
+#     ★こっちが書く時刻と、店主が実際にLINEで送る時刻は【ちがう】。
+#       夜に書いて、朝に送ることもある。その逆もある。
+#     ★★せやから、時間帯に寄りかかった挨拶は【そもそも書かん】。
+#       相手の呼び名から入るか、用件から入る。それで一つも困らん。
+_TIME_GREETINGS = ("おはよう", "こんばんは", "こんにちわ", "こんにちは",
+                   "朝から", "今朝", "今晩")
+
+
+# ★★★2026-08-29：生成文の末尾に、よその著作権表記が付いとった。
+#   `Copyright © 2025 Ken Kawamura. All Rights Reserved. GACHACOPI.COM`
+#   ★コードにもルールにもチャット記録にも無い文字列や。
+#     スクショの書き起こしツールか、貼り付けの経路で混ざったもんやと思われる。
+#   ★★他人の著作権表記を付けたまま顧客に送ったら、洒落にならん。ここで止める。
+_JUNK = (
+    ("Copyright", "著作権表記"), ("copyright", "著作権表記"),
+    ("All Rights Reserved", "著作権表記"), ("All rights reserved", "著作権表記"),
+    ("©", "コピーライト記号"),
+    (".COM", "よそのURL/社名"), (".com/", "よそのURL"),
+    ("http://", "URL"),
+    ("読み取り内容", "スクショの書き起こしが本文に混ざっとる"),
+    ("※話者の左右は", "書き起こしの但し書きが本文に混ざっとる"),
+    ("[画像を送付", "システムの印が本文に混ざっとる"),
+    ("生成AI", "AIの話"), ("プロンプト", "AIの話"),
+)
+
+
+def _check_foreign_junk(text: str):
+    """よそから紛れ込んだ異物が本文に残ってへんか見る。"""
+    out = []
+    for w, why in _JUNK:
+        if w in text:
+            # ★椿が自分で出す商品リンクは通す（STORES／Stripe／note）
+            #   ★2026-08-29：stores.jp しか見てへんかったんで、
+            #     月詠みの案内（buy.stripe.com）だけの文が弾かれた。
+            _OURS = ("stores.jp", "buy.stripe.com", "note.com/tsubaki_honne")
+            if w in (".com/", "http://", ".COM") and any(o in text for o in _OURS):
+                continue
+            out.append(f"★異物が混ざっとる（{w} ＝ {why}）。顧客に出す文から必ず消すこと")
+    return sorted(set(out))
+
+
+def _check_time_greeting(text: str):
+    """時間帯に寄りかかった挨拶が入ってへんか見る（引用の中は除く）。"""
+    head = "\n".join(text.splitlines()[:6])          # 挨拶は頭にしか出えへん
+    head = re.sub(r"「[^」]*」", "", head)             # 相手の言葉の引用は見逃す
+    hit = [w for w in _TIME_GREETINGS if w in head]
+    if hit:
+        return [f"★時間帯の挨拶が入っとる（{'/'.join(hit)}）。"
+                f"書く時刻と送る時刻はちがうんやから、time-of-day に寄りかからんこと。"
+                f"呼び名か用件から入る"]
+    return []
 
 
 def _check_hearing_escapes(text: str):

@@ -212,6 +212,300 @@ def _unmangle(text: str) -> str:
 
 
 @st.cache_data(ttl=25, show_spinner=False)
+# ---------------- 返信の材料を組む（★一人ずつでも一括でも、ここを通す） ----------------
+#
+# ★★★2026-08-29 切り出し。もともと「この子専用の返信を作る」ボタンの中にべた書きしとった。
+#   ★せやけど、この五千字には、事故るたびに足してきた対策が全部入っとる——
+#     ・いま答えよとする相談を履歴から外す（同じ話を二度目扱いせんため）
+#     ・検索画面のスクショに印を付ける（過去を今日の話として読まんため）
+#     ・会員の訂正を機械で拾て、いちばん上に立てる（直したことを戻さんため）
+#     ・呼び名の指定を先頭に置く／日をまたいだ相談に行ごとの日時を付ける
+#   ★★一括生成のために別のコードを書いたら、この対策が片方だけに乗る。
+#   ★★★せやから一本にして、一人ずつからも一括からも、同じものを呼ぶ。
+def _build_consult_context(cb, cmem, chist, incoming, _lmsgs, _refs, _span_h):
+    """返信生成に渡す hist_str を組む。戻り値は (hist_str, 画面に出す警告のリスト)。"""
+    warns = []
+    _past = [h for h in chist[:13]
+             if str(h.get('worry') or '').strip() != incoming.strip()][:12]
+    hist_str = "\n\n".join(
+        f"◆{str(h['created_at'])[:16]} 会員の相談: {str(h['worry'])[:800]}\n"
+        f"　椿の返信: {str(h['reading'])[:1600]}"
+        for h in reversed(_past)
+    )
+    # ★★★2026-08-23：ここで【いま答えよとする相談】を履歴から外す。
+    #   相談欄は未返信ぶんを自動で入れとる＝LINE直近と中身が丸かぶりや。
+    #   実測：ema shimotsumaさん8/8件、riyoさん5/5件、なつみさん4/4件が重複しとった。
+    #   ★重なったまま渡すと、椿には【今の相談】と【前にも来とった同じ話】の
+    #     二回に見える。ほんで「さっきも言うてたな」「その話は前に聞いた」と、
+    #     ★★初めて聞いた話を二度目みたいに扱う。これが不自然さの正体のひとつ。
+    #   ★★★せやから、相談欄に入っとる文はここから落とす。残りは「それより前の話」。
+    _cur = incoming.strip()
+    _before = [h for h in _lmsgs
+               if str(h.get('text') or '').strip() not in _cur]
+    # ★★★2026-08-25：検索画面のスクショに、機械で印を付ける。
+    #   MAKIKOさんの回で事故った。昼に届いた八枚のスクショは全部
+    #   【トーク内検索】の画面で、読み取り内容にも「検索窓に『文才』と入力」
+    #   「検索結果 1/1」と、はっきり書いてあった。★過去を掘り返した画面や。
+    #   ★★それを椿は「今日の掛け合い」として読んで、半年前の言葉
+    #     （70まで頑張る／はやくしなきゃ）を今日の球として返した。
+    #   ★★★会員に三回訂正させた。しかも一回認めたのに、次の返信でまた戻した。
+    #     材料には答えが書いてあった。読み落としただけや。
+    #     せやから、読み落としようがないように、こっちで印を付ける。
+    def _mark(t: str) -> str:
+        if any(k in t for k in ("検索窓", "検索バー", "検索欄", "トーク内検索", "検索モード")):
+            return ("【★これはトーク内検索の画面や。過去を掘り返して見せてくれとる。"
+                    "今日のやりとりやない。いつの話かは、必ず本人に確かめること】\n" + t)
+        return t
+    _line_before = "\n".join(
+        f"・{str(h.get('created_at'))[:16]} {_mark(str(h.get('text') or ''))[:1600]}"
+        for h in _before)
+    if _line_before:
+        hist_str += ("\n\n◆それより前に会員からLINEに届いとったメッセージ（時系列。"
+                     "[画像を送付]は画像の自動読み取り内容）。"
+                     "★これは【今の相談】より前の話や。今の相談と混同せんこと:\n"
+                     + _line_before)
+    # ★相談以外の資料（ヒアリング原文・訂正・最新の意向・暦）は、
+    #   古うても必ず渡す。ここが落ちると、直したはずの間違いがまた出る
+    if _refs:
+        hist_str += "\n\n◆この会員についての、消したらあかん資料（古うても必ず踏まえる）:\n" + \
+            "\n\n".join(f"【{str(h['month'])}】\n{str(h['reading'])[:4000]}" for h in _refs)
+    # ★★★呼び名の指定は、いちばん上に置く。ここを外すと事故る
+    # ★★★2026-08-25：訂正が、次の返信で元に戻る事故を止める。
+    #   MAKIKOさんの回。「2月の話だから今じゃない」と訂正されて、
+    #   椿は22:45に「ごっちゃにした、拾い直すわ」と一回認めた。
+    #   ★ところが23:16の次の返信で、また「今日また口にしとる」に戻した。
+    #   ★★訂正は控えに残っとるのに、次の生成では他の材料に埋もれてまう。
+    #   ★★★せやから、訂正の言葉を機械で拾て、いちばん上に立てる。
+    #     一度直したことを、二度と戻さんために。
+    _FIXWORDS = ("ちがいます", "違います", "ちゃいます", "そうじゃなく", "そうではなく",
+                 "ですから", "前の話", "半年前", "昔の話", "今じゃない", "今の話やない",
+                 "訂正", "間違って", "間違えて", "誤解", "ではありません", "ではないです")
+    _fixes = [h for h in _lmsgs
+              if any(w in str(h.get("text") or "") for w in _FIXWORDS)]
+    if _fixes:
+        hist_str = (
+            "◆★★★会員から【訂正】が入っとる。ここを最優先で読むこと。\n"
+            "　一度直したことを、次の返信で元に戻したらあかん。"
+            "戻したら、会員は同じことを三回言わされることになる（実際に起きた）。\n"
+            + "\n".join(f"　・{str(h.get('created_at'))[5:16]} 「{str(h.get('text') or '').strip()[:180]}」"
+                        for h in _fixes)
+            + "\n\n" + hist_str
+        )
+        st.warning(f"⚠️ 直近のやりとりに、会員からの訂正らしき発言が {len(_fixes)}件あります。"
+                   "生成された返信が、その訂正を踏まえているか必ず確かめてください。")
+    if _span_h >= 3:
+        hist_str += ("\n\n◆★今の相談の各行の頭の［08/21 09:59］は、"
+                     "その一行が届いた日時や。"
+                     f"この相談は{_span_h/24:.1f}日ぶんが溜まったもんで、"
+                     "★下の行ほど新しい。"
+                     "古い行を『今さっきの話』として扱わんこと。"
+                     "★★いちばん答えてほしいんは、たいてい【いちばん下の行】や。")
+    _who = (cb.get("line_name") or cb["nickname"]).strip()
+    _memo = str(cmem.get("note") or "").strip()
+    hist_str = (
+        f"◆この会員の呼び名：{_who}"
+        + (f"\n◆この会員についての決まりごと：{_memo}" if _memo else "")
+        + "\n★呼び名は、ここに書いてあるとおりに書くこと。"
+          "『さん』を勝手に足したり外したりせん。\n\n"
+        + hist_str
+    )
+    return hist_str, warns
+
+
+# ---------------- 一括モードの部品（★下書きを作る／送る） ----------------
+def _draft_one(cb) -> dict:
+    """一人ぶんの下書きを作る。★一人ずつの画面と、まったく同じ材料を通す。"""
+    cmem = {"id": cb["id"], "nickname": cb["nickname"], "note": cb.get("note", ""),
+            "me_birth": cb["me_birth"], "him_birth": cb["him_birth"]}
+    # 相談欄に入れるんは「直近のまとまり」＝一人ずつの画面の既定と同じ
+    _rows_ts = cb.get("waiting_recent_ts") or cb.get("waiting_ts")
+    incoming = cb["waiting_recent"] or cb["waiting"]
+    _span_h = 0.0
+    if _rows_ts and len(_rows_ts) >= 2:
+        try:
+            _span_h = (datetime.fromisoformat(_rows_ts[-1][0])
+                       - datetime.fromisoformat(_rows_ts[0][0])).total_seconds() / 3600
+        except Exception:
+            _span_h = 0.0
+    if _span_h >= 3:
+        incoming = "\n".join(f"［{ts[5:16].replace('T', ' ')}］{x}" for ts, x in _rows_ts)
+
+    _all_hist = store.list_readings(cmem["id"], limit=50)
+    _kantei_rows = [h for h in _all_hist if h["month"] == "個別鑑定書"]
+    kantei_text = str(_kantei_rows[0]["reading"]) if _kantei_rows else ""
+    chist = [h for h in _all_hist if h["month"] == "相談"]
+    _refs = [h for h in _all_hist if h["month"] not in ("相談", "個別鑑定書")]
+    _lmsgs = [r for r in (cb.get("chats") or []) if str(r.get("role")) == "user"][-40:]
+
+    hist_str, warns = _build_consult_context(cb, cmem, chist, incoming, _lmsgs, _refs, _span_h)
+    res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str,
+                                     kantei=kantei_text)
+    # ★控えに保存するんも、一人ずつの時と同じ作法にする（同じ相談文なら上書き）
+    reading_id = None
+    try:
+        _dup = next((h for h in _all_hist if h["month"] == "相談"
+                     and str(h["worry"]).strip() == incoming.strip()), None)
+        if _dup:
+            reading_id = _dup["id"]
+            store.update_reading(reading_id, res["reply"])
+        else:
+            reading_id = store.add_reading(cmem["id"], "相談", incoming.strip(), res["reply"])
+    except Exception as e:
+        warns.append(f"控えの保存に失敗（返信自体は出とる）: {e}")
+    return {"reply": res["reply"], "incoming": incoming, "warns": warns, "reading_id": reading_id}
+
+
+def _send_one(cb, text: str, reading_id=None) -> tuple[bool, str]:
+    """一人に送る。★記録は push 側で一回だけ入る（ここでは add_line_chat を呼ばん）。
+    ここで呼んだら、会員の画面に同じ返信が二回並ぶ（2026-08-22に53件やらかしとる）。"""
+    text = (text or "").strip()
+    if not text:
+        return False, "文面が空や"
+    if not cb.get("uid"):
+        return False, "LINEが紐付いてへん"
+    if not env("LINE_CHANNEL_ACCESS_TOKEN"):
+        return False, "LINE_CHANNEL_ACCESS_TOKEN が未設定や"
+    try:
+        from src import line_bot as _lb
+        _push = getattr(_lb, "push_long_text", None) or _lb.push_text
+        if not _push(cb["uid"], text):
+            return False, "LINE側がエラーを返した"
+        if reading_id:
+            try:
+                store.update_reading(reading_id, text)   # 送った文面で控えを揃える
+            except Exception as e:
+                return True, f"{cb['nickname']}さんへ送信（★控えの更新は失敗：{e}）"
+        return True, f"{cb['nickname']}さんに送信しました"
+    except Exception as e:
+        return False, str(e)
+
+
+# ---------------- 未返信ぶんを、まとめて下書きする ----------------
+#
+# ★★2026-08-29 新設。未返信が何人も溜まる日がある。
+#   一人ずつ選んで、材料を確かめて、生成して、送って——を人数ぶん繰り返すんは、しんどい。
+#   ★せやから、下書きだけ先にまとめて作る。
+# ★★★ただし、送信は必ず【読んでから】や。
+#   作った端から自動で飛ぶ形にはせん。顧客に出す文やからな。
+#   ・一人ずつ送る … 各人の下書きの下にボタン
+#   ・まとめて送る … チェックを入れた人だけ、二段階の確認を通して送る
+def _render_bulk_consult(waiting, board):
+    import time as _t
+    if not waiting:
+        st.success("未返信の会員はおらんで。ようやっとる。")
+        return
+
+    st.caption(f"未返信 {len(waiting)}人ぶんの下書きを作ります。"
+               "一人あたり十数秒かかるので、人数が多い日は少し待ってな。")
+
+    _key = "con_bulk_results"
+    c1, c2 = st.columns([1, 1])
+    if c1.button("✍️ ぜんぶ下書きする", type="primary", use_container_width=True,
+                 key="con_bulk_run"):
+        st.session_state[_key] = {}
+        _bar = st.progress(0.0, text="はじめます…")
+        for i, cb in enumerate(waiting, 1):
+            _bar.progress((i - 1) / len(waiting), text=f"{cb['nickname']}さんを視てます…（{i}/{len(waiting)}）")
+            try:
+                st.session_state[_key][str(cb["id"])] = _draft_one(cb)
+            except Exception as e:
+                st.session_state[_key][str(cb["id"])] = {"error": str(e)}
+            _t.sleep(0.2)          # 立て続けに投げすぎん
+        _bar.progress(1.0, text="できたで")
+        st.rerun()
+    if c2.button("🗑 下書きを捨てる", use_container_width=True, key="con_bulk_clear"):
+        st.session_state.pop(_key, None)
+        st.rerun()
+
+    res = st.session_state.get(_key) or {}
+    if not res:
+        st.info("「ぜんぶ下書きする」を押すと、ここに一人ずつ並びます。")
+        return
+
+    _ok = [cb for cb in waiting if not (res.get(str(cb["id"])) or {}).get("error")]
+    _ng = [cb for cb in waiting if (res.get(str(cb["id"])) or {}).get("error")]
+    if _ng:
+        st.error(f"作れんかった人が {len(_ng)}人おる：" + "、".join(x["nickname"] for x in _ng))
+
+    st.divider()
+    _send_ids = []
+    for cb in waiting:
+        r = res.get(str(cb["id"])) or {}
+        if r.get("error"):
+            with st.expander(f"⚠️ {cb['nickname']}　（失敗）", expanded=False):
+                st.error(r["error"])
+            continue
+        with st.expander(f"🔴 {cb['nickname']}　（{cb['n_recent']}件・{cb['recent_from']}〜）",
+                         expanded=True):
+            for w in r.get("warns", []):
+                st.warning(w)
+            st.caption("届いとる相談")
+            st.text(r["incoming"][:600] + ("…" if len(r["incoming"]) > 600 else ""))
+            edited = st.text_area("返信（直せます）", value=r["reply"], height=260,
+                                  key=f"bulk_out_{cb['id']}")
+            st.session_state[_key][str(cb["id"])]["edited"] = edited
+            b1, b2 = st.columns([1, 1])
+            if b1.checkbox("まとめて送る対象にする", key=f"bulk_pick_{cb['id']}", value=True):
+                _send_ids.append(cb)
+            _ck = f"bulk_one_{cb['id']}"
+            if not st.session_state.get(_ck):
+                if b2.button("📤 この人だけ送る", key=f"bulk_send_{cb['id']}",
+                             use_container_width=True):
+                    st.session_state[_ck] = True
+                    st.rerun()
+            else:
+                st.warning(f"「{cb['line_name'] or cb['nickname']}」さんに、この{len(edited)}字を送るで。ええか？")
+                s1, s2 = st.columns(2)
+                if s1.button("✅ 送る", type="primary", key=f"bulk_go_{cb['id']}",
+                             use_container_width=True):
+                    ok, msg = _send_one(cb, edited, r.get("reading_id"))
+                    st.session_state.pop(_ck, None)
+                    (st.success if ok else st.error)(msg)
+                    if ok:
+                        _consult_board.clear()
+                        st.rerun()
+                if s2.button("やめとく", key=f"bulk_no_{cb['id']}", use_container_width=True):
+                    st.session_state.pop(_ck, None)
+                    st.rerun()
+
+    # ---- まとめて送る ----
+    st.divider()
+    if not _send_ids:
+        st.caption("まとめて送る対象が選ばれてへん。")
+        return
+    _names = "、".join(x["nickname"] for x in _send_ids)
+    _bk = "con_bulk_confirm"
+    if not st.session_state.get(_bk):
+        if st.button(f"📤 チェックした {len(_send_ids)}人に、まとめて送る", type="primary",
+                     use_container_width=True, key="con_bulk_sendall"):
+            st.session_state[_bk] = True
+            st.rerun()
+    else:
+        st.warning(f"★{len(_send_ids)}人に送ります：{_names}\n\n"
+                   "上の下書きは、ぜんぶ目を通したか？　送ったら取り消せんで。")
+        s1, s2 = st.columns(2)
+        if s1.button("✅ ぜんぶ送る", type="primary", use_container_width=True, key="con_bulk_goall"):
+            _bar = st.progress(0.0, text="送っとる…")
+            done, fail = [], []
+            for i, cb in enumerate(_send_ids, 1):
+                r = st.session_state[_key].get(str(cb["id"])) or {}
+                txt = r.get("edited") or r.get("reply") or ""
+                ok, msg = _send_one(cb, txt, r.get("reading_id"))
+                (done if ok else fail).append(f"{cb['nickname']}" + ("" if ok else f"（{msg}）"))
+                _bar.progress(i / len(_send_ids), text=f"{cb['nickname']}さん…（{i}/{len(_send_ids)}）")
+                _t.sleep(0.3)
+            st.session_state.pop(_bk, None)
+            st.session_state.pop(_key, None)
+            if done:
+                st.success(f"送れた：{len(done)}人　" + "、".join(done))
+            if fail:
+                st.error(f"送れんかった：{len(fail)}人　" + "、".join(fail))
+            _consult_board.clear()
+        if s2.button("やめとく", use_container_width=True, key="con_bulk_noall"):
+            st.session_state.pop(_bk, None)
+            st.rerun()
+
+
 def _consult_board() -> tuple[str, list[dict], dict]:
     """会員ごとの「LINEの今」を、シートの読み込み3回だけでまとめて作る。
 
@@ -386,6 +680,21 @@ if view == VIEW_CONSULT:
                    "この画面から送った分は記録されるので、使うほど正確になります。")
         _labels = [f"{'🔴' if b['waiting'] else '✅'} {b['nickname']}"
                    f"{'' if b['uid'] else '（LINE未リンク）'}　{b['last_ts']}" for b in _board]
+        # ★★★2026-08-29：未返信の人が溜まった時のための一括モード。
+        #   ★生成は一人ずつと【まったく同じ材料】を通す（_build_consult_context）。
+        #     別のコードで書いたら、事故対策が片方だけに乗る。それは前にやらかしとる。
+        #   ★★送信は必ず【下書きを見てから】や。作った端から飛ぶ形にはせん。
+        #     一人ずつ送るんも、まとめて送るんも、どっちも下書きを読んだ後にする。
+        _waiting = [b for b in _board if b["waiting"] and b["uid"]]
+        _bulk = st.toggle(
+            f"📚 未返信をまとめて下書きする（{len(_waiting)}人）",
+            key="con_bulk", value=False,
+            help="未返信の会員ぶんの返信を、順に作って一覧で出します。送信は下書きを見てから、"
+                 "一人ずつでも、まとめてでもできます。")
+        if _bulk:
+            _render_bulk_consult(_waiting, _board)
+            st.stop()
+
         cpick = st.selectbox("会員を選ぶ", _labels, key="con_pick", label_visibility="collapsed")
         cb = _board[_labels.index(cpick)]
         cmem = {"id": cb["id"], "nickname": cb["nickname"], "note": cb.get("note", ""),
@@ -540,90 +849,10 @@ if view == VIEW_CONSULT:
                     #   作り直した時、同じ相談文の控えが残っとる＝【前回のやりとり】に
                     #   自分の前の返信が並ぶ。★椿は「この話はもう答えた」と思て、
                     #   「さっき言うたとおりや」と、初回みたいに答えてくれん。
-                    _past = [h for h in chist[:13]
-                             if str(h.get('worry') or '').strip() != incoming.strip()][:12]
-                    hist_str = "\n\n".join(
-                        f"◆{str(h['created_at'])[:16]} 会員の相談: {str(h['worry'])[:800]}\n"
-                        f"　椿の返信: {str(h['reading'])[:1600]}"
-                        for h in reversed(_past)
-                    )
-                    # ★★★2026-08-23：ここで【いま答えよとする相談】を履歴から外す。
-                    #   相談欄は未返信ぶんを自動で入れとる＝LINE直近と中身が丸かぶりや。
-                    #   実測：ema shimotsumaさん8/8件、riyoさん5/5件、なつみさん4/4件が重複しとった。
-                    #   ★重なったまま渡すと、椿には【今の相談】と【前にも来とった同じ話】の
-                    #     二回に見える。ほんで「さっきも言うてたな」「その話は前に聞いた」と、
-                    #     ★★初めて聞いた話を二度目みたいに扱う。これが不自然さの正体のひとつ。
-                    #   ★★★せやから、相談欄に入っとる文はここから落とす。残りは「それより前の話」。
-                    _cur = incoming.strip()
-                    _before = [h for h in _lmsgs
-                               if str(h.get('text') or '').strip() not in _cur]
-                    # ★★★2026-08-25：検索画面のスクショに、機械で印を付ける。
-                    #   MAKIKOさんの回で事故った。昼に届いた八枚のスクショは全部
-                    #   【トーク内検索】の画面で、読み取り内容にも「検索窓に『文才』と入力」
-                    #   「検索結果 1/1」と、はっきり書いてあった。★過去を掘り返した画面や。
-                    #   ★★それを椿は「今日の掛け合い」として読んで、半年前の言葉
-                    #     （70まで頑張る／はやくしなきゃ）を今日の球として返した。
-                    #   ★★★会員に三回訂正させた。しかも一回認めたのに、次の返信でまた戻した。
-                    #     材料には答えが書いてあった。読み落としただけや。
-                    #     せやから、読み落としようがないように、こっちで印を付ける。
-                    def _mark(t: str) -> str:
-                        if any(k in t for k in ("検索窓", "検索バー", "検索欄", "トーク内検索", "検索モード")):
-                            return ("【★これはトーク内検索の画面や。過去を掘り返して見せてくれとる。"
-                                    "今日のやりとりやない。いつの話かは、必ず本人に確かめること】\n" + t)
-                        return t
-                    _line_before = "\n".join(
-                        f"・{str(h.get('created_at'))[:16]} {_mark(str(h.get('text') or ''))[:1600]}"
-                        for h in _before)
-                    if _line_before:
-                        hist_str += ("\n\n◆それより前に会員からLINEに届いとったメッセージ（時系列。"
-                                     "[画像を送付]は画像の自動読み取り内容）。"
-                                     "★これは【今の相談】より前の話や。今の相談と混同せんこと:\n"
-                                     + _line_before)
-                    # ★相談以外の資料（ヒアリング原文・訂正・最新の意向・暦）は、
-                    #   古うても必ず渡す。ここが落ちると、直したはずの間違いがまた出る
-                    if _refs:
-                        hist_str += "\n\n◆この会員についての、消したらあかん資料（古うても必ず踏まえる）:\n" + \
-                            "\n\n".join(f"【{str(h['month'])}】\n{str(h['reading'])[:4000]}" for h in _refs)
-                    # ★★★呼び名の指定は、いちばん上に置く。ここを外すと事故る
-                    # ★★★2026-08-25：訂正が、次の返信で元に戻る事故を止める。
-                    #   MAKIKOさんの回。「2月の話だから今じゃない」と訂正されて、
-                    #   椿は22:45に「ごっちゃにした、拾い直すわ」と一回認めた。
-                    #   ★ところが23:16の次の返信で、また「今日また口にしとる」に戻した。
-                    #   ★★訂正は控えに残っとるのに、次の生成では他の材料に埋もれてまう。
-                    #   ★★★せやから、訂正の言葉を機械で拾て、いちばん上に立てる。
-                    #     一度直したことを、二度と戻さんために。
-                    _FIXWORDS = ("ちがいます", "違います", "ちゃいます", "そうじゃなく", "そうではなく",
-                                 "ですから", "前の話", "半年前", "昔の話", "今じゃない", "今の話やない",
-                                 "訂正", "間違って", "間違えて", "誤解", "ではありません", "ではないです")
-                    _fixes = [h for h in _lmsgs
-                              if any(w in str(h.get("text") or "") for w in _FIXWORDS)]
-                    if _fixes:
-                        hist_str = (
-                            "◆★★★会員から【訂正】が入っとる。ここを最優先で読むこと。\n"
-                            "　一度直したことを、次の返信で元に戻したらあかん。"
-                            "戻したら、会員は同じことを三回言わされることになる（実際に起きた）。\n"
-                            + "\n".join(f"　・{str(h.get('created_at'))[5:16]} 「{str(h.get('text') or '').strip()[:180]}」"
-                                        for h in _fixes)
-                            + "\n\n" + hist_str
-                        )
-                        st.warning(f"⚠️ 直近のやりとりに、会員からの訂正らしき発言が {len(_fixes)}件あります。"
-                                   "生成された返信が、その訂正を踏まえているか必ず確かめてください。")
-                    if _span_h >= 3:
-                        hist_str += ("\n\n◆★今の相談の各行の頭の［08/21 09:59］は、"
-                                     "その一行が届いた日時や。"
-                                     f"この相談は{_span_h/24:.1f}日ぶんが溜まったもんで、"
-                                     "★下の行ほど新しい。"
-                                     "古い行を『今さっきの話』として扱わんこと。"
-                                     "★★いちばん答えてほしいんは、たいてい【いちばん下の行】や。")
-                    _who = (cb.get("line_name") or cb["nickname"]).strip()
-                    _memo = str(cmem.get("note") or "").strip()
-                    hist_str = (
-                        f"◆この会員の呼び名：{_who}"
-                        + (f"\n◆この会員についての決まりごと：{_memo}" if _memo else "")
-                        + "\n★呼び名は、ここに書いてあるとおりに書くこと。"
-                          "『さん』を勝手に足したり外したりせん。\n\n"
-                        + hist_str
-                    )
+                    hist_str, _warns = _build_consult_context(
+                        cb, cmem, chist, incoming, _lmsgs, _refs, _span_h)
+                    for _w in _warns:
+                        st.warning(_w)
                     with st.spinner("椿が視てます…"):
                         res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str,
                                                          kantei=kantei_text)
