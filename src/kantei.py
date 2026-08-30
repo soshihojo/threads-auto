@@ -21,6 +21,7 @@ from pathlib import Path
 
 from .config import ROOT
 from .diagnosis import (NAME_GUARD, RESPECT_GUARD, _shuku_distance, add_honorific,
+                        with_honorific,
                         honmei_shuku, soften_rude, strip_ai_leak, strip_jargon)
 from .llm import complete
 
@@ -1019,7 +1020,7 @@ def make_kantei(name: str, me_birth: str, him_birth: str, details: str,
     html_to_pdf(html_path, pdf_path)
     # 納品用にダウンロードフォルダへも必ず置く（LINE公式アプリから添付しやすいように）。
     # ダウンロード側のファイル名は「個別鑑定_名前さん.pdf」（相談者に見える名前なので敬称付き）
-    dl_path = Path.home() / "Downloads" / f"個別鑑定_{name}さん.pdf"
+    dl_path = Path.home() / "Downloads" / f"個別鑑定_{with_honorific(name)}.pdf"
     shutil.copy2(pdf_path, dl_path)
     print(f"📜 完成: {pdf_path}（本文{total}字）")
     print(f"⬇️ ダウンロードにも配置: {dl_path}")
@@ -1128,7 +1129,7 @@ def make_tsukiyomi(name: str, me_birth: str, him_birth: str, worry: str = "",
     safe = re.sub(r"[（(].*?[）)]", "", name)          # 括弧とその中身を除去
     safe = re.sub(r"^[\d\-_\s]+|[\d\-_\s]+$", "", safe)  # 前後の連番・ハイフンを除去
     safe = re.sub(r"[｜|/\\:*?\"<>]", "", safe).strip() or name
-    dl_path = Path.home() / "Downloads" / f"月詠み_{safe}さん_{month_label}.pdf"
+    dl_path = Path.home() / "Downloads" / f"月詠み_{with_honorific(safe)}_{month_label}.pdf"
     shutil.copy2(pdf_path, dl_path)
     print(f"📜 完成: {pdf_path}（本文{total}字）")
     print(f"⬇️ ダウンロードにも配置: {dl_path}")

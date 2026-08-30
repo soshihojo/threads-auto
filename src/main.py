@@ -198,35 +198,32 @@ _DELIVERY_REMINDER = """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
 
 
-def _strip_honorific(name: str) -> str:
-    """--name に付いてきた敬称を外す。
+def _check_name(name: str) -> str:
+    """呼び名はそのまま通す。★足しも引きもせん。形だけ確かめて印を出す。
 
-    ★★2026-08-30：--name に「ゆみさん」と敬称込みで渡してしもた。
-      生成側（shiomi.build_calendar_html / kantei のPDF名）は自分で「さん」を足す作りやから、
-      表紙が【「ゆみさんさんのために」】になった。★実際に納品直前まで行った。
-      ★呼び名は敬称抜きで渡すんが決まりや。渡し間違えたら、ここで黙って直して、印を出す。
+    ★★★2026-08-30：ここで一回、剥がす作りにしてしもて、事故を増やした。経緯を残す。
+      ・「ゆみさん」で渡した → 暦の表紙が【「ゆみさんさんのために」】になった
+      ・ほな剥がしたろ、と「ゆみ」に直した → 今度は章タイトルが
+        【「ゆみという人」】と呼び捨てになった（add_honorific は敬称付きの時だけ働く）
+      ★★どっちも納品直前まで行った。★原因は「足す側」が素で さん を足しとったことや。
+      ★せやから直したんは足す側（diagnosis.with_honorific）。ここでは、もう触らん。
+
+    ★決まり：呼び名は【本文に出したい形そのまま】で渡す。
+      新しい人は「ゆみさん」、前から呼び捨ての人は「さやか」。
     """
-    raw = str(name).strip()
-    # ★外すんは【さん・様】だけや。生成側が足すんがこの二つやから、二重になるんはここだけ。
-    #   ★★「ちゃん」「くん」は外さん。呼び名の一部やからや（「まきちゃん」を「まき」に
-    #     変えてもうたら、別の名前になる。呼び名の指定はそのまま通すんが決まり）。
-    #     ★その場合は「まきちゃんさん」になるんで、直せるように印だけ出す。
-    cleaned = re.sub(r"(さん|様|さま)$", "", raw)
-    if cleaned and cleaned != raw:
-        print(f"⚠ --name の敬称を外した：「{raw}」→「{cleaned}」"
-              f"（表紙とファイル名は、こっちが自動で『さん』を付ける）")
-        return cleaned
-    if raw.endswith(("ちゃん", "くん")):
-        print(f"⚠ 呼び名が「{raw}」やと、表紙は「{raw}さん」になる。"
-              f"それでええか確かめること（呼び名はそのまま通す決まりやから、こっちでは外さん）")
-    return raw
+    n = str(name).strip()
+    if not n.endswith(("さん", "ちゃん", "くん", "様", "さま", "君")):
+        print(f"⚠ 呼び名「{n}」は敬称なしや。★本文で呼び捨てになる。"
+              f"新しい人やったら「{n}さん」で渡し直すこと"
+              f"（前から呼び捨てで通しとる人なら、このままでええ）")
+    return n
 
 
 def cmd_kantei(args: argparse.Namespace) -> None:
     """個別鑑定（有料）: 章立て約10,000字の鑑定文を生成し、和風デザインのPDFを出力。"""
     from . import kantei
     details = Path(args.details_file).read_text(encoding="utf-8")
-    name = _strip_honorific(args.name)
+    name = _check_name(args.name)
     res = kantei.make_kantei(name, args.me, args.him, details)
     print(f"→ LINE公式アプリのチャットからPDFを添付して送付: {res['pdf']}")
     print("\n" + "━" * 24 + " 納品文（LINEにそのまま貼る） " + "━" * 24)
@@ -251,7 +248,7 @@ def cmd_shiomi(args: argparse.Namespace) -> None:
     from . import kantei, shiomi
     details = Path(args.details_file).read_text(encoding="utf-8")
 
-    name = _strip_honorific(args.name)
+    name = _check_name(args.name)
     res = kantei.make_kantei(name, args.me, args.him, details)
     cal = shiomi.make_shiomi(name, args.me, args.him, details)
 

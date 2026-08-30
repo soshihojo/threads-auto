@@ -27,6 +27,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import lint
+from .diagnosis import with_honorific as _with_hon
 from .kantei import (CHROME, OUT_DIR, _internal_brief,
                      add_honorific, soften_rude, strip_ai_leak,
                      strip_instruction_leak, strip_jargon, strip_markdown)
@@ -288,7 +289,7 @@ li b {{ display:inline-block; min-width:40px; color:#a52e44; text-indent:0; }}
 .foot {{ text-align:center; font-size:8.5px; color:#a99; margin:14px 0 4px; }}
 </style></head><body>
 <div class="head"><h1>九十日の暦</h1>
-<p>{_html.escape(name)}さんのために　{d0.year}年{d0.month}月{d0.day}日 — {end.year}年{end.month}月{end.day}日</p></div>
+<p>{_html.escape(_with_hon(name))}のために　{d0.year}年{d0.month}月{d0.day}日 — {end.year}年{end.month}月{end.day}日</p></div>
 <div class="months">{''.join(months)}</div>
 <div class="legend">
 <span><i class="dot" style="background:#a52e44"></i>動いてええ日</span>
@@ -506,7 +507,7 @@ def make_shiomi(name: str, me_birth: str, him_birth: str, details: str,
                     f"--screenshot={png_path}", html_path.resolve().as_uri()],
                    check=True, capture_output=True, timeout=120)
     for p in (pdf_path, png_path):
-        shutil.copy2(p, Path.home() / "Downloads" / f"九十日の暦_{name}さん{p.suffix}")
+        shutil.copy2(p, Path.home() / "Downloads" / f"九十日の暦_{_with_hon(name)}{p.suffix}")
     print(f"  📜 {pdf_path}\n  🖼 {png_path}")
 
     # ★暦の納品文は、鑑定書の納品文とは別便や。ここで必ず出す（2026-08-20ルール化）。
