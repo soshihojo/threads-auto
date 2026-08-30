@@ -23,7 +23,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from gspread.utils import rowcol_to_a1
 
-from .config import env
+from .config import env, load_config
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 JST = ZoneInfo("Asia/Tokyo")
@@ -47,12 +47,16 @@ TABLES = {
     "processed_replies": ["reply_id", "post_id", "username", "text", "seen_at"],
     "draft_replies": ["reply_id", "post_id", "username", "in_text", "draft_text", "status", "created_at", "sent_at"],
     "leads": ["reply_id", "post_id", "username", "text", "keyword", "notified", "created_at"],
-    "scheduled_posts": ["id", "text", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at"],
+    # ★2026-08-31：末尾に account を足した。Threadsを二本まわすため。
+    #   ★末尾に足す限り、既存の行は "" になるだけで壊れん（_records は位置で読む）。
+    #   ★空欄＝一本目（default_account）として扱う。今まで貼った行はそのまま動く。
+    "scheduled_posts": ["id", "text", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at", "account"],
     "members": ["id", "nickname", "me_birth", "him_birth", "note", "created_at", "line_user_id"],
     "readings": ["id", "member_id", "month", "worry", "reading", "created_at"],
     "line_users": ["user_id", "display_name", "me_birth", "him_birth", "bot", "note", "created_at", "updated_at"],
     "line_chats": ["id", "user_id", "role", "text", "created_at"],
-    "web_diag": ["code", "me_birth", "him_birth", "status", "period", "type_name", "used", "created_at", "used_at"],
+    # ★2026-08-31：末尾に source を足した。どのThreadsアカウント経由で来たかの印。
+    "web_diag": ["code", "me_birth", "him_birth", "status", "period", "type_name", "used", "created_at", "used_at", "source"],
     "web_events": ["id", "event", "vid", "created_at"],
 }
 
@@ -347,10 +351,11 @@ def approve_candidate(post_id: int, scheduled_at: str, text: str | None = None) 
     _update_cells("scheduled_posts", idx, updates)
 
 
-def add_scheduled(text: str, scheduled_at: str) -> int:
+def add_scheduled(text: str, scheduled_at: str, account: str = "") -> int:
     new_id = _next_id()
-    _append("scheduled_posts", {"id": new_id, "text": text, 
-                               "scheduled_at": scheduled_at, "status": "scheduled", "created_at": _now()})
+    _append("scheduled_posts", {"id": new_id, "text": text,
+                               "scheduled_at": scheduled_at, "status": "scheduled",
+                               "created_at": _now(), "account": account})
     return new_id
 
 
@@ -404,12 +409,23 @@ def list_scheduled(status: str | None = None, limit: int = 200) -> list[dict]:
 
 
 
-def due_scheduled(now_iso: str) -> list[dict]:
+def due_scheduled(now_iso: str, account: str | None = None) -> list[dict]:
+    """時刻が来た予約を返す。account を渡したら、そのアカウント宛だけに絞る。
+
+    ★2026-08-31：account が空欄の行は【一本目】として扱う。
+      今まで手で貼ってきた行はぜんぶ空欄やから、そのまま一本目に流れる。
+    """
     now = parse_dt(now_iso) or datetime.now()
+    default_key = (load_config().get("default_account")
+                   or next(iter(load_config().get("accounts") or {"a": {}})))
     due = []
     for r in _records("scheduled_posts"):
         if r.get("status") != "scheduled":
             continue
+        if account is not None:
+            row_acc = str(r.get("account") or "").strip() or default_key
+            if row_acc != account:
+                continue
         t = parse_dt(r.get("scheduled_at"))
         if t and t <= now:
             due.append((t, r))
@@ -531,10 +547,10 @@ def list_web_events(limit: int = 20000) -> list[dict]:
 
 # ---- Web無料診断（鑑定番号） ----
 def add_web_diag(code: str, me_birth: str, him_birth: str, status: str,
-                 period: str, type_name: str) -> None:
+                 period: str, type_name: str, source: str = "") -> None:
     _append("web_diag", {"code": code, "me_birth": me_birth, "him_birth": him_birth,
                         "status": status, "period": period, "type_name": type_name,
-                        "used": 0, "created_at": _now()})
+                        "used": 0, "created_at": _now(), "source": source})
 
 
 def get_web_diag(code: str) -> dict | None:

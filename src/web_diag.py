@@ -11,6 +11,7 @@ BAN対策の設計: Threads側では返信もDMも一切せず、入口をこの
 from __future__ import annotations
 
 import random
+import re
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
@@ -133,7 +134,11 @@ def submit(data: dict) -> dict:
     t = en_type(me, him)
     love = love_type(me)  # 本人だけの恋愛タイプ（シェア用バッジ）
     code = _issue_code()
-    store.add_web_diag(code, me, him, status, period, t["name"])
+    # ★2026-08-31：どのThreadsアカウントの固定投稿から来たかを残す。
+    #   二本目の固定投稿だけ /shindan?a=b にしておく。空欄＝一本目や。
+    #   ★LINEは一本のままやから、ここでしか流入元は分からん。
+    src = re.sub(r"[^0-9a-zA-Z_-]", "", str(data.get("src", "")))[:16]
+    store.add_web_diag(code, me, him, status, period, t["name"], source=src)
     # 「診断を実行した人数」の計測（vid=訪問者の匿名ID。同じ人の複数回をユニーク化する）
     try:
         store.add_web_event("submit", str(data.get("vid", ""))[:64])
@@ -340,6 +345,8 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
 <script>
 // 計測（訪問者の匿名ID＋ビーコン。失敗しても画面には影響させない）
 const VID=(()=>{try{
+  // ★2026-08-31：?a=b で来たら、どのアカウント経由かを一緒に送る
+  const SRC = (new URLSearchParams(location.search).get("a")||"").slice(0,16);
   let v=localStorage.getItem("tsubaki_vid");
   if(!v){ v=(crypto.randomUUID?crypto.randomUUID():Date.now()+"-"+Math.random().toString(36).slice(2));
           localStorage.setItem("tsubaki_vid",v); }
@@ -405,7 +412,7 @@ document.getElementById("f").addEventListener("submit", async (e)=>{
   const go=document.getElementById("go"); go.disabled=true; go.textContent="視てる……";
   try{
     const r=await fetch("/shindan/api",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({me, him, status:st.value, period:pe?pe.value:"", vid:VID})});
+      body:JSON.stringify({me, him, status:st.value, period:pe?pe.value:"", vid:VID, src:SRC})});
     const j=await r.json();
     if(!j.ok) throw new Error(j.error||"failed");
     // 恋愛タイプ・バッジ（シェア用・悩みは出さない）

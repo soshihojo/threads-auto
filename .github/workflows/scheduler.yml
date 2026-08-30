@@ -12,25 +12,35 @@ on:
 #   ★★schedule.run_due には was_posted_before いう保険があるが、あれは
 #     「前の回の投稿が posts に書かれた後」やないと効かん。同時に走ったら両方すり抜ける。
 #   ★★★せやから、そもそも重ねん。走っとる間に来た回は、待たせんと捨てる（投稿は次の回で拾える）。
-concurrency:
-  group: threads-scheduler
-  cancel-in-progress: false
-
 jobs:
   run-due:
     runs-on: ubuntu-latest
+    # ★2026-08-31：アカウントごとに回す。fail-fast は切る
+    #   （片方が落ちても、もう片方の投稿は出したいため）。
+    strategy:
+      fail-fast: false
+      matrix:
+        account: [a, b]
+    # ★同時に走らんようにする。ここが二重投稿の原因やった（下の但し書き参照）。
+    #   ★アカウントごとに別のグループにする。二本が互いを待つ必要は無い。
+    concurrency:
+      group: threads-scheduler-${{ matrix.account }}
+      cancel-in-progress: false
     env:
       STORE_BACKEND: sheets
       GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
       GOOGLE_SHEET_KEY: ${{ secrets.GOOGLE_SHEET_KEY }}
       THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
       THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+      THREADS_ACCESS_TOKEN_B: ${{ secrets.THREADS_ACCESS_TOKEN_B }}
+      THREADS_USER_ID_B: ${{ secrets.THREADS_USER_ID_B }}
+      GH_SECRET_WRITE_TOKEN: ${{ secrets.GH_SECRET_WRITE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - run: pip install -r requirements.txt
       - name: refresh token
-        run: python -m src.main refresh-token || true
+        run: python -m src.main refresh-token --account ${{ matrix.account }} || true
       - name: run due scheduled posts
-        run: python -m src.main run-due
+        run: python -m src.main run-due --account ${{ matrix.account }}

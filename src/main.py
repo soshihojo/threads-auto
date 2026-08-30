@@ -17,28 +17,73 @@ import re
 from pathlib import Path
 
 from . import analytics, content, diagnosis, replies as replies_mod, schedule as schedule_mod, store
-from .config import DATA_DIR, active_profile, env, load_config
+from .config import (DATA_DIR, account_conf, account_keys, active_profile, env,
+                     load_config, profile_for)
 from .threads_client import ThreadsClient
 
 TOKEN_FILE = DATA_DIR / "token.txt"
 
 
-def _token() -> str:
-    # 自動更新で保存したトークンがあれば優先、無ければ.env
-    if TOKEN_FILE.exists():
-        t = TOKEN_FILE.read_text().strip()
+def _token_file(suffix: str = "") -> Path:
+    """アカジトごとに保存先を分ける。★一本目は今まで通り data/token.txt。"""
+    return DATA_DIR / (f"token{suffix.lower()}.txt" if suffix else "token.txt")
+
+
+def _token(suffix: str = "") -> str:
+    # 自動更新で保存したトークンがあれば優先、無ければ環境変数
+    f = _token_file(suffix)
+    if f.exists():
+        t = f.read_text().strip()
         if t:
             return t
-    return env("THREADS_ACCESS_TOKEN", required=True)
+    return env(f"THREADS_ACCESS_TOKEN{suffix}", required=True)
 
 
-def make_client() -> ThreadsClient:
-    return ThreadsClient(_token(), env("THREADS_USER_ID"))
+class AccountNotReady(SystemExit):
+    """そのアカウントのトークンがまだ用意されてへん、いう合図。
+
+    ★2026-08-31：matrix で二本まわす作りにしたんで、二本目のアカウントを
+      まだ作ってへん間も十五分おきにジョブが走る。★そこで落としたら、
+      失敗通知が鳴り続けて【ほんまの失敗が埋もれる】。
+      せやから「まだ無い」は失敗やのうて、黙って飛ばす扱いにする（終了コード0）。
+    """
+
+
+def account_ready(account: str | None = None) -> bool:
+    sfx = account_conf(account).get("env_suffix", "")
+    return bool((_token_file(sfx).exists() and _token_file(sfx).read_text().strip())
+                or env(f"THREADS_ACCESS_TOKEN{sfx}")) and bool(env(f"THREADS_USER_ID{sfx}"))
+
+
+def skip_if_not_ready(account: str | None) -> bool:
+    """未設定なら、その旨を出して True を返す（呼び側は静かに終わる）。"""
+    if account_ready(account):
+        return False
+    conf = account_conf(account)
+    print(f"⏭  アカウント '{conf['key']}'（{conf.get('label','')}）は、まだトークンが無い。"
+          f"何もせんと終わる。"
+          f"★使う時は Secrets に THREADS_ACCESS_TOKEN{conf['env_suffix']} と "
+          f"THREADS_USER_ID{conf['env_suffix']} を入れること")
+    return True
+
+
+def make_client(account: str | None = None) -> ThreadsClient:
+    """--account の指定からクライアントを作る。
+
+    ★2026-08-31：Threadsを二本まわせるようにした。
+      env_suffix が "" なら今まで通り THREADS_ACCESS_TOKEN / THREADS_USER_ID。
+      "_B" なら THREADS_ACCESS_TOKEN_B / THREADS_USER_ID_B を見る。
+    """
+    conf = account_conf(account)
+    sfx = conf.get("env_suffix", "")
+    return ThreadsClient(_token(sfx), env(f"THREADS_USER_ID{sfx}", required=True))
 
 
 # ---------- commands ----------
-def cmd_check(_: argparse.Namespace) -> None:
-    c = make_client()
+def cmd_check(args: argparse.Namespace) -> None:
+    if skip_if_not_ready(getattr(args, "account", None)):
+        return
+    c = make_client(getattr(args, "account", None))
     me = c.me()
     print(f"✅ 認証OK: @{me.get('username')} (id={me.get('id')})")
     try:
@@ -53,6 +98,8 @@ def cmd_check(_: argparse.Namespace) -> None:
 
 
 def cmd_post(args: argparse.Namespace) -> None:
+    if skip_if_not_ready(getattr(args, "account", None)):
+        return
     profile = active_profile()
     case = content.pick_case()  # 実話回は実話の地域、一般論回はランダム地域（本文と位置タグで同じ地域）
     region = (case or {}).get("region") or content.pick_region()
@@ -63,7 +110,7 @@ def cmd_post(args: argparse.Namespace) -> None:
     if args.dry_run:
         print("(--dry-run のため配信しません)")
         return
-    c = make_client()
+    c = make_client(getattr(args, "account", None))
     loc_id = c.first_location_id(region) if (profile.get("tag_location") and region) else None
     media_id = c.publish_thread(text, location_id=loc_id)
     store.init_db()
@@ -71,21 +118,25 @@ def cmd_post(args: argparse.Namespace) -> None:
     print(f"🚀 配信しました: media_id={media_id}")
 
 
-def cmd_replies(_: argparse.Namespace) -> None:
-    c = make_client()
+def cmd_replies(args: argparse.Namespace) -> None:
+    if skip_if_not_ready(getattr(args, "account", None)):
+        return
+    c = make_client(getattr(args, "account", None))
     stats = replies_mod.process_replies(c)
     print(f"📥 新規返信 {stats['new_replies']} / リード {stats['leads']} / 下書き {stats['drafts']} / 自動送信 {stats['auto_sent']}")
     if load_config()["replies"].get("mode") == "draft" and stats["drafts"]:
         print("→ `python -m src.main approve` で下書きを確認・送信してください。")
 
 
-def cmd_approve(_: argparse.Namespace) -> None:
+def cmd_approve(args: argparse.Namespace) -> None:
+    if skip_if_not_ready(getattr(args, "account", None)):
+        return
     store.init_db()
     drafts = store.pending_drafts()
     if not drafts:
         print("承認待ちの下書きはありません。")
         return
-    c = make_client()
+    c = make_client(getattr(args, "account", None))
     print(f"承認待ち {len(drafts)} 件。各件: [y]送信 / [e]編集して送信 / [s]スキップ / [q]中断\n")
     for d in drafts:
         print(f"── @{d['username']} のコメント:\n   「{d['in_text']}」")
@@ -110,8 +161,10 @@ def cmd_approve(_: argparse.Namespace) -> None:
             print(f"   ❌ 送信失敗: {e}\n")
 
 
-def cmd_insights(_: argparse.Namespace) -> None:
-    c = make_client()
+def cmd_insights(args: argparse.Namespace) -> None:
+    if skip_if_not_ready(getattr(args, "account", None)):
+        return
+    c = make_client(getattr(args, "account", None))
     results = analytics.collect_insights(c)
     n = analytics.archive_winners(results)
     print(f"📈 {len(results)}件のインサイトを更新。伸びた{n}件を学習アーカイブに記録。")
@@ -119,9 +172,11 @@ def cmd_insights(_: argparse.Namespace) -> None:
         print(f"  eng {r['engagement']:.1%} | views {r['views']} | {r['text'][:30]}…")
 
 
-def cmd_learn(_: argparse.Namespace) -> None:
+def cmd_learn(args: argparse.Namespace) -> None:
     """反応データ（リード/エンゲージ）を分析し、勝ち要素を抽象化して学習ルールを自動更新。"""
-    c = make_client()
+    if skip_if_not_ready(getattr(args, "account", None)):
+        return
+    c = make_client(getattr(args, "account", None))
     res = analytics.learn_and_update_rules(c)
     if not res.get("updated"):
         print(f"⏭️ 学習スキップ: {res.get('reason')}")
@@ -151,9 +206,12 @@ def cmd_check_store(_: argparse.Namespace) -> None:
     print("✅ 読み書きOK" if found else "⚠️ 書けたが読み出せず。権限/共有設定を確認")
 
 
-def cmd_run_due(_: argparse.Namespace) -> None:
-    c = make_client()
-    stats = schedule_mod.run_due(c)
+def cmd_run_due(args: argparse.Namespace) -> None:
+    if skip_if_not_ready(getattr(args, "account", None)):
+        return
+    acc = getattr(args, "account", None)
+    c = make_client(acc)
+    stats = schedule_mod.run_due(c, account_conf(acc)["key"])
     print(f"⏰ 予約チェック: 対象 {stats['due']} / 配信 {stats['posted']} / 失敗 {stats['failed']}")
 
 
@@ -415,12 +473,49 @@ def cmd_line_sweep(args: argparse.Namespace) -> None:
     print(f"未返信 {n}件に対応した")
 
 
-def cmd_refresh_token(_: argparse.Namespace) -> None:
-    c = make_client()
+def _write_back_secret(name: str, value: str) -> None:
+    """更新したトークンを GitHub Secret に書き戻す（Actions の中でだけ動く）。
+
+    ★gh CLI は Actions のランナーに最初から入っとる。
+      書き込みには secrets:write が要るんで、GH_TOKEN に PAT を渡す必要がある。
+      ★PAT が無い時は黙って諦める（今まで通りの動きに戻るだけで、壊れはせん）。
+    """
+    import os
+    import subprocess
+    if not os.getenv("GITHUB_ACTIONS"):
+        return
+    tok = os.getenv("GH_SECRET_WRITE_TOKEN") or ""
+    if not tok:
+        print("　⚠ GH_SECRET_WRITE_TOKEN が無いんで Secret に書き戻せん。"
+              "★このままやとトークンは六十日で切れる。PAT（secrets:write）を入れること")
+        return
+    try:
+        subprocess.run(["gh", "secret", "set", name, "--body", value],
+                       check=True, capture_output=True,
+                       env={**os.environ, "GH_TOKEN": tok})
+        print(f"　🔐 GitHub Secret {name} に書き戻した")
+    except Exception as e:
+        print(f"　⚠ Secret の書き戻しに失敗（次の回も古いトークンで動く）: {e}")
+
+
+def cmd_refresh_token(args: argparse.Namespace) -> None:
+    if skip_if_not_ready(getattr(args, "account", None)):
+        return
+    acc = getattr(args, "account", None)
+    sfx = account_conf(acc).get("env_suffix", "")
+    c = make_client(acc)
     data = c.refresh_long_lived_token()
     if data.get("access_token"):
-        TOKEN_FILE.write_text(data["access_token"])
-        print(f"🔑 トークン更新OK（{data.get('expires_in','?')}秒有効）。data/token.txt に保存。")
+        f = _token_file(sfx)
+        f.write_text(data["access_token"])
+        print(f"🔑 トークン更新OK（{data.get('expires_in','?')}秒有効）。{f} に保存。")
+        # ★★★2026-08-31：ここが今まで効いてへんかった。
+        #   data/ は .gitignore で、Actions のランナーは毎回捨てられる。
+        #   せやから更新したトークンが残らんで、次の回はまた古い Secret から始まっとった。
+        #   ＝十五分おきに更新しとるつもりで、Secret のトークンは六十日で普通に切れる。
+        #   ★手元のトークンが8/27に切れたんも、これが理由や。
+        #   ★せやから Actions の時は GitHub Secret に書き戻す。
+        _write_back_secret(f"THREADS_ACCESS_TOKEN{sfx}", data["access_token"])
     else:
         print(f"更新応答: {data}")
 
@@ -428,15 +523,24 @@ def cmd_refresh_token(_: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="threads-auto")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("check").set_defaults(func=cmd_check)
-    p_post = sub.add_parser("post"); p_post.add_argument("--dry-run", action="store_true"); p_post.set_defaults(func=cmd_post)
-    sub.add_parser("replies").set_defaults(func=cmd_replies)
-    sub.add_parser("approve").set_defaults(func=cmd_approve)
-    sub.add_parser("insights").set_defaults(func=cmd_insights)
-    sub.add_parser("learn").set_defaults(func=cmd_learn)
+    # ★2026-08-31：Threadsを触るコマンドは、ぜんぶ --account を取れるようにした。
+    #   省略したら config.yaml の default_account（＝一本目の椿）を使う。
+    #   ★せやから、今まで通りの叩き方でも動きは変わらん。
+    def _acc(prs):
+        prs.add_argument("--account", default=None,
+                         help=f"どのThreadsアカウントで動かすか（{'/'.join(account_keys())}）。"
+                              "省略したら config.yaml の default_account")
+        return prs
+
+    _acc(sub.add_parser("check")).set_defaults(func=cmd_check)
+    p_post = _acc(sub.add_parser("post")); p_post.add_argument("--dry-run", action="store_true"); p_post.set_defaults(func=cmd_post)
+    _acc(sub.add_parser("replies")).set_defaults(func=cmd_replies)
+    _acc(sub.add_parser("approve")).set_defaults(func=cmd_approve)
+    _acc(sub.add_parser("insights")).set_defaults(func=cmd_insights)
+    _acc(sub.add_parser("learn")).set_defaults(func=cmd_learn)
     sub.add_parser("voice-learn").set_defaults(func=cmd_voice_learn)
     sub.add_parser("check-store").set_defaults(func=cmd_check_store)
-    sub.add_parser("run-due").set_defaults(func=cmd_run_due)
+    _acc(sub.add_parser("run-due")).set_defaults(func=cmd_run_due)
     p_diag = sub.add_parser("diagnose")
     p_diag.add_argument("--me", required=True, help="相談者の生年月日 YYYY-MM-DD")
     p_diag.add_argument("--him", required=True, help="彼の生年月日 YYYY-MM-DD")
@@ -482,7 +586,7 @@ def main() -> None:
     p_join.add_argument("--him", help="彼の生年月日。省略時は line_users から拾う")
     p_join.add_argument("--plan", help="月詠みの値段のメモ（例: 5,980円）")
     p_join.set_defaults(func=cmd_join)
-    sub.add_parser("refresh-token").set_defaults(func=cmd_refresh_token)
+    _acc(sub.add_parser("refresh-token")).set_defaults(func=cmd_refresh_token)
     args = parser.parse_args()
     args.func(args)
 

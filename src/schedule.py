@@ -6,7 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from . import store
-from .config import active_profile
+from .config import active_profile, profile_for
 from .content import sanitize
 from .threads_client import ThreadsClient
 
@@ -22,11 +22,15 @@ def now_jst_iso() -> str:
     return now_jst().strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def run_due(client: ThreadsClient) -> dict:
-    """期限が来た予約投稿を配信。結果サマリを返す。"""
+def run_due(client: ThreadsClient, account: str | None = None) -> dict:
+    """期限が来た予約投稿を配信。結果サマリを返す。
+
+    ★2026-08-31：account を渡したら、そのアカウント宛の行だけ流す。
+      渡さんかったら今まで通り全部（＝一本目しか無かった頃の動き）。
+    """
     store.init_db()
-    profile = active_profile()
-    due = store.due_scheduled(now_jst_iso())
+    profile = profile_for(account)
+    due = store.due_scheduled(now_jst_iso(), account)
     stats = {"due": len(due), "posted": 0, "failed": 0}
     for row in due:
         text = sanitize(row["text"])  # 投稿直前に装飾記号(**等)を必ず除去

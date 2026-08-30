@@ -7,6 +7,27 @@
 # 現在アクティブなプロファイル名（profiles配下のキーを指定）
 active_profile: tsubaki
 
+# =====================================================================
+# ★★★2026-08-31：Threadsのアカウントを二本まわせるようにした。
+#   キーが --account に渡す名前。ワークフローはこのキーで matrix を回す。
+#   env_suffix が環境変数の後ろに付く（"" なら今まで通りの名前）。
+#   ★LINEは一本のままや。増やすんはThreads側だけ。
+#   ★profile を分ければ、posts シートの profile 列で自然に見分けが付く
+#     （せやから posts に列は足さんでええ）。
+# =====================================================================
+default_account: a
+accounts:
+  a:
+    label: 椿（tsubaki_honne）
+    profile: tsubaki
+    env_suffix: ""            # THREADS_ACCESS_TOKEN / THREADS_USER_ID
+    source: ""                # 診断URLの ?a= に入れる印。空なら付けん
+  b:
+    label: 二本目（キャラ未定）
+    profile: tsubaki          # ★新しいキャラのルールができたら、ここを差し替える
+    env_suffix: "_B"          # THREADS_ACCESS_TOKEN_B / THREADS_USER_ID_B
+    source: b
+
 profiles:
   # ---- C：占い・恋愛（椿／tsubaki_honne）----
   # 「彼の本音を視る」関西弁・毒舌・宿曜鑑定キャラ。慰めず本音を伝えるtough love。

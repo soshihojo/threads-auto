@@ -262,7 +262,9 @@ def approve_candidate(post_id: int, scheduled_at: str, text: str | None = None) 
             )
 
 
-def add_scheduled(text: str, scheduled_at: str) -> int:
+def add_scheduled(text: str, scheduled_at: str, account: str = "") -> int:
+    # ★account は sheets 側と引数を揃えるためだけ。sqlite では持たん。
+
     with conn() as c:
         cur = c.execute(
             "INSERT INTO scheduled_posts(text, scheduled_at, status) VALUES (?,?,'scheduled')",
@@ -280,8 +282,14 @@ def list_scheduled(status: str | None = None, limit: int = 200) -> list[sqlite3.
         return c.execute("SELECT * FROM scheduled_posts ORDER BY scheduled_at DESC LIMIT ?", (limit,)).fetchall()
 
 
-def due_scheduled(now_iso: str) -> list[sqlite3.Row]:
-    """status=scheduled かつ scheduled_at <= now のものを返す。"""
+def due_scheduled(now_iso: str, account: str | None = None) -> list[sqlite3.Row]:
+    """status=scheduled かつ scheduled_at <= now のものを返す。
+
+    ★2026-08-31：sheets 側と引数を揃えた。
+      sqlite は手元の下書き用で、アカウント列は持たせてへん。
+      せやから account を渡されても、ここでは絞らんと全部返す。
+      （本番は STORE_BACKEND=sheets や。そっちで絞る）
+    """
     with conn() as c:
         return c.execute(
             "SELECT * FROM scheduled_posts WHERE status='scheduled' AND scheduled_at <= ? ORDER BY scheduled_at",
@@ -375,7 +383,8 @@ def list_web_events(limit: int = 20000) -> list[dict]:
 
 # ---- Web無料診断（鑑定番号） ----
 def add_web_diag(code: str, me_birth: str, him_birth: str, status: str,
-                 period: str, type_name: str) -> None:
+                 period: str, type_name: str, source: str = "") -> None:
+    # ★source は sheets 側と引数を揃えるためだけ。sqlite では持たん（本番は sheets）。
     with conn() as c:
         c.execute(
             "INSERT INTO web_diag(code, me_birth, him_birth, status, period, type_name) VALUES (?,?,?,?,?,?)",

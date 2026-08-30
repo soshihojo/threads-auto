@@ -19,19 +19,28 @@ on:
   workflow_dispatch: {}
 
 # ★2026-08-22：巡回も重ねん。重なると、同じコメントに二回返す事故になる。
-concurrency:
-  group: threads-poll
-  cancel-in-progress: false
-
+# ★2026-08-31：ワークフロー全体で1本やと、matrix の二本が互いを待ってまう。
+# ★せやから重なり止めはジョブ側（アカウント別）に移した。
 jobs:
   poll:
     runs-on: ubuntu-latest
+    # ★2026-08-31：Threadsのアカウントごとに巡回する。
+    #   ★片方がこけても、もう片方の返信は出したいんで fail-fast は切る。
+    strategy:
+      fail-fast: false
+      matrix:
+        account: [a, b]
+    concurrency:
+      group: threads-poll-${{ matrix.account }}
+      cancel-in-progress: false
     env:
       STORE_BACKEND: sheets
       GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
       GOOGLE_SHEET_KEY: ${{ secrets.GOOGLE_SHEET_KEY }}
       THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
       THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+      THREADS_ACCESS_TOKEN_B: ${{ secrets.THREADS_ACCESS_TOKEN_B }}
+      THREADS_USER_ID_B: ${{ secrets.THREADS_USER_ID_B }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CHATWORK_API_TOKEN: ${{ secrets.CHATWORK_API_TOKEN }}
       CHATWORK_ROOM_ID: ${{ secrets.CHATWORK_ROOM_ID }}
@@ -41,10 +50,10 @@ jobs:
         with: { python-version: "3.11" }
       - run: pip install -r requirements.txt
       - name: replies + leads
-        run: python -m src.main replies
+        run: python -m src.main replies --account ${{ matrix.account }}
       - name: insights (once a day at JST 21時)
         # ★2026-08-02: cronを2時間おきに変えた際に、この条件が古い cron 文字列のまま
         # 取り残されて一致せず、7/18以降 insights が一度も実行されていなかった。
         # 対象は直近25投稿と軽いので、毎回実行する。
         continue-on-error: true
-        run: python -m src.main insights
+        run: python -m src.main insights --account ${{ matrix.account }}

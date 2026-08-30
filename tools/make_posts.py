@@ -22,7 +22,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src import store_sheets as ss  # noqa: E402
 
-COLS = 8                     # id / text / scheduled_at / status / media_id / error / created_at / posted_at
+# ★2026-08-31：末尾に account を足して9列にした。Threadsを二本まわすため。
+#   ★空欄で貼ったら、今まで通り一本目（config.yaml の default_account）に流れる。
+COLS = 9                     # id / text / scheduled_at / status / media_id / error / created_at / posted_at / account
 JARGON = ("宿曜", "二十七宿", "命宮", "栄親", "安壊", "危成", "業胎", "本命宿", "月宿", "七曜")
 SHUKU = ("昴宿", "畢宿", "觜宿", "参宿", "井宿", "鬼宿", "柳宿", "星宿", "張宿", "翼宿", "軫宿",
          "角宿", "亢宿", "氐宿", "房宿", "心宿", "尾宿", "箕宿", "斗宿", "女宿", "虚宿", "危宿",
@@ -78,6 +80,8 @@ def main() -> int:
     ap.add_argument("--every", type=int, default=90, help="何分おきか（既定90＝1時間半）")
     ap.add_argument("--start", default="", help="開始時刻 YYYY-MM-DD HH:MM（既定＝最後の予約の次）")
     ap.add_argument("--out", default="", help="控えの置き場（既定 note_out/投稿◯本_MMDD.tsv）")
+    ap.add_argument("--account", default="",
+                    help="どのThreadsアカウントに流すか（空欄＝一本目）。二本目なら b")
     a = ap.parse_args()
     ss._CACHE.clear()
 
@@ -100,10 +104,10 @@ def main() -> int:
     w = csv.writer(out, delimiter="\t", quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
     for i, p in enumerate(posts):
         t = start + timedelta(minutes=a.every * i)
-        w.writerow([first + i, p, t.strftime("%Y-%m-%d %H:%M:%S"), "scheduled", "", "", "", ""])
+        w.writerow([first + i, p, t.strftime("%Y-%m-%d %H:%M:%S"), "scheduled", "", "", "", "", a.account])
     tsv = out.getvalue()
 
-    # ★検算：全行8列か。行数が合うか
+    # ★検算：全行9列か。行数が合うか
     rows = list(csv.reader(io.StringIO(tsv), delimiter="\t"))
     assert len(rows) == len(posts) and all(len(r) == COLS for r in rows), "列がそろってへん"
 
