@@ -206,11 +206,20 @@ def _strip_honorific(name: str) -> str:
       表紙が【「ゆみさんさんのために」】になった。★実際に納品直前まで行った。
       ★呼び名は敬称抜きで渡すんが決まりや。渡し間違えたら、ここで黙って直して、印を出す。
     """
-    cleaned = re.sub(r"(さん|ちゃん|くん|様|さま)$", "", str(name).strip())
-    if cleaned and cleaned != name.strip():
-        print(f"⚠ --name の敬称を外した：「{name}」→「{cleaned}」"
+    raw = str(name).strip()
+    # ★外すんは【さん・様】だけや。生成側が足すんがこの二つやから、二重になるんはここだけ。
+    #   ★★「ちゃん」「くん」は外さん。呼び名の一部やからや（「まきちゃん」を「まき」に
+    #     変えてもうたら、別の名前になる。呼び名の指定はそのまま通すんが決まり）。
+    #     ★その場合は「まきちゃんさん」になるんで、直せるように印だけ出す。
+    cleaned = re.sub(r"(さん|様|さま)$", "", raw)
+    if cleaned and cleaned != raw:
+        print(f"⚠ --name の敬称を外した：「{raw}」→「{cleaned}」"
               f"（表紙とファイル名は、こっちが自動で『さん』を付ける）")
-    return cleaned or str(name).strip()
+        return cleaned
+    if raw.endswith(("ちゃん", "くん")):
+        print(f"⚠ 呼び名が「{raw}」やと、表紙は「{raw}さん」になる。"
+              f"それでええか確かめること（呼び名はそのまま通す決まりやから、こっちでは外さん）")
+    return raw
 
 
 def cmd_kantei(args: argparse.Namespace) -> None:
