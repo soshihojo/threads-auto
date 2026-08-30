@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 from . import analytics, content, diagnosis, replies as replies_mod, schedule as schedule_mod, store
@@ -197,11 +198,27 @@ _DELIVERY_REMINDER = """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
 
 
+def _strip_honorific(name: str) -> str:
+    """--name に付いてきた敬称を外す。
+
+    ★★2026-08-30：--name に「ゆみさん」と敬称込みで渡してしもた。
+      生成側（shiomi.build_calendar_html / kantei のPDF名）は自分で「さん」を足す作りやから、
+      表紙が【「ゆみさんさんのために」】になった。★実際に納品直前まで行った。
+      ★呼び名は敬称抜きで渡すんが決まりや。渡し間違えたら、ここで黙って直して、印を出す。
+    """
+    cleaned = re.sub(r"(さん|ちゃん|くん|様|さま)$", "", str(name).strip())
+    if cleaned and cleaned != name.strip():
+        print(f"⚠ --name の敬称を外した：「{name}」→「{cleaned}」"
+              f"（表紙とファイル名は、こっちが自動で『さん』を付ける）")
+    return cleaned or str(name).strip()
+
+
 def cmd_kantei(args: argparse.Namespace) -> None:
     """個別鑑定（有料）: 章立て約10,000字の鑑定文を生成し、和風デザインのPDFを出力。"""
     from . import kantei
     details = Path(args.details_file).read_text(encoding="utf-8")
-    res = kantei.make_kantei(args.name, args.me, args.him, details)
+    name = _strip_honorific(args.name)
+    res = kantei.make_kantei(name, args.me, args.him, details)
     print(f"→ LINE公式アプリのチャットからPDFを添付して送付: {res['pdf']}")
     print("\n" + "━" * 24 + " 納品文（LINEにそのまま貼る） " + "━" * 24)
     print(res["note"])
@@ -225,8 +242,9 @@ def cmd_shiomi(args: argparse.Namespace) -> None:
     from . import kantei, shiomi
     details = Path(args.details_file).read_text(encoding="utf-8")
 
-    res = kantei.make_kantei(args.name, args.me, args.him, details)
-    cal = shiomi.make_shiomi(args.name, args.me, args.him, details)
+    name = _strip_honorific(args.name)
+    res = kantei.make_kantei(name, args.me, args.him, details)
+    cal = shiomi.make_shiomi(name, args.me, args.him, details)
 
     print("\n" + "━" * 72)
     print("📦 潮見は三点セットや。この順番で送る:")
