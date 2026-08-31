@@ -335,8 +335,11 @@ MAKIKOさんの回。昼に届いた八枚のスクショは、ぜんぶ【ト�
 
 **スプシにそのまま貼れる形で出す。** 説明を挟んだ読み物にして出さん（貼れんかったら値打ちがない）。
 
-- 区切りはタブ。列はシートの `scheduled_posts` と同じ **8列**
-  `id / text / scheduled_at / status / media_id / error / created_at / posted_at`
+- 区切りはタブ。列はシートの `scheduled_posts` と同じ **9列**
+  `id / text / scheduled_at / status / media_id / error / created_at / posted_at / account`
+  ★**2026-08-31に `account` を末尾に足した**（Threadsを二本まわせるようにしたため）。
+  　**空欄＝一本目（椿）** や。今まで通りそのまま貼ったら、椿から出る。
+  　二本目に流したい時だけ `b` と入れる（`make_posts.py --account b` で付く）。
 - 本文は **ダブルクォートで囲む**。中の改行はそのまま入れる（Sheetsは引用符付きの複数行を1セルとして読む）
 - **並びは【シートの行順】に合わせる。時刻順やない。**
   ★ここが事故の口や。`"2026-08-27 10:00"` と `"2026-08-27 1:00"` を文字列で並べると
