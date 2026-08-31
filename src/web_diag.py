@@ -345,12 +345,17 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
 <script>
 // 計測（訪問者の匿名ID＋ビーコン。失敗しても画面には影響させない）
 const VID=(()=>{try{
-  // ★2026-08-31：?a=b で来たら、どのアカウント経由かを一緒に送る
-  const SRC = (new URLSearchParams(location.search).get("a")||"").slice(0,16);
   let v=localStorage.getItem("tsubaki_vid");
   if(!v){ v=(crypto.randomUUID?crypto.randomUUID():Date.now()+"-"+Math.random().toString(36).slice(2));
           localStorage.setItem("tsubaki_vid",v); }
   return v;
+}catch(_){ return ""; }})();
+// ★★2026-08-31：?a=b で来たら、どのアカウント経由かを一緒に送る。
+//   ★ここは【トップレベル】に置くこと。一回、上のIIFEの中に入れてしもて、
+//     SRC が関数の外から見えんようになった。★fetch の行で ReferenceError が出て、
+//     画面には「ごめんな、視るのに失敗したわ」が出続けた（＝LINE追加が丸ごと止まった）。
+const SRC=(()=>{try{
+  return (new URLSearchParams(location.search).get("a")||"").replace(/[^0-9a-zA-Z_-]/g,"").slice(0,16);
 }catch(_){ return ""; }})();
 function track(e){ try{ navigator.sendBeacon("/shindan/track?e="+e+"&vid="+encodeURIComponent(VID)); }catch(_){} }
 track("view");
