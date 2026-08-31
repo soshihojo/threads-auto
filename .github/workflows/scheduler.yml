@@ -44,3 +44,53 @@ jobs:
         run: python -m src.main refresh-token --account ${{ matrix.account }} || true
       - name: run due scheduled posts
         run: python -m src.main run-due --account ${{ matrix.account }}
+
+  # ★★★2026-08-31 新設：コメント返信を、ここでも回す。
+  #
+  #   なんで scheduler に相乗りさせるか。
+  #   ★poll.yml の schedule が【7時間半、一度も発火せんかった】。実害：返信が丸ごと止まった。
+  #   ★★GitHub Actions の schedule はベストエフォートで、間引かれる時は間引かれる。
+  #     8/29に cron を "17,47" にずらして混雑を避けたが、それでも死んだ。★根治せん。
+  #   ★★★対して、この scheduler は【外部から workflow_dispatch で15分おきに叩かれとる】。
+  #     実測：13:00 / 13:15 / 13:30 / 13:45… と、途切れず動いとる。
+  #     ★せやから、確実に動いとる方の便に、返信を相乗りさせる。
+  #
+  #   投稿が遅れんのか。★遅れん。
+  #   ★★GitHub Actions の【ジョブは並列に走る】。run-due とは別のジョブやから、
+  #     返信が何分かかろうと、投稿はいつも通り即座に出る。
+  #     （実測：巡回は3.5〜9分、scheduler本体は1分未満。15分間隔に十分収まる）
+  #
+  #   二重に返信せんのか。★せん。
+  #   ★★concurrency のグループ名を poll.yml と【同じ】にしてある。
+  #     グループはリポジトリ全体で共有されるんで、poll.yml の cron が生き返っても、
+  #     同じアカウントの巡回は常に一本しか走らん。
+  #   ★★★ほんで processed_replies の既読の印もあるんで、二重返信は二重に防がれとる。
+  #
+  #   ★poll.yml は消さん。二つの経路から起動される方が、片方が死んでも止まらん。
+  replies:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        account: [a, b]
+    concurrency:
+      group: threads-poll-${{ matrix.account }}   # ★poll.yml と同じ名前にすること
+      cancel-in-progress: false
+    env:
+      STORE_BACKEND: sheets
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_KEY: ${{ secrets.GOOGLE_SHEET_KEY }}
+      THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+      THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+      THREADS_ACCESS_TOKEN_B: ${{ secrets.THREADS_ACCESS_TOKEN_B }}
+      THREADS_USER_ID_B: ${{ secrets.THREADS_USER_ID_B }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CHATWORK_API_TOKEN: ${{ secrets.CHATWORK_API_TOKEN }}
+      CHATWORK_ROOM_ID: ${{ secrets.CHATWORK_ROOM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - name: replies + leads
+        run: python -m src.main replies --account ${{ matrix.account }}
