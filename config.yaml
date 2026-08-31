@@ -22,6 +22,9 @@ accounts:
     profile: tsubaki
     env_suffix: ""            # THREADS_ACCESS_TOKEN / THREADS_USER_ID
     source: ""                # 診断URLの ?a= に入れる印。空なら付けん
+    # ★「生まれ月」装置の最低率。椿の主戦場やからここは高いまま。
+    #   実測：あり=views中央292／なし=中央160。伸びた上位12本のうち10本がこれ。
+    device_min: 0.6
   b:
     label: 椿さん（tsubakisan_honne）
     # ★2026-08-31：同じブランド（椿）で二本目を出す方針に決まった。
@@ -32,6 +35,14 @@ accounts:
     profile: tsubaki
     env_suffix: "_B"          # THREADS_ACCESS_TOKEN_B
     source: b                 # 固定投稿のリンクを /shindan?a=b にする
+    # ★★2026-08-31：椿さんは【生まれ月装置を使わん】。0 にしてある。
+    #   ★理由：生まれ月は椿（一本目）の主戦場や。二本で同じ装置を回したら、
+    #     切り口がすぐ枯れるし、同じ読者に同じ形が二回届く。
+    #   ★★★代わりに椿さんは【難しい恋（復縁・音信不通・言えん恋）】に絞って、
+    #     名乗り／逆張り／思想／受付、という別の装置で回す。
+    #   ★★これは【賭け】や。生まれ月の数字は椿で採れたもんで、
+    #     椿さんの装置はまだ一本も実測が無い。★出たら測って、ここを直す。
+    device_min: 0.0
 
 profiles:
   # ---- C：占い・恋愛（椿／tsubaki_honne）----

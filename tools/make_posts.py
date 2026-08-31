@@ -86,8 +86,13 @@ def _sim(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
 
 
-def _existing() -> list[tuple[str, str]]:
-    """(どこの投稿か, 本文) を集める。★両アカウントぶん。"""
+def _existing(skip: set[tuple[str, str]] | None = None) -> list[tuple[str, str]]:
+    """(どこの投稿か, 本文) を集める。★両アカウントぶん。
+
+    skip … (シート名, id) の集合。★差し替え対象の行は、自分自身と比べても
+            しゃあないんで外す（★これが無いと、書き直すたびに自分と被る）。
+    """
+    skip = skip or set()
     out = []
     for r in ss._records("posts"):
         txt = str(r.get("text") or "").strip()
@@ -99,6 +104,8 @@ def _existing() -> list[tuple[str, str]]:
         except Exception:
             continue        # ★シートがまだ無い時は黙って飛ばす
         for r in rows:
+            if (table, str(r.get("id"))) in skip:
+                continue
             if str(r.get("status")) in ("scheduled", "pending_review"):
                 txt = str(r.get("text") or "").strip()
                 if txt:
@@ -106,10 +113,10 @@ def _existing() -> list[tuple[str, str]]:
     return out
 
 
-def check_dup(posts: list[str]) -> list[str]:
+def check_dup(posts: list[str], skip: set[tuple[str, str]] | None = None) -> list[str]:
     """新しい下書きが、過去のもんと被ってへんか見る。★両アカウントをまたいで見る。"""
     warn = []
-    old = _existing()
+    old = _existing(skip)
     olds = [(w, _norm(txt), _hook(txt)) for w, txt in old]
     print(f"　 重複チェック：過去 {len(olds)}本と突き合わせる（両アカウント）")
 
@@ -139,7 +146,7 @@ def check_dup(posts: list[str]) -> list[str]:
     return warn
 
 
-def check(posts: list[str]) -> list[str]:
+def check(posts: list[str], account: str | None = None) -> list[str]:
     """出す前の検品。★ここで止まったら、中身を直してから出す。"""
     bad = []
     for i, p in enumerate(posts, 1):
@@ -152,9 +159,14 @@ def check(posts: list[str]) -> list[str]:
                 bad.append(f"{i}本目：NG語「{k}」が入っとる")
         if n > 140:
             bad.append(f"{i}本目：{n}字。★100字以下がいちばん伸びる（実測 views中央319）")
+    # ★★2026-08-31：「生まれ月」の要求率は【アカウントごと】に持たせた。
+    #   ★椿は 0.6（実測で効いとる装置やから外さん）。
+    #   ★★椿さんは 0.0（生まれ月は椿の主戦場。二本で同じ装置を回したら切り口が枯れる）。
+    from src.config import account_conf
+    need = float(account_conf(account).get("device_min", 0.6))
     rate = sum(1 for p in posts if DEVICE.search(p)) / max(1, len(posts))
-    if rate < 0.6:
-        bad.append(f"★「生まれ月」の率が {rate*100:.0f}%。6割以上にする"
+    if need > 0 and rate < need:
+        bad.append(f"★「生まれ月」の率が {rate*100:.0f}%。{need*100:.0f}%以上にする"
                    "（あり=中央292／なし=中央160。伸びた上位12本のうち10本がこれ）")
     return bad
 
@@ -167,6 +179,9 @@ def main() -> int:
     ap.add_argument("--out", default="", help="控えの置き場（既定 note_out/投稿◯本_MMDD.tsv）")
     ap.add_argument("--account", default="",
                     help="どのThreadsアカウントに流すか（空欄＝一本目）。二本目なら b")
+    ap.add_argument("--replace", default="",
+                    help="差し替え。'1-10' のように、持ち回る既存の id を指定する。"
+                         "★id と時刻はそのまま使い、その行は重複チェックの対象から外す")
     a = ap.parse_args()
     ss._CACHE.clear()
 
@@ -177,7 +192,7 @@ def main() -> int:
     acc = a.account or None
     table = ss.sched_table(acc)
 
-    bad = check(posts)
+    bad = check(posts, acc)
     if bad:
         print("❌ 検品で止まった。直してからもう一回：")
         for b in bad:
@@ -185,7 +200,16 @@ def main() -> int:
         return 1
 
     # ★★重複チェックは【止める】。警告で流したら、結局そのまま貼ってまうからや。
-    dup = check_dup(posts)
+    # ★差し替えの時は、持ち回る id を重複チェックから外す（自分と比べても意味が無い）
+    keep_ids: list[str] = []
+    if a.replace:
+        m = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", a.replace)
+        keep_ids = ([str(i) for i in range(int(m.group(1)), int(m.group(2)) + 1)] if m
+                    else [x.strip() for x in a.replace.split(",") if x.strip()])
+        if len(keep_ids) != len(posts):
+            print(f"❌ 差し替えの id が {len(keep_ids)}件、本文が {len(posts)}本。数が合わん")
+            return 1
+    dup = check_dup(posts, {(table, i) for i in keep_ids})
     if dup:
         print("❌ 切り口が被っとる。直してからもう一回：")
         for d in dup:
@@ -194,15 +218,27 @@ def main() -> int:
         print("   ★同じ読者にも二回届く。そっちの方が痛い。")
         return 1
 
-    start = (datetime.strptime(a.start, "%Y-%m-%d %H:%M") if a.start
-             else (_last_scheduled(acc) or datetime.now()) + timedelta(minutes=a.every))
-    first = _next_id(acc)
-
     out = io.StringIO()
     w = csv.writer(out, delimiter="\t", quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
-    for i, p in enumerate(posts):
-        t = start + timedelta(minutes=a.every * i)
-        w.writerow([first + i, p, t.strftime("%Y-%m-%d %H:%M:%S"), "scheduled", "", "", "", "", a.account])
+    if keep_ids:
+        # ★差し替え：既存の id と時刻を、そのまま持ち回る
+        by_id = {str(r.get("id")): r for r in ss._records(table)}
+        missing = [i for i in keep_ids if i not in by_id]
+        if missing:
+            print(f"❌ シート {table} に id {missing} が無い")
+            return 1
+        rows_at = [by_id[i].get("scheduled_at") for i in keep_ids]
+        for i, p in zip(keep_ids, posts):
+            w.writerow([i, p, by_id[i].get("scheduled_at"), "scheduled", "", "", "", "", a.account])
+        start = datetime.strptime(str(rows_at[0])[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S")
+        first = int(keep_ids[0])
+    else:
+        start = (datetime.strptime(a.start, "%Y-%m-%d %H:%M") if a.start
+                 else (_last_scheduled(acc) or datetime.now()) + timedelta(minutes=a.every))
+        first = _next_id(acc)
+        for i, p in enumerate(posts):
+            tt = start + timedelta(minutes=a.every * i)
+            w.writerow([first + i, p, tt.strftime("%Y-%m-%d %H:%M:%S"), "scheduled", "", "", "", "", a.account])
     tsv = out.getvalue()
 
     # ★検算：全行9列か。行数が合うか
@@ -223,7 +259,11 @@ def main() -> int:
     print(f"　 控え: {dst}")
     label = "椿（tsubaki_honne）" if table == "scheduled_posts" else "椿さん（tsubakisan_honne）"
     print(f"　 ★貼り先のシート: 【{table}】　{label}")
-    print(f"　 ★貼り始め: B{len(ss._records(table))+ss.FIRST_DATA_ROW}")
+    if keep_ids:
+        print(f"　 ★★差し替え：id {keep_ids[0]}〜{keep_ids[-1]} の行に【上書き】する")
+        print(f"　 ★貼り始め: B{ss.FIRST_DATA_ROW + [str(r.get('id')) for r in ss._records(table)].index(keep_ids[0])}")
+    else:
+        print(f"　 ★貼り始め: B{len(ss._records(table))+ss.FIRST_DATA_ROW}")
     print("\n" + "─" * 60 + "\n")
     print(tsv, end="")
     return 0
