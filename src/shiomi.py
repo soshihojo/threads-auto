@@ -360,17 +360,40 @@ def check_daylists(s: "Shiomi", today: str, horizon: int = 89) -> list[str]:
 SHIOMI_LEDGER = OUT_DIR / "_潮見を買うた人.txt"
 
 
+def _norm_name(s: str) -> str:
+    """名寄せ用に均す（敬称を落とす）。tools/uriage.py と同じ考え方や。"""
+    s = str(s or "").strip()
+    for w in ("さん", "ちゃん", "くん", "様"):
+        if s.endswith(w):
+            s = s[: -len(w)]
+    return s
+
+
 def record_shiomi_buyer(name: str, today: str) -> None:
-    """潮見の名簿に一行足す。★同じ名前が二回来ても、重ねて書かん。"""
+    """潮見の名簿に一行足す。★同じ人が二回来ても、重ねて書かん。
+
+    ★★★2026-08-31：ここが【三列】で書いとった。台帳はもう【四列】や
+      （日付／名前／LINEの表示名／user_id）。
+      せやから「月詠みは5,980円」いう注記が【表示名の列】に入っとった。
+      ★実害：壊れた行が二つ溜まった（純子・ゆみさん）。
+      ★★おまけに、敬称の有無で別人扱いになって重複しとった
+        （手で書いた「ゆみ」と、ここが書いた「ゆみさん」）。
+      ★★★列を合わせて、名寄せしてから重複を見る形に直す。
+    """
     SHIOMI_LEDGER.parent.mkdir(exist_ok=True)
-    line = f"{today}\t{name}\t月詠みは5,980円"
     old = SHIOMI_LEDGER.read_text(encoding="utf-8") if SHIOMI_LEDGER.exists() else ""
-    if any(l.split("\t")[1:2] == [name] for l in old.splitlines() if l.strip()):
-        return
+    key = _norm_name(name)
+    for l in old.splitlines():
+        if not l.strip() or l.startswith("#"):
+            continue
+        cols = l.split("\t")
+        # ★名前の列と表示名の列、どっちで書かれとっても拾う
+        if key and key in {_norm_name(c) for c in cols[1:3]}:
+            return
+    # ★表示名と user_id は、こっちでは分からん。空欄で置いて、店主が後から埋める。
+    line = f"{today}\t{name}\t\t"
     head = ("# 潮見（9,800円）を買うた人の名簿。\n"
-            "# ★この人らの月詠みは【月5,980円】や。本鑑定だけの人（3,980円）とちゃう。\n"
-            "# ★★試しに作っただけの分は、この行を手で消しといて。\n"
-            "# 日付\t名前\t月詠みの値段\n") if not old else ""
+            "# 日付\t名前\tLINEの表示名\tuser_id（同名がおる時は必須）\n") if not old else ""
     SHIOMI_LEDGER.write_text(old + head + line + "\n", encoding="utf-8")
 
 
