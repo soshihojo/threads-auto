@@ -40,18 +40,18 @@ def run_due(client: ThreadsClient, account: str | None = None) -> dict:
         #   原因が何であれ（id重複・マーク失敗・シートの手編集）、
         #   「同じ本文は二度と出さん」を最後の壁にする。
         if store.was_posted_before(text):
-            store.mark_scheduled(row["id"], "skipped",
+            store.mark_scheduled(row["id"], "skipped", account=account,
                                  error="同一本文を配信済み（再配信ループ防止）")
             print(f"⏭  予約スキップ（配信済み本文）: id={row['id']}")
             continue
         try:
             media_id = client.publish_thread(text)
-            store.mark_scheduled(row["id"], "posted", media_id=media_id)
+            store.mark_scheduled(row["id"], "posted", media_id=media_id, account=account)
             store.save_post(media_id, text, profile["name"])
             stats["posted"] += 1
             print(f"✅ 予約投稿 配信: id={row['id']} media_id={media_id}")
         except Exception as e:
-            store.mark_scheduled(row["id"], "failed", error=str(e))
+            store.mark_scheduled(row["id"], "failed", error=str(e), account=account)
             stats["failed"] += 1
             print(f"❌ 予約投稿 失敗: id={row['id']} {e}")
     return stats

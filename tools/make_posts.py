@@ -15,7 +15,7 @@
 　★ここを機械にやらせて、こっちは中身だけ考える。
 """
 from __future__ import annotations
-import argparse, csv, io, re, sys, statistics
+import argparse, csv, difflib, io, re, sys, statistics
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -33,13 +33,13 @@ NG = ("**", "##", "必ず", "絶対", "保証", "あいつ", "あの男", "先�
 DEVICE = re.compile(r"(何月生まれ|生まれ月|月生まれ)")
 
 
-def _next_id() -> int:
-    ids = [int(r["id"]) for r in ss._records("scheduled_posts")
+def _next_id(account: str | None = None) -> int:
+    ids = [int(r["id"]) for r in ss._records(ss.sched_table(account))
            if str(r.get("id", "")).strip().isdigit()]
     return (max(ids) + 1) if ids else 1
 
 
-def _last_scheduled() -> datetime | None:
+def _last_scheduled(account: str | None = None) -> datetime | None:
     """いちばん先の予約時刻を返す（そこに繋げるため）。"""
     def pd(s):
         s = str(s)[:19].replace("T", " ")
@@ -48,10 +48,95 @@ def _last_scheduled() -> datetime | None:
                 return datetime.strptime(s, f)
             except ValueError:
                 pass
-    ts = [pd(r["scheduled_at"]) for r in ss._records("scheduled_posts")
+    ts = [pd(r["scheduled_at"]) for r in ss._records(ss.sched_table(account))
           if str(r.get("status")) == "scheduled" and str(r.get("scheduled_at")).strip()]
     ts = [x for x in ts if x]
     return max(ts) if ts else None
+
+
+# ★★★2026-08-31 新設：切り口の重複チェック。
+#
+#   なんで要るか。★椿と椿さん、二本とも同じ人格（profile=tsubaki）で走らせる。
+#   ★★同じ切り口を両方で流したら、Threads は重複と見て片方の露出を落とす。
+#   ★★★ほんで、同じ読者に二回届く。興ざめする。実害はそっちの方が大きい。
+#
+#   何と比べるか。★【両方のアカウントの】過去の投稿と、まだ出てへん予約の全部や。
+#     ・posts          … 配信済み（両アカウント。profile が同じでも中身で見る）
+#     ・scheduled_posts   … 椿の未配信
+#     ・scheduled_posts_b … 椿さんの未配信
+#
+#   どう測るか。★一行目（フック）と、本文まるごとの二本立て。
+#     ★フックが似とったら、中身がちごても「また同じやつか」と見える。
+#     ★★せやからフックの方を厳しめに見る。
+HOOK_LIMIT = 0.72       # 一行目の似とる率。これ以上で警告
+BODY_LIMIT = 0.62       # 本文まるごとの似とる率
+_MONTH = re.compile(r"([0-9１-９]{1,2})月生まれ")
+
+
+def _norm(s: str) -> str:
+    """比べる用に均す。記号と空白を落として、数字だけ残す。"""
+    return re.sub(r"[\s、。！？!?…—・「」『』（）()♡★☆🌙😊]", "", str(s or ""))
+
+
+def _hook(p: str) -> str:
+    return _norm(p.strip().splitlines()[0] if p.strip() else "")
+
+
+def _sim(a: str, b: str) -> float:
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _existing() -> list[tuple[str, str]]:
+    """(どこの投稿か, 本文) を集める。★両アカウントぶん。"""
+    out = []
+    for r in ss._records("posts"):
+        txt = str(r.get("text") or "").strip()
+        if txt:
+            out.append((f"配信済み({r.get('profile') or '?'})", txt))
+    for table, label in (("scheduled_posts", "椿の予約"), ("scheduled_posts_b", "椿さんの予約")):
+        try:
+            rows = ss._records(table)
+        except Exception:
+            continue        # ★シートがまだ無い時は黙って飛ばす
+        for r in rows:
+            if str(r.get("status")) in ("scheduled", "pending_review"):
+                txt = str(r.get("text") or "").strip()
+                if txt:
+                    out.append((f"{label} id={r.get('id')}", txt))
+    return out
+
+
+def check_dup(posts: list[str]) -> list[str]:
+    """新しい下書きが、過去のもんと被ってへんか見る。★両アカウントをまたいで見る。"""
+    warn = []
+    old = _existing()
+    olds = [(w, _norm(txt), _hook(txt)) for w, txt in old]
+    print(f"　 重複チェック：過去 {len(olds)}本と突き合わせる（両アカウント）")
+
+    for i, p in enumerate(posts, 1):
+        pn, ph = _norm(p), _hook(p)
+        worst = None
+        for where, on, oh in olds:
+            hs = _sim(ph, oh) if ph and oh else 0.0
+            bs = _sim(pn, on)
+            if hs >= HOOK_LIMIT or bs >= BODY_LIMIT:
+                score = max(hs, bs)
+                if worst is None or score > worst[0]:
+                    worst = (score, where, on[:38], hs, bs)
+        if worst:
+            _, where, head, hs, bs = worst
+            warn.append(f"{i}本目：{where} と被っとる"
+                        f"（フック{hs*100:.0f}% / 本文{bs*100:.0f}%）→ {head}…")
+
+    # ★今回の30本の中どうしも見る（同じ切り口を二本入れてまうことがある）
+    for i in range(len(posts)):
+        for j in range(i + 1, len(posts)):
+            hs = _sim(_hook(posts[i]), _hook(posts[j]))
+            bs = _sim(_norm(posts[i]), _norm(posts[j]))
+            if hs >= HOOK_LIMIT or bs >= BODY_LIMIT:
+                warn.append(f"{i+1}本目と{j+1}本目が中で被っとる"
+                            f"（フック{hs*100:.0f}% / 本文{bs*100:.0f}%）")
+    return warn
 
 
 def check(posts: list[str]) -> list[str]:
@@ -89,6 +174,9 @@ def main() -> int:
     if not posts:
         posts = [p.strip() for p in Path(a.file).read_text(encoding="utf-8").split("\n\n") if p.strip()]
 
+    acc = a.account or None
+    table = ss.sched_table(acc)
+
     bad = check(posts)
     if bad:
         print("❌ 検品で止まった。直してからもう一回：")
@@ -96,9 +184,19 @@ def main() -> int:
             print("   " + b)
         return 1
 
+    # ★★重複チェックは【止める】。警告で流したら、結局そのまま貼ってまうからや。
+    dup = check_dup(posts)
+    if dup:
+        print("❌ 切り口が被っとる。直してからもう一回：")
+        for d in dup:
+            print("   " + d)
+        print("\n   ★★同じ切り口を二本のアカウントで流したら、Threadsが片方を落とす。")
+        print("   ★同じ読者にも二回届く。そっちの方が痛い。")
+        return 1
+
     start = (datetime.strptime(a.start, "%Y-%m-%d %H:%M") if a.start
-             else (_last_scheduled() or datetime.now()) + timedelta(minutes=a.every))
-    first = _next_id()
+             else (_last_scheduled(acc) or datetime.now()) + timedelta(minutes=a.every))
+    first = _next_id(acc)
 
     out = io.StringIO()
     w = csv.writer(out, delimiter="\t", quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
@@ -123,7 +221,9 @@ def main() -> int:
     print(f"　 字数 中央{statistics.median(ns):.0f}（{min(ns)}〜{max(ns)}）／"
           f"生まれ月 {100*sum(1 for p in posts if DEVICE.search(p))//len(posts)}%")
     print(f"　 控え: {dst}")
-    print(f"　 ★貼り始め: シートの最終行の次（B{len(ss._records('scheduled_posts'))+ss.FIRST_DATA_ROW}）")
+    label = "椿（tsubaki_honne）" if table == "scheduled_posts" else "椿さん（tsubakisan_honne）"
+    print(f"　 ★貼り先のシート: 【{table}】　{label}")
+    print(f"　 ★貼り始め: B{len(ss._records(table))+ss.FIRST_DATA_ROW}")
     print("\n" + "─" * 60 + "\n")
     print(tsv, end="")
     return 0

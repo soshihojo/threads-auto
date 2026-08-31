@@ -51,6 +51,11 @@ TABLES = {
     #   ★末尾に足す限り、既存の行は "" になるだけで壊れん（_records は位置で読む）。
     #   ★空欄＝一本目（default_account）として扱う。今まで貼った行はそのまま動く。
     "scheduled_posts": ["id", "text", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at", "account"],
+    # ★★2026-08-31：二本目は【別シート】にした。
+    #   ★同じシートに account 列で混ぜとくと、手で貼る時に必ずどっちかに紛れる。
+    #   ★★シートごと分けたら、貼る場所を間違えん限り混ざりようがない。
+    #   （account 列は残す。どっちのシートの行か、行だけ見ても分かるようにするため）
+    "scheduled_posts_b": ["id", "text", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at", "account"],
     "members": ["id", "nickname", "me_birth", "him_birth", "note", "created_at", "line_user_id"],
     "readings": ["id", "member_id", "month", "worry", "reading", "created_at"],
     "line_users": ["user_id", "display_name", "me_birth", "him_birth", "bot", "note", "created_at", "updated_at"],
@@ -329,6 +334,19 @@ def recent_leads(limit: int = 50) -> list[dict]:
 
 
 # ---- scheduled posts / candidates ----
+def sched_table(account: str | None = None) -> str:
+    """そのアカウントの予約シート名を返す。
+
+    ★一本目（default_account）は今まで通り "scheduled_posts"。
+      二本目からは "scheduled_posts_b" のように、キーを後ろに付けた別シートになる。
+    ★★シートを分ける理由：同じシートに混ぜとくと、手で貼る時に必ず紛れるからや。
+    """
+    cfg = load_config()
+    default = cfg.get("default_account") or next(iter(cfg.get("accounts") or {"a": {}}))
+    key = account or default
+    return "scheduled_posts" if key == default else f"scheduled_posts_{key}"
+
+
 def _next_id() -> int:
     ids = [int(r["id"]) for r in _records("scheduled_posts") if str(r.get("id", "")).strip().isdigit()]
     return (max(ids) + 1) if ids else 1
@@ -352,10 +370,11 @@ def approve_candidate(post_id: int, scheduled_at: str, text: str | None = None) 
 
 
 def add_scheduled(text: str, scheduled_at: str, account: str = "") -> int:
-    new_id = _next_id()
-    _append("scheduled_posts", {"id": new_id, "text": text,
-                               "scheduled_at": scheduled_at, "status": "scheduled",
-                               "created_at": _now(), "account": account})
+    table = sched_table(account or None)
+    new_id = _next_id_for(table)
+    _append(table, {"id": new_id, "text": text,
+                    "scheduled_at": scheduled_at, "status": "scheduled",
+                    "created_at": _now(), "account": account})
     return new_id
 
 
@@ -410,22 +429,18 @@ def list_scheduled(status: str | None = None, limit: int = 200) -> list[dict]:
 
 
 def due_scheduled(now_iso: str, account: str | None = None) -> list[dict]:
-    """時刻が来た予約を返す。account を渡したら、そのアカウント宛だけに絞る。
+    """時刻が来た予約を返す。
 
-    ★2026-08-31：account が空欄の行は【一本目】として扱う。
-      今まで手で貼ってきた行はぜんぶ空欄やから、そのまま一本目に流れる。
+    ★★2026-08-31（改）：アカウントごとに【シートを分けた】んで、
+      ここは「そのアカウントのシートを読む」だけでええ。列で絞る必要は無い。
+      ★一本目は今まで通り scheduled_posts。二本目は scheduled_posts_b。
     """
     now = parse_dt(now_iso) or datetime.now()
-    default_key = (load_config().get("default_account")
-                   or next(iter(load_config().get("accounts") or {"a": {}})))
+    table = sched_table(account)
     due = []
-    for r in _records("scheduled_posts"):
+    for r in _records(table):
         if r.get("status") != "scheduled":
             continue
-        if account is not None:
-            row_acc = str(r.get("account") or "").strip() or default_key
-            if row_acc != account:
-                continue
         t = parse_dt(r.get("scheduled_at"))
         if t and t <= now:
             due.append((t, r))
@@ -433,8 +448,17 @@ def due_scheduled(now_iso: str, account: str | None = None) -> list[dict]:
     return [r for _, r in due]
 
 
-def mark_scheduled(post_id: int, status: str, *, media_id: str | None = None, error: str | None = None) -> None:
-    idx = _find_row("scheduled_posts", "id", post_id)
+def mark_scheduled(post_id: int, status: str, *, media_id: str | None = None,
+                   error: str | None = None, account: str | None = None) -> None:
+    """予約行に印を付ける。
+
+    ★★2026-08-31：account を渡したら、そのアカウントのシートを触る。
+      ★渡さんかったら今まで通り scheduled_posts。
+      ★★★ここを間違えると【投稿したのに済みの印が付かん】→ 十五分後にまた投稿される。
+        （8/17〜18に同じ本文が十本二重に出た事故がそれや。二度と繰り返さん）
+    """
+    table = sched_table(account)
+    idx = _find_row(table, "id", post_id)
     if not idx:
         return
     updates = {"status": status}
@@ -444,7 +468,7 @@ def mark_scheduled(post_id: int, status: str, *, media_id: str | None = None, er
         updates["error"] = error
     if status == "posted":
         updates["posted_at"] = _now()
-    _update_cells("scheduled_posts", idx, updates)
+    _update_cells(table, idx, updates)
 
 
 def cancel_scheduled(post_id: int) -> None:
