@@ -61,7 +61,17 @@ def _recent_reply_tails(limit: int = 12) -> list[str]:
 
 
 def _draft_reply(reply_text: str, username: str, is_lead: bool,
-                 recent: list[str] | None = None) -> str:
+                 recent: list[str] | None = None, post_text: str = "") -> str:
+    """コメントへの返信を作る。
+
+    ★★★2026-08-31：post_text（元の投稿の本文）を渡すようにした。理由を残す。
+      椿さん（二本目）で「①②③のどれか番号だけコメントして」いう型を使い出した。
+      ★そしたら相手のコメントが【「③」】の一文字だけになる。
+      ★★元の投稿を渡してへんかったんで、モデルは①②③が何のことか分からんまま書いた。
+      ★★★実害：「③」と答えた人に【「②選んだあんたやろ」】と返してもうた（8/31 22:57）。
+        投稿の選択肢は ①1ヶ月 ②3ヶ月 ③半年超え。半年超えの人に三ヶ月の話をした。
+      ★番号や絵文字だけのコメントは、元の投稿が無いと意味が取れん。必ず渡す。
+    """
     profile = active_profile()
     system = profile.get("reply_system") or REPLY_SYSTEM
     intent = (profile.get("reply_lead_intent") or DEFAULT_LEAD_INTENT) if is_lead else \
@@ -78,8 +88,17 @@ def _draft_reply(reply_text: str, username: str, is_lead: bool,
               "③締めの一文（同じ言い回しは二度使わん）\n"
               "長さも変える。三行の時もあれば、一行で刺す時もあってええ。"
         )
+    # ★元の投稿を先に置く。★番号・絵文字だけのコメントは、これが無いと読めん。
+    ctx = ""
+    if post_text:
+        ctx = (f"【このコメントが付いた、椿の投稿】\n{post_text.strip()}\n\n"
+               "★相手のコメントは、この投稿への返事や。\n"
+               "★★もし投稿に①②③のような選択肢があって、相手が番号だけ書いとるんやったら、"
+               "【その番号が指す中身】を投稿から読み取って返すこと。"
+               "★番号を取り違えたら、まるきり別の人の話を返すことになる。\n\n")
     user = (
-        f"オファー文脈: {profile.get('offer','')}\n"
+        f"オファー文脈: {profile.get('offer','')}\n\n"
+        f"{ctx}"
         f"相手(@{username})のコメント: 「{reply_text}」\n\n{intent}{avoid}"
     )
     text = _clean_reply(complete(system, user, model=REPLY_MODEL,
@@ -151,9 +170,11 @@ def process_replies(client: ThreadsClient) -> dict:
     #   まず全部の投稿から未処理を集めて、古い順に並べてから上限ぶんだけ処理する。
     #   待たされとる人から先に返す。これやと誰も置き去りにならん。
     pending: list[tuple[dict, str, str | None]] = []
+    post_texts: dict[str, str] = {}      # ★post_id → 本文。返信を作る時に渡す
     for post in posts:
         post_id = post["id"]
         permalink = post.get("permalink")
+        post_texts[str(post_id)] = str(post.get("text") or "")
         all_replies = list(client.replies(post_id, top_level_only=True))
         _maybe_self_reply(client, post_id, len(all_replies), self_reply_threshold, stats)
         for r in all_replies:
@@ -219,7 +240,8 @@ def process_replies(client: ThreadsClient) -> dict:
         #   その回の残りのコメントが全部処理されずに終わった。
         #   一人の失敗は一人分で済ませる。残りは続ける。
         try:
-            draft = _draft_reply(rtext, ruser, is_lead, recent=_recent)
+            draft = _draft_reply(rtext, ruser, is_lead, recent=_recent,
+                                 post_text=post_texts.get(str(post_id), ""))
         except Exception as e:
             stats["errors"] = stats.get("errors", 0) + 1
             print(f"[replies] 下書きの生成に失敗（この人は次の巡回に回す）: @{ruser} {e}")
