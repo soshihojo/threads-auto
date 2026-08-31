@@ -23,10 +23,15 @@ accounts:
     env_suffix: ""            # THREADS_ACCESS_TOKEN / THREADS_USER_ID
     source: ""                # 診断URLの ?a= に入れる印。空なら付けん
   b:
-    label: 二本目（キャラ未定）
-    profile: tsubaki          # ★新しいキャラのルールができたら、ここを差し替える
-    env_suffix: "_B"          # THREADS_ACCESS_TOKEN_B / THREADS_USER_ID_B
-    source: b
+    label: 椿さん（tsubakisan_honne）
+    # ★2026-08-31：同じブランド（椿）で二本目を出す方針に決まった。
+    #   ★せやから profile は tsubaki のままでええ。人格は同じや。
+    #   ★★★ただし【文面は必ず散らす】。同じ切り口を両方で流したらあかん。
+    #     Threads は重複を落とすし、同じ読者に二回届いたら興ざめする。
+    #     ★散らし方のルールは、店主から参考の中身をもろてから rules に足す。
+    profile: tsubaki
+    env_suffix: "_B"          # THREADS_ACCESS_TOKEN_B
+    source: b                 # 固定投稿のリンクを /shindan?a=b にする
 
 profiles:
   # ---- C：占い・恋愛（椿／tsubaki_honne）----
