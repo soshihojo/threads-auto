@@ -130,7 +130,12 @@ def _creds_info() -> dict:
 @lru_cache(maxsize=1)
 def _spreadsheet():
     gc = gspread.authorize(Credentials.from_service_account_info(_creds_info(), scopes=SCOPES))
-    return gc.open_by_key(env("GOOGLE_SHEET_KEY", required=True))
+    # ★★★2026-08-31：ここが _api を通ってへんかった。
+    #   実害：scheduler に返信ジョブを足して【4ジョブが同時にSheetsを叩く】ようになった瞬間、
+    #   429（読み取りが一分あたりの上限超え）で run-due が両アカウントとも落ちた＝投稿が止まった。
+    #   ★2026-08-14 に sh.worksheet で同じことをやっとる。★同じ型の穴がもう一つ残っとった。
+    #   ★★待てば直るもんは待つ。ここも必ずリトライを通す。
+    return _api(gc.open_by_key, env("GOOGLE_SHEET_KEY", required=True))
 
 
 @lru_cache(maxsize=None)
