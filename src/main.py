@@ -51,8 +51,9 @@ class AccountNotReady(SystemExit):
 
 def account_ready(account: str | None = None) -> bool:
     sfx = account_conf(account).get("env_suffix", "")
+    # ★トークンさえあれば動く（USER_ID は me から引ける）。
     return bool((_token_file(sfx).exists() and _token_file(sfx).read_text().strip())
-                or env(f"THREADS_ACCESS_TOKEN{sfx}")) and bool(env(f"THREADS_USER_ID{sfx}"))
+                or env(f"THREADS_ACCESS_TOKEN{sfx}"))
 
 
 def skip_if_not_ready(account: str | None) -> bool:
@@ -62,8 +63,7 @@ def skip_if_not_ready(account: str | None) -> bool:
     conf = account_conf(account)
     print(f"⏭  アカウント '{conf['key']}'（{conf.get('label','')}）は、まだトークンが無い。"
           f"何もせんと終わる。"
-          f"★使う時は Secrets に THREADS_ACCESS_TOKEN{conf['env_suffix']} と "
-          f"THREADS_USER_ID{conf['env_suffix']} を入れること")
+          f"★使う時は Secrets に THREADS_ACCESS_TOKEN{conf['env_suffix']} を入れること")
     return True
 
 
@@ -76,7 +76,9 @@ def make_client(account: str | None = None) -> ThreadsClient:
     """
     conf = account_conf(account)
     sfx = conf.get("env_suffix", "")
-    return ThreadsClient(_token(sfx), env(f"THREADS_USER_ID{sfx}", required=True))
+    # ★USER_ID は無うてもええ。★クライアントが me から自分で引く。
+    #   ★新しいアカウントを繋ぐ時、トークンだけで check が通る方が手順が短い。
+    return ThreadsClient(_token(sfx), env(f"THREADS_USER_ID{sfx}"))
 
 
 # ---------- commands ----------
