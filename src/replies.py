@@ -60,6 +60,45 @@ def _recent_reply_tails(limit: int = 12) -> list[str]:
         return []
 
 
+# ★★★2026-08-31：番号の取り違えを、機械で止める。
+#
+#   投稿本文を渡すようにしたら精度は上がった。★せやけど「上がった」だけや。
+#   モデルは読み違える。★実際に一回、「③」に「②選んだあんたやろ」と返して送信済みや。
+#   ★★材料を渡すだけやと、また起きる。★せやから【出た文を検査して止める】。
+#
+#   何を見るか。★相手のコメントが【番号だけ】の時に限って、
+#   　返信の中に【ちがう番号】が入っとったら、それは取り違えや。
+#   ★★番号だけのコメントは、椿さんの①②③型で必ず出る。そこを狙い撃ちにする。
+# ★★★返信の側で選択肢と見なすんは【丸数字だけ】や。裸の数字は見ん。
+#   ★一回、裸の数字も拾う作りにして誤作動した。
+#     選択肢が「②3ヶ月」やと、正しい返信「3ヶ月かぁ…」の【3】を③と読んでもうて、
+#     ★★正しい返信を三回とも捨てた。★元のバグより悪い。
+#   ★★返信本文の数字は、たいてい中身（3ヶ月・1ヶ月）や。選択肢の指し示しやない。
+#     取り違えが表に出るんは「②選んだあんたやろ」のように【丸数字を書く】時だけや。
+_CHOICE_RE = re.compile(r"[①②③④⑤]")
+_CIRCLED = {"1": "①", "2": "②", "3": "③", "4": "④", "5": "⑤"}
+
+
+def _only_choice(text: str) -> str | None:
+    """コメントが【番号だけ】なら、その番号（①②③の形）を返す。ちがえば None。"""
+    s = re.sub(r"[\s。、.,!！?？\-ー~〜（）()]", "", str(text or ""))
+    if len(s) != 1:
+        return None
+    return _CIRCLED.get(s, s if s in "①②③④⑤" else None)
+
+
+def _choice_mismatch(reply_text: str, draft: str) -> str | None:
+    """返信がちがう番号を指しとったら、その番号を返す。問題なければ None。"""
+    want = _only_choice(reply_text)
+    if not want:
+        return None
+    for m in _CHOICE_RE.finditer(draft):
+        got = _CIRCLED.get(m.group(0), m.group(0))
+        if got in "①②③④⑤" and got != want:
+            return got
+    return None
+
+
 def _draft_reply(reply_text: str, username: str, is_lead: bool,
                  recent: list[str] | None = None, post_text: str = "") -> str:
     """コメントへの返信を作る。
@@ -108,6 +147,22 @@ def _draft_reply(reply_text: str, username: str, is_lead: bool,
         text = _clean_reply(complete(
             system + "\n\n【厳重注意】モデル名・署名・占術名・宿の名前を絶対に書かないこと。",
             user, model=REPLY_MODEL, max_tokens=200, temperature=0.9))
+
+    # ★★★番号の取り違えを止める。★一度だけ作り直して、それでも直らんかったら空で返す。
+    #   空で返したら呼び側が「下書きが空」で送信を見送る。★間違うた返信を送るよりましや。
+    wrong = _choice_mismatch(reply_text, text)
+    if wrong:
+        want = _only_choice(reply_text)
+        print(f"[replies] 番号の取り違え（相手は{want}やのに{wrong}と書いた）。作り直す")
+        text = _clean_reply(complete(
+            system + f"\n\n【厳重注意】相手が選んだんは【{want}】や。"
+                     f"★★{want}が指す中身だけを読んで返すこと。"
+                     f"★他の番号（{wrong}など）には一切触れんこと。"
+                     "★★★返信の中に番号そのものを書かんでええ。中身だけ書き。",
+            user, model=REPLY_MODEL, max_tokens=200, temperature=0.9))
+        if _choice_mismatch(reply_text, text):
+            print(f"[replies] 作り直しても取り違えが直らん。★この一件は送らん（次の巡回で拾い直す）")
+            return ""
     return strip_ai_leak(text)
 
 
