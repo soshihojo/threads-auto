@@ -1074,6 +1074,48 @@ _TIC_OPENING_RE = re.compile(
 #   正規版を diagnosis.soften_rude に一本化して、投稿・鑑定書・会員返信も同じ網を通す。
 
 # 見下す語。使われたら作り直し（言い換えでは意味が壊れるため）
+# ★★★2026-09-01：オウム返しを機械で止める。
+#
+#   実害（Asakoさんの回）：
+#     相談者「私の方が仕事が終わるのが遅いから…彼のタイミングで0〜10分以内に折り返してくれる」
+#     椿「0〜10分で必ず折り返してくるんか。それ、待たせてるようで…」
+#   ——相手が今言うたことを、そのまま頭で言い直しとる。★一発でAIやとバレる型や。
+#
+#   NURTURE_SYSTEM には前から「共感やオウム返しから入らない」と書いてある。
+#   ★★書いてあっても守られん。★せやから機械で見る。
+#
+#   見方：返信の【頭のひと文】と、相手の直前の発言に、
+#   　　  長い共通部分（8字以上）があったら、それは言い直しや。
+#   ★8字は「0〜10分以内に折り返し」くらいの長さ。偶然では一致せん。
+#   ★★見方（二回、外した。経緯を残す）：
+#     一回目＝完全一致の部分文字列。★オウム返しは言い換えるんで拾えん。
+#       相手「…0〜10分以内に折り返してくれる」／椿「0〜10分で必ず折り返してくるんか」
+#       共通の部分文字列は「0〜10分」の5字だけやった。
+#     二回目＝同じ長さの窓を滑らせて似とる率。★途中を飛ばす言い換えが拾えん。
+#       「合図で掛けて」と「折り返してくれる」が離れとると、一つの窓に入らん。
+#   ★★★三回目＝【返信の頭のうち、何割が相手の発言から来とるか】で見る。
+#     3字以上そろって一致した分だけ数える（1〜2字は偶然やから数えん）。
+#     6割を超えたら、それは言い直しや。
+_PARROT_COVER = 0.6       # 頭のうち、この割合が相手の発言由来なら言い直し
+_PARROT_MIN_BLOCK = 3     # 3字以上そろった一致だけ数える
+_PARROT_MIN_LEN = 8       # 頭がこれより短い時は見ん（「せやな」等で誤検知する）
+
+
+def _parrot_head(incoming: str, text: str) -> str | None:
+    """返信の頭が、相手の発言の言い直しになっとったら、拾うた一致を返す。"""
+    import difflib
+    if not incoming or not text:
+        return None
+    head = re.sub(r"\s", "", re.split(r"[。、！？!?\n]", text.strip(), maxsplit=1)[0])
+    src = re.sub(r"\s", "", incoming)
+    if len(head) < _PARROT_MIN_LEN or len(src) < _PARROT_MIN_LEN:
+        return None
+    blocks = difflib.SequenceMatcher(None, head, src).get_matching_blocks()
+    hits = [head[b.a:b.a + b.size] for b in blocks if b.size >= _PARROT_MIN_BLOCK]
+    cover = sum(len(h) for h in hits) / len(head)
+    return "／".join(hits) if cover >= _PARROT_COVER else None
+
+
 _DEMEANING_RE = re.compile(r"(?:アホ|あほ|バカ|馬鹿|ばか|情けない|だらしな|しょうもな|クズ|みっともな)")
 
 
@@ -1522,6 +1564,12 @@ def generate_nurture(user: dict, history: list[dict], incoming: str,
     if _TIC_OPENING_RE.match(text):
         problems.append("『ふーん』『あー、それな』のような小説の相槌で書き出した。"
                         "人がLINEで打つ文字やない。前置きの相槌を置かず、いきなり中身から書くこと")
+    _echo = _parrot_head(incoming, text)
+    if _echo:
+        problems.append(f"相手が今言うたことを、頭で言い直した（「{_echo}」）。"
+                        "これはオウム返しで、一発で機械やとバレる。"
+                        "相手の言葉を要約せんと、いきなり【読み】から書き出すこと。"
+                        "相手の発言に触れる時は、頭やのうて途中に置くこと")
     if _DEMEANING_RE.search(text):
         problems.append("相手を見下す語を使った。毒舌の中身は現実を突くことであって悪口やない。"
                         "相談者が好きな人を雑に扱う言い方はせんこと")
