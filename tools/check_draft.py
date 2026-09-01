@@ -115,6 +115,7 @@ def check(text: str, name: str = "", allow_plain: bool = False) -> list[str]:
     bad += _check_hearing_escapes(text)
     bad += _check_time_greeting(text)
     bad += _check_foreign_junk(text)
+    bad += _check_star(text)
     return bad
 
 
@@ -152,6 +153,22 @@ _TIME_GREETINGS = ("おはよう", "こんばんは", "こんにちわ", "こん
 #   ★コードにもルールにもチャット記録にも無い文字列や。
 #     スクショの書き起こしツールか、貼り付けの経路で混ざったもんやと思われる。
 #   ★★他人の著作権表記を付けたまま顧客に送ったら、洒落にならん。ここで止める。
+# ★★★2026-09-01：★印は【こっちの手元の記号】や。顧客に渡す文面に出したらあかん。
+#   実測：システムが作る納品文86件には★が0個。
+#   　　　手で書くヒアリング39件に813個、返信50件に368個、連絡4件に25個。
+#   ＝完全にこっちの書き癖が漏れとるだけや。読む側には意味が無い記号が並ぶ。
+#   店主から「★はいらん、全部削れ」。★機械で止める。
+_STAR_RE = re.compile(r"[★☆]")
+
+
+def _check_star(text):
+    n = len(_STAR_RE.findall(text))
+    if n:
+        return [f"★印が{n}個ある。顧客に渡す文面から全部消すこと"
+                "（こっちの手元の記号や。読む側には意味が無い）"]
+    return []
+
+
 _JUNK = (
     ("Copyright", "著作権表記"), ("copyright", "著作権表記"),
     ("All Rights Reserved", "著作権表記"), ("All rights reserved", "著作権表記"),
