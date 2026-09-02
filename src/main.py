@@ -19,7 +19,7 @@ from pathlib import Path
 from . import analytics, content, diagnosis, replies as replies_mod, schedule as schedule_mod, store
 from .config import (DATA_DIR, account_conf, account_keys, active_profile, env,
                      load_config, profile_for)
-from .threads_client import ThreadsClient
+from .threads_client import AccountBlocked, ThreadsClient
 
 TOKEN_FILE = DATA_DIR / "token.txt"
 
@@ -590,7 +590,49 @@ def main() -> None:
     p_join.set_defaults(func=cmd_join)
     _acc(sub.add_parser("refresh-token")).set_defaults(func=cmd_refresh_token)
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except AccountBlocked as e:
+        _report_blocked(getattr(args, "account", None), e)
+
+
+def _report_blocked(account: str | None, e: Exception) -> None:
+    """アカウントごと止められとる時の後始末。
+
+    ★2026-09-02：椿さん(B)がMetaの検問に掛かった時、
+      15分ごとに scheduler が真っ赤になった。それが困るんは、
+      本家(A)が本当に転けた時の赤が埋もれるからや。
+      せやから——本家が止まったら今まで通り落とす（金が止まる）。
+      二本目が止まったら警告だけ出して0で終わる（集客が止まるだけ）。
+    """
+    conf = account_conf(account)
+    key, label = conf["key"], conf.get("label", "")
+    default = load_config().get("default_account")
+    note = (f"アカウント '{key}'（{label}）が Meta に止められとる。\n"
+            f"  → www.threads.com に @ のIDで入って、出てくる指示に従うこと。\n"
+            f"  → 解いた後は THREADS_ACCESS_TOKEN{conf['env_suffix']} を取り直す（検問で失効しとることが多い）。\n"
+            f"  詳細: {e}")
+    _gha_notice("error" if key == default else "warning", note.replace("\n", " "))
+    if key == default:
+        print(f"❌ {note}")
+        raise SystemExit(1)
+    print(f"⚠️  {note}\n  （本家 '{default}' は動いとるんで、ここは0で終わる。"
+          f"予約投稿は焼かんとそのまま残してある）")
+
+
+def _gha_notice(level: str, msg: str) -> None:
+    """GitHub Actions の注記。ローカルでは何もせん。"""
+    import os
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    print(f"::{level}::{msg}")
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if path:
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(f"\n> **{'🚫' if level == 'error' else '⚠️'} {msg}**\n")
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

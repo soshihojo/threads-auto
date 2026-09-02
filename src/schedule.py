@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from . import store
 from .config import active_profile, profile_for
 from .content import sanitize
-from .threads_client import ThreadsClient
+from .threads_client import AccountBlocked, ThreadsClient
 
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -50,6 +50,12 @@ def run_due(client: ThreadsClient, account: str | None = None) -> dict:
             store.save_post(media_id, text, profile["name"])
             stats["posted"] += 1
             print(f"✅ 予約投稿 配信: id={row['id']} media_id={media_id}")
+        except AccountBlocked as e:
+            # ★2026-09-02：アカウントごと止められとる時は、この投稿が悪いんやない。
+            #   failed を付けたら予約行が焼き付いて二度と出んようになる。
+            #   status は scheduled のまま残して、そこで抜ける。検問が解けたら出る。
+            print(f"🚫 アカウントが止められとる。予約は {len(due)} 本そのまま残す: {e}")
+            raise
         except Exception as e:
             store.mark_scheduled(row["id"], "failed", error=str(e), account=account)
             stats["failed"] += 1

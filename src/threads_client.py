@@ -25,6 +25,38 @@ class ThreadsError(RuntimeError):
     pass
 
 
+class AccountBlocked(ThreadsError):
+    """アカウントごと止められとる（トークン切れ・チェックポイント・権限剥奪）。
+
+    ★2026-09-02：椿さん(B)が22本目を出した28秒後にこれを食らった。
+      「You cannot access the app till you log in to www.threads.com」——
+      Metaが新規アカウントの自動投稿を検問にかけた。人がthreads.comで解くまで直らん。
+
+    これを普通の失敗と混ぜたらあかん理由が二つある。
+      ① 投稿一本の失敗やのうて、アカウント全体の状態や。
+         run_due がこれを「その投稿が失敗した」と扱うと、予約行が
+         failed で焼き付いて二度と出んようになる。38本が消えるとこやった。
+      ② 直し方が人の手（threads.comで検問を解く）で、待っても直らん。
+    """
+
+
+# アカウントごと止まっとる時にMetaが返す文言。部分一致で見る。
+_BLOCKED_HINTS = (
+    "cannot access the app till you log in",   # 検問（チェックポイント）
+    "session has expired",                      # 期限切れ
+    "session is invalid",
+    "access token could not be decrypted",      # トークンが壊れとる
+    "error validating access token",            # 失効・剥奪をまとめて拾う
+    "user is enrolled in a blocking",           # 追加の本人確認待ち
+    "has not authorized application",
+)
+
+
+def is_blocked_message(msg: str) -> bool:
+    m = (msg or "").lower()
+    return any(h in m for h in _BLOCKED_HINTS)
+
+
 class ThreadsClient:
     def __init__(self, access_token: str, user_id: str | None = None, *, timeout: int = 30):
         if not access_token:
@@ -55,7 +87,10 @@ class ThreadsClient:
                     msg = resp.json().get("error", {}).get("message", resp.text)
                 except Exception:
                     msg = resp.text
-                raise ThreadsError(f"{method} {url} -> {resp.status_code}: {msg}")
+                # ★アカウントごと止まっとる系は、投稿一本の失敗と分けて投げる。
+                #   呼び側（run_due）が予約行を failed で焼かんようにするため。
+                exc = AccountBlocked if is_blocked_message(msg) else ThreadsError
+                raise exc(f"{method} {url} -> {resp.status_code}: {msg}")
             return resp.json() if resp.content else {}
         raise ThreadsError(f"リクエスト失敗（{retries}回）: {last_exc}")
 
