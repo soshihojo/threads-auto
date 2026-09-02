@@ -1024,6 +1024,42 @@ _ARTIFACT_LINE_RE = re.compile(
 # metaが混入した。椿の返信は関西弁の日本語だけのはずで、これらの英単語は出てはいけない。
 # 前後がASCII英字でない時だけ（＝日本語や文頭文末・空白に接する時だけ）落とす＝URLや
 # 長い英単語の一部は壊さない。
+# ★★★2026-09-02：椿が【自分で持ち込んだ英単語】を止める。
+#
+#   実害：Asakoさんへの返信に「彼、自分から追わんでも relationship 続いてる思た」。
+#   　　　他にも relationship 8件・that 3件・data 3件。★日本語で言える語を英語で置いた。
+#
+#   ★★ただの英字禁止では駄目や。実測すると、英字の大半は【正当】やった：
+#     ・URL（stores.jp / note.com / buy.stripe.com）… 1,500件超
+#     ・相談者の話に出た固有名詞（Threads / Instagram / TikTok / Twitter /
+#       YouTube / MBTI / USJ / GTO / Vaundy / CoCo / visa …）
+#     ★これを全部止めたら、相手の言葉を拾い返せんようになる。
+#
+#   ★★★見分け方：【相談者の側に出てへん英単語は、椿が持ち込んだもん】や。
+#     会話の履歴（prompt）に無い英字を、椿が急に使うたら、それが漏れ。
+_EN_OK = {
+    # 商売で必ず使う語
+    "LINE", "PDF", "PayPay", "Web", "WEB", "SNS", "DM", "URL", "OFF",
+    # 十中八九そのまま出るサービス名（履歴に無うても許す）
+    "Threads", "Instagram", "TikTok", "Twitter", "YouTube", "SMS", "MBTI",
+    # 日本語の中でそのまま大文字で書く語
+    "SOS", "MAX", "OK", "NG", "TV", "CD", "DVD",
+    "https", "http",   # URL除去をすり抜けた断片
+}
+
+
+def _foreign_word(prompt: str, text: str) -> str | None:
+    """椿が自分で持ち込んだ英単語があれば、それを返す。"""
+    body = re.sub(r"https?://\S+", "", text)          # URLは落とす
+    src = re.sub(r"https?://\S+", "", prompt or "")   # 会話の履歴も同じく
+    src_words = {w.lower() for w in re.findall(r"[A-Za-z]{2,}", src)}
+    for w in re.findall(r"[A-Za-z]{3,}", body):
+        if w in _EN_OK or w.lower() in src_words:
+            continue                                   # 相談者側に出とる語は正当
+        return w
+    return None
+
+
 _META_LEAK_RE = re.compile(
     r"(?i)(?<![A-Za-z])(?:meta|system|assistant|prompt|StructuredOutput|"
     r"tool_call|tool_use|markdown|role:|<\|[a-z_]*\|>)(?![A-Za-z])"
@@ -1546,6 +1582,15 @@ def generate_nurture(user: dict, history: list[dict], incoming: str,
     if _META_LEAK_RE.search(text):
         problems.append("meta・system等の英単語やシステム由来の文字列が混入した。"
                         "椿の返信は関西弁の日本語だけで書き、英単語やコード片を一切混ぜないこと")
+    # ★呼び名（ローマ字の表示名）は prompt に入ってへん。
+    #   ★★入れとかんと「aki」「ema」「Madoka」を漏れと見なしてまう。
+    _en = _foreign_word(prompt + " " + str(user.get("display_name") or ""), text)
+    if _en:
+        problems.append(f"英単語「{_en}」を自分から持ち込んだ。"
+                        "椿は関西弁の日本語しか使わん。日本語に置き換えること"
+                        "（relationship→関係、data→材料、のように）。"
+                        "相談者が言うた固有名詞をそのまま拾うんはええが、"
+                        "自分から英語を混ぜるんはあかん")
     if AI_LEAK_RE.search(text):
         problems.append("モデル名や『執筆者』などの署名が混入した。これは最も重大な事故で、"
                         "椿が生身の人間やないとバレる。返信は椿本人の言葉だけで、"
