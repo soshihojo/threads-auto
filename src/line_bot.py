@@ -1874,11 +1874,15 @@ def _handle_code(user_id: str, incoming: str, snd) -> bool:
     if row:
         store.upsert_line_user(user_id, me_birth=row["me_birth"], him_birth=row["him_birth"])
         base = _diag_count(store.recent_line_chats(user_id, limit=12))  # 生成前の診断数
+        # ★2026-09-03：言い当ては診断ページから外して、ここで出す。
+        #   ページで先に見せると、押される前に引きを使い切る（結果を見た55%が押さん）。
+        from .iiate import iiate as _iiate
+        _hint = _iiate(row["him_birth"], row.get("status") or "") or ""
         res = _retry(lambda: generate_reading(
             row["me_birth"], row["him_birth"],
             row.get("status") or "（不明。性質と縁を中心に視る）",
             row.get("period") or "（不明）",
-            "", for_line=True,
+            "", for_line=True, iiate_hint=_hint,
         ), "番号診断の生成")
         if res is None:
             return True  # 番号は未使用のまま残る＝スイープ/再送で再挑戦できる

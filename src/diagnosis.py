@@ -762,7 +762,8 @@ DIAG_LINE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つ�
 
 
 def generate_reading(me_birth: str, him_birth: str, status: str, period: str,
-                     details: str = "", *, for_line: bool = False) -> dict:
+                     details: str = "", *, for_line: bool = False,
+                     iiate_hint: str = "") -> dict:
     """無料診断の鑑定文を生成して返す。
     details は相談者の自由記述（例: 未読無視が続いてる／既読はつくが返信なし 等）。
     for_line=True はLINE内で自動返信する用（URL誘導なし・会話を続ける締め）。
@@ -783,6 +784,12 @@ def generate_reading(me_birth: str, him_birth: str, status: str, period: str,
         + f"【相談者の状況】{status}\n"
         f"【最後の連絡からの期間】{period}\n"
         + (f"【相談者が書いた具体的な状況】{details}\n" if details.strip() else "")
+        # ★2026-09-03：診断ページに出しとった「彼の言い当て」を、ここへ移した。
+        #   ★理由：ページで先に出すと、押される前にいちばん強い引きを使い切ってまう。
+        #     実測、結果を見た人の55%がボタンに触れんと消えとった。
+        #   ★★ページからは消して、この一点はLINEでだけ出す。ここが最初の「当たってる」になる。
+        + (f"【彼の生まれから引いた一点（★この読みを本文の頭で言い切ること。"
+           f"当てにいく一撃や。ぼかさん）】{iiate_hint}\n" if iiate_hint.strip() else "")
         + "\n"
         "--- 以下は鑑定の内部参考（宿曜の算出結果）。専門用語なので本文には絶対に出さず、"
         "性質や相性の“中身”だけを日常語に翻訳して使うこと ---\n"

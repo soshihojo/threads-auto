@@ -230,13 +230,6 @@ button:disabled { opacity:.5; }
 .badge .bcatch { font-size:14px; color:#d9a441; margin:12px 0 14px; }
 .badge .bline { font-size:14px; text-align:left; color:#efe6da; line-height:1.95; }
 .badge .bsig { font-size:11px; letter-spacing:.3em; color:#8d8177; text-align:right; margin-top:12px; }
-.sharelead { text-align:center; font-size:13.5px; color:#cdbfae; margin:0 0 10px; }
-.share { display:flex; gap:8px; margin-bottom:26px; }
-.share button { flex:1 1 0; padding:12px 4px; margin:0; font-size:13px; letter-spacing:.05em;
-  background:#241a20; color:#efe6da; border:1px solid #443037; border-radius:9px; }
-.share button.x { background:#111; border-color:#333; }
-.share button.th { background:#101010; border-color:#333; }
-.share .done { color:#06C755; }
 .card { border:1px solid #b08d3e; border-radius:12px; padding:26px 20px; text-align:center;
   background:linear-gradient(160deg,#241a20,#1c1318); margin-bottom:22px; }
 .card .lbl { font-size:11px; letter-spacing:.5em; color:#b08d3e; }
@@ -256,6 +249,7 @@ button:disabled { opacity:.5; }
 .iiate .iilim b { color:#d9a441; font-weight:600; }
 .codebox { border:1px dashed #b08d3e; border-radius:10px; text-align:center; padding:14px; margin-bottom:20px; }
 .codebox .lbl { font-size:12px; color:#b08d3e; letter-spacing:.3em; }
+.codebox .ttl { font-size:11.5px; color:#a89b8c; margin-top:10px; letter-spacing:.06em; }
 .codebox .code { font-size:38px; letter-spacing:.3em; color:#fff; font-weight:600; }
 .linebtn { display:block; text-align:center; background:#06C755; color:#fff; text-decoration:none;
   padding:16px; border-radius:10px; font-size:16.5px; letter-spacing:.1em; margin-bottom:14px; }
@@ -314,30 +308,23 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
        ②鑑定番号の箱をボタンの下に回した。頼む前に「番号を控えろ」いう宿題を見せとった
        ③次への一行を、その人に出た縁の名前で書き換えるようにした（JS側で差し込む）。
          前は誰に対しても同じ抽象文やった -->
-  <!-- ★2026-08-14：言い当ての一枚。ここが最初の「当たってる」を起こす場所や。
-       型は3段で固定する：言い当て → 答え合わせを本人にさせる → 限界の白状。
-       限界を白状するから、当てた部分の信用が上がる（討論の裁定）。 -->
-  <div class="iiate" id="iiatebox" style="display:none">
-    <div class="lbl">彼の生まれから、ひとつだけ</div>
-    <p class="ii" id="iitext"></p>
-    <p class="iichk">当たっとるかは、あんたが一番よう知っとるやろ。<br>
-      外れとる思うなら、それも値打ちのある情報や。</p>
-    <p class="iilim">ここまでは、生まれだけで視えるとこ。<br>
-      彼の<b>「今の心」</b>は、ここからでは視えん。</p>
-  </div>
-
+  <!-- ★2026-09-03：言い当ての一枚は、ここから外してLINEの一発目へ移した。
+       ★理由：結果を見た人の55%が、LINEのボタンに触れんと消えとった。
+         ページで「彼」の話まで出し切ると、そこで満足してまう。
+       ★★ほんでLINEの一発目も「Webで視た二人の縁の続きや」て彼の話から入る。ネタが二重やった。
+       ★★★ページは「あんた」と「二人の縁」で止める。彼の話はLINEにしか無い、いう形にする。 -->
   <p class="next" id="nextline"></p>
-  <a class="linebtn" id="lbtn" href="#">LINEで続きを視てもらう</a>
-  <p class="step" id="stept">上のボタン押したら、番号は入っとる。<b>送信だけしてな。</b><br>開かん時は、下の番号をコピーして送ってくれたらええで🌙</p>
+  <a class="linebtn" id="lbtn" href="#">彼が“今”なに考えとるか、視てもらう</a>
+  <!-- ★2026-09-03：番号の箱は、押すまで出さん。押す前に見せると
+       「番号を控えなあかん」いう宿題が視界に入って、それが押さん理由になる。 -->
+  <div id="afterbtn" style="display:none">
+  <p class="step" id="stept">押したら、番号は入っとる。<b>送信だけしてな。</b><br>開かん時は、下の番号をコピーして送ってくれたらええで🌙</p>
   <div class="codebox"><div class="lbl">あんたの鑑定番号</div><div class="code" id="code"></div>
-    <button type="button" class="copybtn" id="copyb">番号をコピー</button></div>
-
-  <p class="sharelead">当たってたら、友達にも当てて回してみ🌙</p>
-  <div class="share">
-    <button type="button" class="x" id="shX">Xでシェア</button>
-    <button type="button" class="th" id="shT">スレッズ</button>
-    <button type="button" id="shC">リンクをコピー</button>
+    <button type="button" class="copybtn" id="copyb">番号をコピー</button>
+    <div class="ttl">この番号は7日で切れる</div></div>
   </div>
+
+  <!-- ★2026-09-03：シェアの釦は丸ごと外した。押す前の画面に、外への出口を置かん。 -->
 </section>
 
 <footer>椿｜彼の本音しか視ん</footer>
@@ -359,26 +346,10 @@ const SRC=(()=>{try{
 }catch(_){ return ""; }})();
 function track(e){ try{ navigator.sendBeacon("/shindan/track?e="+e+"&vid="+encodeURIComponent(VID)); }catch(_){} }
 track("view");
-document.getElementById("lbtn").addEventListener("click", ()=>track("line_click"));
-// 恋愛タイプ・バッジのシェア導線（友達が自分のタイプを視に来る＝新規流入の複利ループ）
-function setupShare(name){
-  const url = location.origin + "/shindan";
-  const text = "私の恋愛タイプ、【"+name+"】やった…当たりすぎて笑う😇\\nあんたのタイプも30秒で視てみ→ #椿の縁視";
-  const full = text + "\\n" + url;
-  const X = document.getElementById("shX"), T = document.getElementById("shT"), C = document.getElementById("shC");
-  X.onclick = ()=>{ track("share_x");
-    window.open("https://twitter.com/intent/tweet?text="+encodeURIComponent(text)+"&url="+encodeURIComponent(url),"_blank"); };
-  T.onclick = ()=>{ track("share_threads");
-    window.open("https://www.threads.net/intent/post?text="+encodeURIComponent(full),"_blank"); };
-  C.onclick = async ()=>{ track("share_copy");
-    try{
-      if(navigator.share){ await navigator.share({text, url}); return; }
-      await navigator.clipboard.writeText(full);
-      C.textContent="コピーした！貼ってな"; C.classList.add("done");
-      setTimeout(()=>{ C.textContent="リンクをコピー"; C.classList.remove("done"); }, 2200);
-    }catch(_){}
-  };
-}
+document.getElementById("lbtn").addEventListener("click", ()=>{
+  track("line_click");
+  var ab=document.getElementById("afterbtn"); if(ab) ab.style.display="block";
+});
 // ★2026-08-13：「人に言えない関係」を追加した。
 //   実測で、購入者33人のうち13人（39%）がトークで不倫・既婚に触れとるのに、
 //   選択肢が無いせいで全部「その他・複雑」（392件・最多）に紛れて見えてへんかった。
@@ -426,24 +397,19 @@ document.getElementById("f").addEventListener("submit", async (e)=>{
       document.getElementById("byomi").textContent=j.love.yomi;
       document.getElementById("bcatch").textContent="——"+j.love.catch+"——";
       document.getElementById("bline").textContent=j.love.line;
-      setupShare(j.love.name);
     }
     document.getElementById("tname").textContent=j.type.name;
     document.getElementById("tyomi").textContent=j.type.yomi;
     document.getElementById("tcatch").textContent="——"+j.type.catch+"——";
     document.getElementById("tdesc").textContent=j.type.desc;
     document.getElementById("code").textContent=j.code;
-    // 言い当ては表引きなので、引けん組み合わせでは空で返る。その時は枠ごと出さん
-    if(j.iiate){
-      document.getElementById("iitext").textContent=j.iiate;
-      document.getElementById("iiatebox").style.display="block";
-    }
     // その人に出た縁の名前を使て、次への一行をその場で作る。
     // 「あんたの結果の続き」やと分かる形にする（前は誰にでも同じ抽象文やった）
     document.getElementById("nextline").innerHTML=
       "「"+j.type.name+"」——縁のカタチは、これで出た。<br>"+
-      "ほな、この縁の二人が<b>いつ動いてええか</b>。彼が<b>“今”なに考えとるか</b>。<br>"+
-      "そこから先は、<b>LINEの方で視る。</b>";
+      "ほんで、彼の生まれからは<b>もう一点、出とる</b>。<br>"+
+      "ただこれは、ここに書くにはちょっと際どい。<br>"+
+      "<b>あんたに直接、言うわ。</b>";
     document.getElementById("lbtn").href=j.line_oa_url||j.line_url;
     if(!j.line_oa_url){ document.getElementById("stept").innerHTML=
       "追加したら、この番号だけ送ってな。<br>すぐに“彼の今の本音”を視て返すで🌙"; }
