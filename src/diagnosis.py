@@ -201,6 +201,112 @@ def parrot_head(incoming: str, text: str) -> str | None:
     return "／".join(hits) if cover >= _PARROT_COVER else None
 
 
+# ★★★2026-09-03：文面の検品を【ここ】に一本化した。
+#
+#   経緯：検品はぜんぶ line_bot に置いてあった。せやから、
+#   ★会員返信（app.py→generate_consult）は一つも通ってへんかった。
+#   オウム返しで二回続けて事故って、初めてそれが分かった。
+#
+#   ★★同じ形の穴を、もう作らんための決まり：
+#     文面の良し悪しを見る検品は、これより下に置く。line_bot には置かん。
+#     ★路線ごとの都合（長さの上限など）だけ、呼ぶ側に残す。
+EN_OK = {
+    # 商売で必ず使う語
+    "LINE", "PDF", "PayPay", "Web", "WEB", "SNS", "DM", "URL", "OFF",
+    # 十中八九そのまま出るサービス名（履歴に無うても許す）
+    "Threads", "Instagram", "TikTok", "Twitter", "YouTube", "SMS", "MBTI",
+    # 日本語の中でそのまま大文字で書く語
+    "SOS", "MAX", "OK", "NG", "TV", "CD", "DVD",
+    "https", "http",   # URL除去をすり抜けた断片
+}
+
+
+def foreign_word(prompt: str, text: str) -> str | None:
+    """椿が自分で持ち込んだ英単語があれば、それを返す。"""
+    body = re.sub(r"https?://\S+", "", text)          # URLは落とす
+    src = re.sub(r"https?://\S+", "", prompt or "")   # 会話の履歴も同じく
+    src_words = {w.lower() for w in re.findall(r"[A-Za-z]{2,}", src)}
+    for w in re.findall(r"[A-Za-z]{3,}", body):
+        if w in EN_OK or w.lower() in src_words:
+            continue                                   # 相談者側に出とる語は正当
+        return w
+    return None
+
+
+META_LEAK_RE = re.compile(
+    r"(?i)(?<![A-Za-z])(?:meta|system|assistant|prompt|StructuredOutput|"
+    r"tool_call|tool_use|markdown|role:|<\|[a-z_]*\|>)(?![A-Za-z])"
+)
+
+
+PRONOUN_ANSWER_RE = re.compile(
+    r"^(?:私|わたし|ウチ|うち|自分|彼|彼氏|相手|向こう|こっち|"
+    r"彼から|私から|わたしから|うちから|彼の方|彼のほう|私の方|私のほう)"
+    r"(?:です|や|やで|かな|かも)?(?:[。！!…♪\s]*)$"
+)
+
+# 短い返事への聞き返し。「◯◯だけ来ても分からん」の型
+REASK_RE = re.compile(
+    r"だけ(?:来て|きて|やと|では|じゃ).{0,10}(?:分から|わから)"
+    r"|続きが(?:分から|わから)"
+    r"|どういう意味"
+    r"|何のこと(?:か|や)"
+    r"|もう(?:一回|いっぺん)(?:教えて|言うて)"
+    r"|それだけ(?:やと|だと|では)"
+)
+
+
+TIC_OPENING_RE = re.compile(
+    r"^\s*(?:ふーん|ふうん|あー[、。]|あぁ[、。]|出たわ|いや待て待て|ほう[、。]|"
+    r"ん、それそれ|なるほど|へえ|へー|おっ[、。]|ふむ)"
+)
+
+
+DEMEANING_RE = re.compile(r"(?:アホ|あほ|バカ|馬鹿|ばか|情けない|だらしな|しょうもな|クズ|みっともな)")
+
+
+def inspect_reply(incoming: str, text: str, vocab: str = "") -> list[str]:
+    """椿の文面を検品して、作り直しの理由を並べて返す。空なら合格。
+
+    incoming … 相手が今送ってきた文
+    text     … 椿が書いた返信
+    vocab    … 会話の履歴＋表示名。★ここに出とる英単語は「相手が使うた語」として許す
+    """
+    bad: list[str] = []
+    if META_LEAK_RE.search(text):
+        bad.append("meta・system等の英単語やシステム由来の文字列が混入した。"
+                   "椿の返信は関西弁の日本語だけで書き、英単語やコード片を一切混ぜないこと")
+    if AI_LEAK_RE.search(text):
+        bad.append("モデル名や『執筆者』などの署名が混入した。これは最も重大な事故で、"
+                   "椿が生身の人間やないとバレる。返信は椿本人の言葉だけで、"
+                   "署名・作成者名・モデル名を一切書かないこと")
+    en = foreign_word(vocab, text)
+    if en:
+        bad.append(f"英単語「{en}」を自分から持ち込んだ。"
+                   "椿は関西弁の日本語しか使わん。日本語に置き換えること"
+                   "（relationship→関係、data→材料、のように）。"
+                   "相談者が言うた固有名詞をそのまま拾うんはええが、"
+                   "自分から英語を混ぜるんはあかん")
+    if PRONOUN_ANSWER_RE.match((incoming or "").strip()) and REASK_RE.search(text[:50]):
+        bad.append("相談者の短い返事を『分からん』と聞き返した。"
+                   "その一語は、直前にあなたが投げた質問への答えや"
+                   "（『私』＝相談者自身、『彼』＝彼側）。"
+                   "答えとして受け取って、会話を前に進めること")
+    if TIC_OPENING_RE.match(text):
+        bad.append("『ふーん』『あー、それな』のような小説の相槌で書き出した。"
+                   "人がLINEで打つ文字やない。前置きの相槌を置かず、いきなり中身から書くこと")
+    echo = parrot_head(incoming, text)
+    if echo:
+        bad.append(f"相手が今言うたことを、頭で言い直した（「{echo}」）。"
+                   "これはオウム返しで、一発で機械やとバレる。"
+                   "相手の言葉を要約せんと、いきなり【読み】から書き出すこと。"
+                   "相手の発言に触れる時は、頭やのうて途中に置くこと")
+    if DEMEANING_RE.search(text):
+        bad.append("相手を見下す語を使った。毒舌の中身は現実を突くことであって悪口やない。"
+                   "相談者が好きな人を雑に扱う言い方はせんこと")
+    return bad
+
+
 def strip_jargon(text: str) -> str:
     """本文に漏れた専門用語を日常語へ置き換える。プロンプトで禁じても漏れるので最後に必ず通す。
 
@@ -617,17 +723,15 @@ def generate_consult(me_birth: str, him_birth: str, message: str, history: str =
                      max_tokens=2500, temperature=0.9).strip()))
 
     reply = _gen()
-    # ★オウム返しは、プロンプトに何回書いても止まらん（実証済み）。一回だけ作り直す。
-    echo = parrot_head(message, reply)
-    if echo:
-        print(f"[consult] オウム返しで作り直し: 「{echo}」")
-        reply = _gen(
-            "\n\n【厳重注意】相手が今言うたことを、頭で言い直したらあかん"
-            f"（前回それをやった：「{echo}」）。"
-            "相手の言葉を要約して書き出さん。いきなり【読み】から入ること。"
-            "相手の発言に触れる時は、頭やのうて途中に置くこと。")
-        if parrot_head(message, reply):
-            print("[consult] 作り直してもオウム返しが残った（そのまま返す）")
+    # ★プロンプトに何回書いても止まらん類（オウム返し・相槌・英単語・聞き返し）は、
+    #   機械で見て、一回だけ作り直す。★検品の本体は inspect_reply に集約してある。
+    vocab = f"{history} {message} {kantei[:2000]}"
+    bad = inspect_reply(message, reply, vocab)
+    if bad:
+        print(f"[consult] 検品に掛かって作り直し: {[b[:28] for b in bad]}")
+        reply = _gen("\n\n【厳重注意】" + "。".join(bad) + "。")
+        if (bad2 := inspect_reply(message, reply, vocab)):
+            print(f"[consult] 作り直しても残った（そのまま返す）: {[b[:28] for b in bad2]}")
     return {"me_shuku": me_s, "him_shuku": him_s, "reply": reply}
 
 

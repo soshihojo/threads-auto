@@ -28,7 +28,7 @@ from . import store, web_diag
 from .config import active_profile, env
 from .diagnosis import (AI_LEAK_RE, JARGON, NAME_GUARD, RESPECT_GUARD, TIME_GUARD, _Z2H,
                         find_birthdates, generate_reading, honmei_shuku,
-                        now_context, parse_free_input, parrot_head, soften_rude,
+                        now_context, parse_free_input, EN_OK, foreign_word, META_LEAK_RE, PRONOUN_ANSWER_RE, REASK_RE, TIC_OPENING_RE, DEMEANING_RE, inspect_reply, parrot_head, soften_rude,
                         strip_ai_leak, strip_jargon)
 from .llm import complete, complete_vision
 
@@ -1037,33 +1037,11 @@ _ARTIFACT_LINE_RE = re.compile(
 #
 #   ★★★見分け方：【相談者の側に出てへん英単語は、椿が持ち込んだもん】や。
 #     会話の履歴（prompt）に無い英字を、椿が急に使うたら、それが漏れ。
-_EN_OK = {
-    # 商売で必ず使う語
-    "LINE", "PDF", "PayPay", "Web", "WEB", "SNS", "DM", "URL", "OFF",
-    # 十中八九そのまま出るサービス名（履歴に無うても許す）
-    "Threads", "Instagram", "TikTok", "Twitter", "YouTube", "SMS", "MBTI",
-    # 日本語の中でそのまま大文字で書く語
-    "SOS", "MAX", "OK", "NG", "TV", "CD", "DVD",
-    "https", "http",   # URL除去をすり抜けた断片
-}
-
-
-def _foreign_word(prompt: str, text: str) -> str | None:
-    """椿が自分で持ち込んだ英単語があれば、それを返す。"""
-    body = re.sub(r"https?://\S+", "", text)          # URLは落とす
-    src = re.sub(r"https?://\S+", "", prompt or "")   # 会話の履歴も同じく
-    src_words = {w.lower() for w in re.findall(r"[A-Za-z]{2,}", src)}
-    for w in re.findall(r"[A-Za-z]{3,}", body):
-        if w in _EN_OK or w.lower() in src_words:
-            continue                                   # 相談者側に出とる語は正当
-        return w
-    return None
-
-
-_META_LEAK_RE = re.compile(
-    r"(?i)(?<![A-Za-z])(?:meta|system|assistant|prompt|StructuredOutput|"
-    r"tool_call|tool_use|markdown|role:|<\|[a-z_]*\|>)(?![A-Za-z])"
-)
+# ★2026-09-03：ここにあった検品は diagnosis に移した（soften_rude と同じ扱い）。
+#   ★会員返信がこの網を一つも通ってへんかったから。別名だけ残す。
+_EN_OK = EN_OK
+_foreign_word = foreign_word
+_META_LEAK_RE = META_LEAK_RE
 
 
 # 生成物の末尾に紛れ込む「数字だけの行」。
@@ -1083,25 +1061,11 @@ def _strip_trailing_numbers(text: str) -> str:
 # 「ふーん」76回・「あー、それな」17回・「出たわ」11回まで増えていた（2026-08-04計測）。
 # 人がLINEで打つ文字やないので、文頭に出たら作り直させる。
 # 人称だけの返事。「あんたから？彼から？」への完全な答えになりうる形
-_PRONOUN_ANSWER_RE = re.compile(
-    r"^(?:私|わたし|ウチ|うち|自分|彼|彼氏|相手|向こう|こっち|"
-    r"彼から|私から|わたしから|うちから|彼の方|彼のほう|私の方|私のほう)"
-    r"(?:です|や|やで|かな|かも)?(?:[。！!…♪\s]*)$"
-)
+_PRONOUN_ANSWER_RE = PRONOUN_ANSWER_RE
 
 # 短い返事への聞き返し。「◯◯だけ来ても分からん」の型
-_REASK_RE = re.compile(
-    r"だけ(?:来て|きて|やと|では|じゃ).{0,10}(?:分から|わから)"
-    r"|続きが(?:分から|わから)"
-    r"|どういう意味"
-    r"|何のこと(?:か|や)"
-    r"|もう(?:一回|いっぺん)(?:教えて|言うて)"
-    r"|それだけ(?:やと|だと|では)"
-)
-_TIC_OPENING_RE = re.compile(
-    r"^\s*(?:ふーん|ふうん|あー[、。]|あぁ[、。]|出たわ|いや待て待て|ほう[、。]|"
-    r"ん、それそれ|なるほど|へえ|へー|おっ[、。]|ふむ)"
-)
+_REASK_RE = REASK_RE
+_TIC_OPENING_RE = TIC_OPENING_RE
 
 # 相談者の好きな相手を雑に扱う呼び方。タメ口でも、ここは不快にしかならん。
 # 意味は変わらんので、送信直前に静かに置き換える（作り直しまではさせない）。
@@ -1140,7 +1104,7 @@ def _parrot_head(incoming: str, text: str) -> str | None:
     return parrot_head(incoming, text)
 
 
-_DEMEANING_RE = re.compile(r"(?:アホ|あほ|バカ|馬鹿|ばか|情けない|だらしな|しょうもな|クズ|みっともな)")
+_DEMEANING_RE = DEMEANING_RE
 
 
 def _soften_rough(text: str) -> str:
@@ -1567,45 +1531,11 @@ def generate_nurture(user: dict, history: list[dict], incoming: str,
         problems.append("宿の名前・占術名が本文に漏れた。絶対に書かないこと")
     if len(text.replace("---", "")) > 200:
         problems.append("長すぎた。どんなに重い相談でも吹き出し合計170字以内に収めること")
-    if _META_LEAK_RE.search(text):
-        problems.append("meta・system等の英単語やシステム由来の文字列が混入した。"
-                        "椿の返信は関西弁の日本語だけで書き、英単語やコード片を一切混ぜないこと")
-    # ★呼び名（ローマ字の表示名）は prompt に入ってへん。
-    #   ★★入れとかんと「aki」「ema」「Madoka」を漏れと見なしてまう。
-    _en = _foreign_word(prompt + " " + str(user.get("display_name") or ""), text)
-    if _en:
-        problems.append(f"英単語「{_en}」を自分から持ち込んだ。"
-                        "椿は関西弁の日本語しか使わん。日本語に置き換えること"
-                        "（relationship→関係、data→材料、のように）。"
-                        "相談者が言うた固有名詞をそのまま拾うんはええが、"
-                        "自分から英語を混ぜるんはあかん")
-    if AI_LEAK_RE.search(text):
-        problems.append("モデル名や『執筆者』などの署名が混入した。これは最も重大な事故で、"
-                        "椿が生身の人間やないとバレる。返信は椿本人の言葉だけで、"
-                        "署名・作成者名・モデル名を一切書かないこと")
-    # ★2026-08-08（陽子さん・もう1件は8/4の「相手」）：「どっちや？」に
-    #   「私」「相手」と完全な答えが来たのに「だけ来ても分からんで」と聞き返した。
-    #   短い返事でも、それが人称の答え（私／彼／相手／向こう）なら質問への答えや。
-    #   ただし「万」「友だち306人」みたいな、ほんまに意味の取れん入力への
-    #   聞き返しは正しい行動なので、人称の答えの時だけ検知する。
-    #   聞き返しの型は返信の冒頭にしか出ん（「◯◯」だけ来ても〜で書き出す）ので、先頭50字だけ見る。
-    if _PRONOUN_ANSWER_RE.match(incoming.strip()) and _REASK_RE.search(text[:50]):
-        problems.append("相談者の短い返事を『分からん』と聞き返した。"
-                        "その一語は、直前にあなたが投げた質問への答えや"
-                        "（『私』＝相談者自身、『彼』＝彼側）。"
-                        "答えとして受け取って、会話を前に進めること")
-    if _TIC_OPENING_RE.match(text):
-        problems.append("『ふーん』『あー、それな』のような小説の相槌で書き出した。"
-                        "人がLINEで打つ文字やない。前置きの相槌を置かず、いきなり中身から書くこと")
-    _echo = _parrot_head(incoming, text)
-    if _echo:
-        problems.append(f"相手が今言うたことを、頭で言い直した（「{_echo}」）。"
-                        "これはオウム返しで、一発で機械やとバレる。"
-                        "相手の言葉を要約せんと、いきなり【読み】から書き出すこと。"
-                        "相手の発言に触れる時は、頭やのうて途中に置くこと")
-    if _DEMEANING_RE.search(text):
-        problems.append("相手を見下す語を使った。毒舌の中身は現実を突くことであって悪口やない。"
-                        "相談者が好きな人を雑に扱う言い方はせんこと")
+    # ★検品の本体は diagnosis.inspect_reply に集約した。
+    #   ★ここに個別の検査を足さんこと。足したら会員返信がまた素通りする。
+    problems += inspect_reply(
+        incoming, text,
+        vocab=prompt + " " + str(user.get("display_name") or ""))
     if problems:
         print(f"[line_bot] 返信を作り直し: {problems}")
         # ★作り直しでも system は元のまま使う（NURTURE_SYSTEM に戻すと、
