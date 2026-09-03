@@ -28,7 +28,7 @@ from . import store, web_diag
 from .config import active_profile, env
 from .diagnosis import (AI_LEAK_RE, JARGON, NAME_GUARD, RESPECT_GUARD, TIME_GUARD, _Z2H,
                         find_birthdates, generate_reading, honmei_shuku,
-                        now_context, parse_free_input, soften_rude,
+                        now_context, parse_free_input, parrot_head, soften_rude,
                         strip_ai_leak, strip_jargon)
 from .llm import complete, complete_vision
 
@@ -1132,24 +1132,12 @@ _TIC_OPENING_RE = re.compile(
 #   ★★★三回目＝【返信の頭のうち、何割が相手の発言から来とるか】で見る。
 #     3字以上そろって一致した分だけ数える（1〜2字は偶然やから数えん）。
 #     6割を超えたら、それは言い直しや。
-_PARROT_COVER = 0.6       # 頭のうち、この割合が相手の発言由来なら言い直し
-_PARROT_MIN_BLOCK = 3     # 3字以上そろった一致だけ数える
-_PARROT_MIN_LEN = 8       # 頭がこれより短い時は見ん（「せやな」等で誤検知する）
-
-
+# ★2026-09-03：正規版は diagnosis.parrot_head に移した（soften_rude と同じ扱い）。
+#   理由：ここに置いとったせいで、会員返信（app.py→generate_consult）が
+#   ★このガードを一枚も通ってへんかった。Amiさんの回で、また同じ事故が出た。
 def _parrot_head(incoming: str, text: str) -> str | None:
     """返信の頭が、相手の発言の言い直しになっとったら、拾うた一致を返す。"""
-    import difflib
-    if not incoming or not text:
-        return None
-    head = re.sub(r"\s", "", re.split(r"[。、！？!?\n]", text.strip(), maxsplit=1)[0])
-    src = re.sub(r"\s", "", incoming)
-    if len(head) < _PARROT_MIN_LEN or len(src) < _PARROT_MIN_LEN:
-        return None
-    blocks = difflib.SequenceMatcher(None, head, src).get_matching_blocks()
-    hits = [head[b.a:b.a + b.size] for b in blocks if b.size >= _PARROT_MIN_BLOCK]
-    cover = sum(len(h) for h in hits) / len(head)
-    return "／".join(hits) if cover >= _PARROT_COVER else None
+    return parrot_head(incoming, text)
 
 
 _DEMEANING_RE = re.compile(r"(?:アホ|あほ|バカ|馬鹿|ばか|情けない|だらしな|しょうもな|クズ|みっともな)")

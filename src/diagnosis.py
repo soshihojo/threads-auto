@@ -168,6 +168,39 @@ _SPAN = 360.0 / 27.0  # 1宿あたりの黄経幅（約13.33度）
 JARGON = [*SHUKU_27, "宿曜", "本命宿"]
 
 
+# ★★★2026-09-03：オウム返しの検出を【ここ】に一本化した。
+#
+#   経緯：2026-09-01 に line_bot._parrot_head として入れた。作りは正しい。
+#   ★実害（Amiさんの回 2026-09-03）：会員に、また出た。
+#     会員「彼からお互い我慢すること多かったから一旦離れた方がいいと思うけどどう？って」
+#     椿　「「一旦離れた方がいいと思うけど、どう？」——これ、実はただの別れ宣言やないで」
+#   ★★検出器に掛けたら、ちゃんと拾えた。つまり【検出器は悪ない】。
+#   ★★★通ってへんかっただけや。
+#     会員返信は app.py → generate_consult で終わりで、line_bot のガード群を
+#     一つも呼ばん。ガードは line_bot の自動返信にしか掛かってへんかった。
+#     ——いちばん金を払てくれとる会員だけ、網の外やった。
+#
+#   soften_rude と同じ手を打つ。正規版をここに置いて、両方から呼ぶ。
+_PARROT_COVER = 0.6       # 頭のうち、この割合が相手の発言由来なら言い直し
+_PARROT_MIN_BLOCK = 3     # 3字以上そろった一致だけ数える
+_PARROT_MIN_LEN = 8       # 頭がこれより短い時は見ん（「せやな」等で誤検知する）
+
+
+def parrot_head(incoming: str, text: str) -> str | None:
+    """返信の頭が、相手の発言の言い直しになっとったら、拾うた一致を返す。"""
+    import difflib
+    if not incoming or not text:
+        return None
+    head = re.sub(r"\s", "", re.split(r"[。、！？!?\n]", text.strip(), maxsplit=1)[0])
+    src = re.sub(r"\s", "", incoming)
+    if len(head) < _PARROT_MIN_LEN or len(src) < _PARROT_MIN_LEN:
+        return None
+    blocks = difflib.SequenceMatcher(None, head, src).get_matching_blocks()
+    hits = [head[b.a:b.a + b.size] for b in blocks if b.size >= _PARROT_MIN_BLOCK]
+    cover = sum(len(h) for h in hits) / len(head)
+    return "／".join(hits) if cover >= _PARROT_COVER else None
+
+
 def strip_jargon(text: str) -> str:
     """本文に漏れた専門用語を日常語へ置き換える。プロンプトで禁じても漏れるので最後に必ず通す。
 
@@ -578,8 +611,23 @@ def generate_consult(me_birth: str, him_birth: str, message: str, history: str =
         "相談に正面から答え、前回の流れがあれば踏まえ、具体的な一歩を渡して、あたたかく締めてください。"
     )
     # 鑑定書参照で返信が長くなるため上限は余裕を持たせる（上限なので未使用分は課金されない）
-    reply = soften_rude(strip_jargon(
-        complete(CONSULT_SYSTEM, user, max_tokens=2500, temperature=0.9).strip()))
+    def _gen(extra: str = "") -> str:
+        return soften_rude(strip_jargon(
+            complete(CONSULT_SYSTEM + extra, user,
+                     max_tokens=2500, temperature=0.9).strip()))
+
+    reply = _gen()
+    # ★オウム返しは、プロンプトに何回書いても止まらん（実証済み）。一回だけ作り直す。
+    echo = parrot_head(message, reply)
+    if echo:
+        print(f"[consult] オウム返しで作り直し: 「{echo}」")
+        reply = _gen(
+            "\n\n【厳重注意】相手が今言うたことを、頭で言い直したらあかん"
+            f"（前回それをやった：「{echo}」）。"
+            "相手の言葉を要約して書き出さん。いきなり【読み】から入ること。"
+            "相手の発言に触れる時は、頭やのうて途中に置くこと。")
+        if parrot_head(message, reply):
+            print("[consult] 作り直してもオウム返しが残った（そのまま返す）")
     return {"me_shuku": me_s, "him_shuku": him_s, "reply": reply}
 
 
