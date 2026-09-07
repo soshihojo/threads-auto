@@ -407,9 +407,9 @@ document.getElementById("f").addEventListener("submit", async (e)=>{
     // 「あんたの結果の続き」やと分かる形にする（前は誰にでも同じ抽象文やった）
     document.getElementById("nextline").innerHTML=
       "「"+j.type.name+"」——縁のカタチは、これで出た。<br>"+
-      "ほんで、彼の生まれからは<b>もう一点、出とる</b>。<br>"+
-      "ただこれは、ここに書くにはちょっと際どい。<br>"+
-      "<b>あんたに直接、言うわ。</b>";
+      "ここまでが、生まれから視える分や。<br>"+
+      "彼が<b>“今”なに考えとって</b>、なんで黙っとるか。<br>"+
+      "そこは、<b>あんたに直接、言うわ。</b>";
     document.getElementById("lbtn").href=j.line_oa_url||j.line_url;
     if(!j.line_oa_url){ document.getElementById("stept").innerHTML=
       "追加したら、この番号だけ送ってな。<br>すぐに“彼の今の本音”を視て返すで🌙"; }
