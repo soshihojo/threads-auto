@@ -8,3 +8,4 @@ streamlit>=1.40
 fastapi>=0.110
 uvicorn>=0.30
 pypdf>=4.0
+stripe>=15.6.1,<16

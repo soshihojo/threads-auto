@@ -116,7 +116,8 @@ def learn_and_update_rules(
         "上記をふまえ、次の投稿生成に効く必勝要素へ更新してください。"
     )
     learn_system = active_profile().get("learn_system") or _LEARN_SYS
-    body = complete(learn_system, user, max_tokens=1500, temperature=0.4)
+    from .learning_output import GUARD, write_learning
+    body = complete(learn_system + GUARD, user, max_tokens=6000, temperature=0.4, require_complete=True)
 
     today = datetime.now().strftime("%Y-%m-%d")
     header = (
@@ -124,6 +125,6 @@ def learn_and_update_rules(
         "※ このファイルは `learn` コマンドが実データから自動生成・上書きします。手で編集しても次回の学習で上書きされます。\n"
         "投稿生成時、03_winning_elements.md と合わせてここの知見も反映すること。\n\n"
     )
-    learned_path.write_text(header + body.strip() + "\n", encoding="utf-8")
+    write_learning(learned_path, header, body, today)
     return {"updated": True, "winners": len(winners), "losers": len(losers),
             "analyzed": len(scored), "path": str(learned_path)}

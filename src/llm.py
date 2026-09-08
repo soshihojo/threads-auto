@@ -62,7 +62,7 @@ def complete_vision(system: str, user: str, image_b64: str, media_type: str, *,
 
 
 def complete(system: str, user: str, *, model: str | None = None, max_tokens: int = 1024,
-             temperature: float = 1.0, cache: bool = True) -> str:
+             temperature: float = 1.0, cache: bool = True, require_complete: bool = False) -> str:
     model = model or DEFAULT_MODEL
     kwargs: dict = dict(
         model=model,
@@ -74,7 +74,20 @@ def complete(system: str, user: str, *, model: str | None = None, max_tokens: in
         kwargs["temperature"] = temperature
     if model.startswith(_THINKING_ON) and max_tokens < 4000:
         kwargs["max_tokens"] = 4000  # thinking分の余白（上限なので未使用分は課金されない）
-    return _create(kwargs, cache=cache and len(system) >= _CACHE_MIN_CHARS)
+    return _create(kwargs, cache=cache and len(system) >= _CACHE_MIN_CHARS, require_complete=require_complete)
+
+
+class IncompleteGeneration(RuntimeError):
+    """Do not save a partial response over an existing artifact."""
+
+
+def _response_text(msg, require_complete=False):
+    if require_complete and getattr(msg, "stop_reason", None) != "end_turn":
+        raise IncompleteGeneration(f"Generation did not finish: {getattr(msg, 'stop_reason', None)}")
+    result = "".join(b.text for b in msg.content if b.type == "text").strip()
+    if require_complete and not result:
+        raise IncompleteGeneration("Generation returned no text")
+    return result
 
 
 # ★2026-08-14：一時的な過負荷でも巡回が丸ごと死んどった。
@@ -95,7 +108,7 @@ def _is_transient(e: Exception) -> bool:
     return False
 
 
-def _create(kwargs: dict, *, cache: bool) -> str:
+def _create(kwargs: dict, *, cache: bool, require_complete: bool = False) -> str:
     """messages.create の実行。キャッシュ指定が弾かれても本番を止めん。
 
     キャッシュは「安うなる」だけの仕組みで、これが原因で返信が出えへんのは本末転倒や。
@@ -114,14 +127,14 @@ def _create(kwargs: dict, *, cache: bool) -> str:
                                      "cache_control": {"type": "ephemeral", "ttl": _CACHE_TTL}}]
                 try:
                     msg = client().messages.create(**cached)
-                    return "".join(b.text for b in msg.content if b.type == "text").strip()
+                    return _response_text(msg, require_complete)
                 except Exception as e:
                     if not _is_cache_rejection(e):
                         raise
                     _cache_supported = False
                     print(f"[llm] プロンプトキャッシュが使えんかったので無効化した（生成は続行）: {e}")
             msg = client().messages.create(**kwargs)
-            return "".join(b.text for b in msg.content if b.type == "text").strip()
+            return _response_text(msg, require_complete)
         except Exception as e:
             if not _is_transient(e):
                 raise

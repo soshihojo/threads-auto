@@ -1,0 +1,22 @@
+name: offline tests
+on:
+  push:
+    paths: ['src/**', 'app.py', 'line_app.py', 'tests/**', 'requirements*.txt', '.github/workflows/tests.yml']
+  pull_request:
+    paths: ['src/**', 'app.py', 'line_app.py', 'tests/**', 'requirements*.txt', '.github/workflows/tests.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      STORE_BACKEND: sqlite
+      LINE_BOT_ENABLED: 'false'
+      LINE_SWEEP_INTERVAL_SEC: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q

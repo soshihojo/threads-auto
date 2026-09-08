@@ -13,3 +13,4 @@ render_env_paste.env
 
 kantei_out/
 .DS_Store
+.pytest_cache/

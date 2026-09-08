@@ -9,6 +9,9 @@ from .config import DATA_DIR
 DB_PATH = DATA_DIR / "threads.db"
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS ops_events (
+    id TEXT PRIMARY KEY, user_id TEXT, kind TEXT, created_at TEXT, payload TEXT
+);
 CREATE TABLE IF NOT EXISTS posts (
     media_id   TEXT PRIMARY KEY,
     text       TEXT,
@@ -127,6 +130,20 @@ def init_db() -> None:
             c.execute("ALTER TABLE web_events ADD COLUMN vid TEXT")
         except sqlite3.OperationalError:
             pass
+        if "line_user_id" not in {r[1] for r in c.execute("PRAGMA table_info(members)")}:
+            c.execute("ALTER TABLE members ADD COLUMN line_user_id TEXT DEFAULT ''")
+
+
+def append_ops_event(event: dict) -> bool:
+    with conn() as c:
+        result = c.execute("INSERT OR IGNORE INTO ops_events (id,user_id,kind,created_at,payload) "
+                           "VALUES (:id,:user_id,:kind,:created_at,:payload)", event)
+        return result.rowcount == 1
+
+
+def list_ops_events() -> list[dict]:
+    with conn() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM ops_events ORDER BY created_at, id")]
 
 
 # ---- posts ----
@@ -324,13 +341,18 @@ def update_scheduled(post_id: int, text: str, scheduled_at: str) -> None:
 
 
 # ---- members（サブスク会員） ----
-def add_member(nickname: str, me_birth: str, him_birth: str, note: str = "") -> int:
+def add_member(nickname: str, me_birth: str, him_birth: str, note: str = "", line_user_id: str = "") -> int:
     with conn() as c:
         cur = c.execute(
-            "INSERT INTO members(nickname, me_birth, him_birth, note) VALUES (?,?,?,?)",
-            (nickname, me_birth, him_birth, note),
+            "INSERT INTO members(nickname, me_birth, him_birth, note, line_user_id) VALUES (?,?,?,?,?)",
+            (nickname, me_birth, him_birth, note, line_user_id),
         )
         return cur.lastrowid
+
+
+def set_member_line_user(member_id, line_user_id: str) -> bool:
+    with conn() as c:
+        return c.execute("UPDATE members SET line_user_id=? WHERE id=?", (line_user_id, member_id)).rowcount > 0
 
 
 def list_members() -> list[sqlite3.Row]:
