@@ -122,7 +122,7 @@ def _route_offer_locked(user_id, user, history, incoming, snd):
             store.append_ops_event(new_event(user_id, "task.set", {
                 "task_id": "offer-review-" + key, "title": "商品案内の判定を確認して返信",
                 "stage": "その他", "due_at": datetime.now().date().isoformat(),
-                "status": "open", "note": "自動判定が失敗しました。顧客への引き継ぎ文は送信していません。"
+                "status": "open", "note": "自動判定が失敗しました（" + result.key + "）。顧客への引き継ぎ文は送信していません。"
             }, event_id="offer-review-" + key))
         except Exception as e:
             print("[line_bot] offer review task failed:", type(e).__name__)
