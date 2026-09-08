@@ -88,36 +88,33 @@ def flow(monkeypatch):
     return history,state,calls,send
 
 
-def test_question_reply_then_offer_and_hold(monkeypatch,flow):
+def test_restored_offer_has_two_products_without_new_questions(monkeypatch,flow):
     history,state,calls,send=flow
-    decision=r.Decision('question','scope',r.QUESTIONS['scope'])
-    monkeypatch.setattr(r,'route',lambda *a:decision)
+    monkeypatch.setattr(r,'route',lambda *a:pytest.fail('new product classifier is disabled'))
+    monkeypatch.setattr(bot,'generate_offer',lambda *a:bot.OFFER_MENU)
     bot._route_offer('test',{},history,'相談です',send)
-    assert state['bot']=='on' and not calls and r.pending(history)=='scope'
-    history.append(msg('user','九十日の暦が欲しい'))
-    decision=r.Decision('offer','shiomi',r.OFFERS['shiomi'])
-    bot._route_offer('test',{},history,'九十日の暦が欲しい',send)
     assert state['bot']=='hold' and calls==['after']
+    assert bot.URL_KANTEI in history[-1]['text'] and bot.URL_SHIOMI in history[-1]['text']
     count=len(history)
-    bot._route_offer('test',{},history,'九十日の暦が欲しい',send)
+    bot._route_offer('test',{},history,'相談です',send)
     assert len(history)==count
 
 
 def test_failed_question_or_offer_send_keeps_on(monkeypatch,flow):
     history,state,calls,send=flow
-    monkeypatch.setattr(r,'route',lambda *a:r.Decision('offer','kantei',r.OFFERS['kantei']))
+    monkeypatch.setattr(bot,'generate_offer',lambda *a:bot.OFFER_MENU)
     bot._route_offer('test',{},history,'相談です',lambda t:False)
     assert state['bot']=='on' and not calls
 
 
 @pytest.mark.parametrize('change',['owner_hold','new_message'])
-def test_no_stale_send_after_classification(monkeypatch,flow,change):
+def test_no_stale_send_after_offer_generation(monkeypatch,flow,change):
     history,state,calls,send=flow
     def classify(*a):
         if change=='owner_hold':state['bot']='hold'
         else:history.append(msg('user','やっぱり買わない'))
-        return r.Decision('offer','shiomi',r.OFFERS['shiomi'])
-    monkeypatch.setattr(r,'route',classify)
+        return bot.OFFER_MENU
+    monkeypatch.setattr(bot,'generate_offer',classify)
     bot._route_offer('test',{},history,'相談です',send)
     assert all(h['role']=='user' for h in history) and not calls
 
@@ -148,8 +145,8 @@ def test_duplicate_delivery_does_not_ask_again(monkeypatch,flow):
     count=[]
     def classify(*a):
         count.append(1)
-        return r.Decision('question','goal',r.QUESTIONS['goal'])
-    monkeypatch.setattr(r,'route',classify)
+        return bot.OFFER_MENU
+    monkeypatch.setattr(bot,'generate_offer',classify)
     bot._route_offer('test',{},history,'相談です',send)
     bot._route_offer('test',{},history,'相談です',send)
     assert len(count)==1 and len(history)==2
@@ -206,14 +203,17 @@ def test_direct_price_question_is_answered_without_model():
     assert "3,980円" in decision.text and "9,800円" in decision.text
 
 
-def test_failed_classification_is_silent_and_creates_private_task(monkeypatch, flow):
+def test_model_failure_uses_legacy_offer_without_internal_handoff(monkeypatch, flow):
     history,state,calls,send = flow
     tasks=[]
-    monkeypatch.setattr(r,"route",lambda *a:r.Decision("handoff","error",r.HANDOFF))
+    def fail(*a,**k):raise RuntimeError('synthetic unavailable model')
+    monkeypatch.setattr(bot,'complete',fail)
+    monkeypatch.setattr(r,'route',lambda *a:pytest.fail('new classifier is disabled'))
     monkeypatch.setattr(bot.store,"append_ops_event",lambda e:tasks.append(e))
     bot._route_offer("test",{},history,"相談です",send)
-    assert state["bot"] == "on" and len(history)==1 and not calls
-    assert len(tasks)==1 and tasks[0]["kind"]=="task.set"
+    assert state['bot']=='hold' and calls==['after'] and not tasks
+    assert history[-1]['text']==bot.OFFER_INTRO_FALLBACK+'\n\n'+bot.OFFER_MENU
+    assert '店主が対応' not in history[-1]['text']
 
 
 @pytest.mark.parametrize("text", ["希望に合う内容を確認するため、ここからは店主が対応します。", "店主の確認に回すな。"])
