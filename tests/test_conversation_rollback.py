@@ -53,3 +53,31 @@ def test_removed_canned_copy_cannot_reach_transport():
                  '返し方で嫌な思いをさせてごめんな。こちらからの自動返信は止めとくな。',
                  '話してくれてありがとう。今日はここで終わりにしよな。']:
         assert b._plain_text(text)==''
+
+
+def test_retired_handoff_is_absent_from_reply_and_push_payloads(monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    payloads = []
+    records = []
+    monkeypatch.setattr(b, '_headers', lambda: {})
+    monkeypatch.setattr(b, '_maybe_split_bubble', lambda text: text)
+    monkeypatch.setattr(b.store, 'add_line_chat', lambda *a: records.append(a))
+
+    def transport(url, **kwargs):
+        payload = json.loads(kwargs['data'])
+        payloads.append(payload)
+        # LINE rejects empty text. No real transport is used in this test.
+        return SimpleNamespace(ok=all(m['text'].strip() for m in payload['messages']))
+
+    monkeypatch.setattr(b.requests, 'post', transport)
+    text = '希望に合う内容を確認するため、ここからは店主が対応します。'
+    assert b._send('synthetic-user', 'synthetic-token', text) is False
+    assert len(payloads) == 2  # Both reply and push fallback are checked.
+    assert all(text not in m['text'] for p in payloads for m in p['messages'])
+    assert records == []
+
+    assert b._send('synthetic-user', 'synthetic-token', '待ちたい気持ちは受け取ったで。') is True
+    assert payloads[-1]['messages'][0]['text'] == '待ちたい気持ちは受け取ったで。'
+    assert len(records) == 1
