@@ -29,4 +29,3 @@ def test_seven_day_outcomes_exclude_pending_and_unlinked_cash():
     assert len(report)==1 and report[0]['user_id']=='a' and report[0]['receipts']==3980
     rows.append(new_event('a','payment.void',{'event_id':rows[3]['id']}))
     assert not q.offer_outcomes(rows,datetime(2026,9,8,12,tzinfo=timezone.utc))[0]['purchased']
-
