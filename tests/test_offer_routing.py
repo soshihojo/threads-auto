@@ -195,3 +195,26 @@ def test_all_offer_entry_paths_use_router(monkeypatch,flow,path):
 def test_positional_scope_answer_is_deterministic(answer,key):
     def no_model(*a,**k):pytest.fail('positional answer does not need classifier')
     assert r.route([msg('assistant',r.QUESTIONS['scope'])],answer,no_model,'test').key==key
+
+
+def test_direct_price_question_is_answered_without_model():
+    def failed_model(*a, **k):
+        pytest.fail("direct price question must not depend on classifier")
+    decision = r.route([], "鑑定料いくらですか？", failed_model, "test")
+    assert decision.kind == "offer" and decision.key == "compare"
+    assert "3,980円" in decision.text and "9,800円" in decision.text
+
+
+def test_failed_classification_is_silent_and_creates_private_task(monkeypatch, flow):
+    history,state,calls,send = flow
+    tasks=[]
+    monkeypatch.setattr(r,"route",lambda *a:r.Decision("handoff","error",r.HANDOFF))
+    monkeypatch.setattr(bot.store,"append_ops_event",lambda e:tasks.append(e))
+    bot._route_offer("test",{},history,"相談です",send)
+    assert state["bot"] == "hold" and len(history)==1 and not calls
+    assert len(tasks)==1 and tasks[0]["kind"]=="task.set"
+
+
+@pytest.mark.parametrize("text", ["希望に合う内容を確認するため、ここからは店主が対応します。", "店主の確認に回すな。"])
+def test_internal_handoff_copy_cannot_reach_transport(text):
+    assert bot._plain_text(text)==""

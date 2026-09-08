@@ -113,6 +113,20 @@ def _route_offer_locked(user_id, user, history, incoming, snd):
     if (not latest or latest[-1].get("role") != "user"
             or last != incoming or _offer_already_sent(user_id)):
         return
+    if result.kind == "handoff":
+        # Operator work is private. No LINE handoff message or promise is sent.
+        store.upsert_line_user(user_id, bot="hold")
+        try:
+            from .operations import new_event
+            key = hashlib.sha256((user_id + str(latest[-1].get("id", "")) + incoming).encode()).hexdigest()
+            store.append_ops_event(new_event(user_id, "task.set", {
+                "task_id": "offer-review-" + key, "title": "商品案内の判定を確認して返信",
+                "stage": "その他", "due_at": datetime.now().date().isoformat(),
+                "status": "open", "note": "自動判定が失敗しました（" + result.key + "）。顧客への引き継ぎ文は送信していません。"
+            }, event_id="offer-review-" + key))
+        except Exception as e:
+            print("[line_bot] offer review task failed:", type(e).__name__)
+        return
     if snd(result.text):
         if result.kind != "question":
             store.upsert_line_user(user_id, bot="hold")
@@ -872,6 +886,8 @@ def _plain_text(text: str) -> str:
     """LINE送信前の最終ガード：Markdown記号・アスタリスク・コード風の異物・
     システム由来の英単語（meta等）を完全に除去する
     （LINEは装飾を解釈しないため、記号や異物がそのまま見えてしまう）。"""
+    if re.search(r"店主.{0,12}(?:対応|確認)|(?:担当|運営).{0,8}(?:引き継|回す)", text):
+        return ""  # Internal routing must not leak through generated or fallback copy.
     text = "\n".join(ln for ln in text.splitlines() if not _ARTIFACT_LINE_RE.match(ln))
     text = _META_LEAK_RE.sub("", text)                     # 文中に紛れたmeta等を除去
     text = text.replace("**", "").replace("__", "")
