@@ -265,7 +265,8 @@ TIC_OPENING_RE = re.compile(
 DEMEANING_RE = re.compile(r"(?:アホ|あほ|バカ|馬鹿|ばか|情けない|だらしな|しょうもな|クズ|みっともな)")
 
 
-def inspect_reply(incoming: str, text: str, vocab: str = "") -> list[str]:
+def inspect_reply(incoming: str, text: str, vocab: str = "", *, max_questions: int | None = None,
+                  allow_acknowledgement: bool = False) -> list[str]:
     """椿の文面を検品して、作り直しの理由を並べて返す。空なら合格。
 
     incoming … 相手が今送ってきた文
@@ -273,6 +274,8 @@ def inspect_reply(incoming: str, text: str, vocab: str = "") -> list[str]:
     vocab    … 会話の履歴＋表示名。★ここに出とる英単語は「相手が使うた語」として許す
     """
     bad: list[str] = []
+    if max_questions is not None and len(re.findall(r"[？?]", text)) > max_questions:
+        bad.append("質問は一項目・一問まで。残りの質問を削る")
     if META_LEAK_RE.search(text):
         bad.append("meta・system等の英単語やシステム由来の文字列が混入した。"
                    "椿の返信は関西弁の日本語だけで書き、英単語やコード片を一切混ぜないこと")
@@ -296,7 +299,7 @@ def inspect_reply(incoming: str, text: str, vocab: str = "") -> list[str]:
         bad.append("『ふーん』『あー、それな』のような小説の相槌で書き出した。"
                    "人がLINEで打つ文字やない。前置きの相槌を置かず、いきなり中身から書くこと")
     echo = parrot_head(incoming, text)
-    if echo:
+    if echo and not allow_acknowledgement:
         bad.append(f"相手が今言うたことを、頭で言い直した（「{echo}」）。"
                    "これはオウム返しで、一発で機械やとバレる。"
                    "相手の言葉を要約せんと、いきなり【読み】から書き出すこと。"
