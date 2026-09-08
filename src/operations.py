@@ -13,7 +13,7 @@ KINDS = {"task.set", "reply.ack", "work.log", "customer.link", "stripe.receipt",
 
 
 def new_event(user_id: str, kind: str, payload: dict, *, event_id: str = "", created_at: str = "") -> dict:
-    if kind not in KINDS:
+    if kind not in KINDS and kind not in {"conversation.review", "conversation.state", "conversation.offer", "conversation.follow", "conversation.unfollow"}:
         raise ValueError("Unknown operations event")
     return {"id": event_id or str(uuid4()), "user_id": str(user_id), "kind": kind,
             "created_at": created_at or datetime.now(JST).isoformat(timespec="microseconds"),

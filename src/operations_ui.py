@@ -1,6 +1,7 @@
 """Owner-only Streamlit operations screen; all writes require a visible action."""
 from datetime import date, datetime, time, timedelta
 from uuid import uuid4
+import re
 
 import streamlit as st
 
@@ -46,6 +47,54 @@ def render():
                 st.info(f'LINEの顧客に未紐付けのStripe入金が {report["unlinked"]} 件あります。合計には含めています。')
             if report["other_currency"]:
                 st.warning("円以外の取引は集計対象外：" + ", ".join(report["other_currency"]))
+
+    from .conversation_quality import report, offer_outcomes, VERSION
+    latest, counts, offers = report(rows)
+    with st.expander("LINE会話の満足・終了・商品案内", expanded=True):
+        st.caption("新しい会話処理の導入後の記録です。AI判定は満足度アンケートではありません。無返信を不満とは判定しません。")
+        labels = {"closed":"終了の明示", "correction":"訂正に対応", "decline":"案内辞退",
+                  "complaint":"不満・店主確認", "ai":"自動返信への質問・確認待ち", "error":"判定失敗・店主確認",
+                  "awaiting":"質問の回答待ち", "answered":"回答済み", "offered":"商品案内済み",
+                  "followed_up":"一度フォロー済み", "handoff":"店主確認", "question":"商品選択の回答待ち"}
+        st.caption("処理版：" + VERSION)
+        if latest:
+            st.dataframe([{"顧客":label(uid), "最新状態":labels.get(e["state"],e["state"]),
+                           "日時":e["created_at"], "判定元":e.get("source", "")}
+                          for uid,e in latest.items()], hide_index=True, use_container_width=True)
+        else:
+            st.info("新しい会話の記録が入り次第、ここに表示します。")
+        st.write("商品別の案内人数（導入後・各商品内で重複除外）", offers)
+        st.caption("ブロック／解除イベント：" + str(counts.get("unfollow",0)) + " 件。直前の返信が原因とは限りません。")
+        st.caption("購入は下の入金確認記録と紐付けて評価します。未記録は未購入とは限りません。")
+        outcomes = offer_outcomes(rows, datetime.now(JST))
+        st.write("案内後7日が経過した顧客：", len(outcomes), "人")
+        if outcomes:
+            st.write("7日以内の入金記録がある顧客：", sum(x["purchased"] for x in outcomes), "人")
+            st.write("上記期間の記録済み入金：", sum(x["receipts"] for x in outcomes), "円")
+        st.caption("同じ顧客に紐付いた全商品の入金を集計。案内商品の購入と断定せず、未記録は不明として扱います。登録起点の購入率とは別です。")
+        if users:
+            with st.form("conversation_review"):
+                uid = st.selectbox("会話を確認した顧客", list(users), format_func=label)
+                outcome = st.selectbox("本人の発言から確認できた内容", ["満足して終了", "価格で見送り", "内容が合わない", "手続きが不明", "納期が合わない", "返信への不満", "理由不明"])
+                memo = st.text_input("確認した発言・店主向けメモ")
+                if st.form_submit_button("会話の確認結果を記録"):
+                    _save(uid, "conversation.review", {"outcome":outcome,"note":memo,"source":"owner"})
+        paused=[uid for uid,u in users.items() if re.search(r"\[会話状態:(ai|complaint|error|decline)\]", str(u.get("note") or ""))]
+        if paused:
+            with st.form("quality_resume"):
+                uid=st.selectbox("自動返信の再開を確認する顧客",paused,format_func=label)
+                checked=st.checkbox("会話を確認し、本人が自動返信の継続を希望していることを確認した")
+                if st.form_submit_button("確認した顧客の自動返信を再開"):
+                    if checked:
+                        from .conversation_quality import set_state
+                        set_state(uid,"answered",bot="on")
+                        _save(uid,"conversation.state",{"state":"answered","source":"owner_resume","version":VERSION})
+                    else:
+                        st.error("本人の希望と会話内容を確認してください。")
+        reviews=[e for e in events(rows) if e["kind"]=="conversation.review"]
+        if reviews:
+            st.dataframe([{"顧客":label(e["user_id"]),"確認結果":e["data"].get("outcome"),
+                           "メモ":e["data"].get("note"),"日時":e["created_at"]} for e in reviews], hide_index=True)
 
     tasks = task_board(rows)
     open_tasks = [t for t in tasks if t.get("status") != "done"]

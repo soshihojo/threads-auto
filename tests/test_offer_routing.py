@@ -72,6 +72,8 @@ def test_plain_yes_cannot_pick_expensive_choice():
 
 @pytest.fixture
 def flow(monkeypatch):
+    monkeypatch.setattr(bot, "_quality_turn", lambda *a: {"kind":"normal", "ready":True})
+    monkeypatch.setattr(bot.quality, "record", lambda *a, **k: None)
     history=[msg('user','相談です')]
     state={'bot':'on'}
     calls=[]
