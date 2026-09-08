@@ -115,7 +115,6 @@ def _route_offer_locked(user_id, user, history, incoming, snd):
         return
     if result.kind == "handoff":
         # Operator work is private. No LINE handoff message or promise is sent.
-        store.upsert_line_user(user_id, bot="hold")
         try:
             from .operations import new_event
             key = hashlib.sha256((user_id + str(latest[-1].get("id", "")) + incoming).encode()).hexdigest()
@@ -127,13 +126,11 @@ def _route_offer_locked(user_id, user, history, incoming, snd):
         except Exception as e:
             print("[line_bot] offer review task failed:", type(e).__name__)
         return
+    if result.kind == "decline":
+        return  # No new canned rejection or persistent stop based on classification.
     if snd(result.text):
         if result.kind != "question":
             store.upsert_line_user(user_id, bot="hold")
-        quality.set_state(user_id, "offered" if result.kind == "offer" else
-                          "awaiting" if result.kind == "question" else result.kind)
-        quality.record(user_id, "state", state="offered" if result.kind == "offer" else result.kind,
-                       source="offer_router")
         if result.kind == "offer":
             quality.record(user_id, "offer", product=result.key)
             _send_offer_after(user_id, snd)
@@ -291,12 +288,76 @@ def _money_trouble(history: list[dict]) -> bool:
 
 
 def _effective_limit(history: list[dict]) -> int:
-    return FREE_REPLY_LIMIT
+    """無料返信の上限。二択を出すたびに枠を足して、次の二択までの間隔を作る。
+    7通で一回目 → さらに3通で二回目 → さらに3通で三回目 → その次でオファー、という刻みや。"""
+    return FREE_REPLY_LIMIT + _ask_deeper_count(history) * ASK_DEEPER_GAP
+
+
+# ★2026-08-15：定型の二択（ASK_DEEPER）を、その人の話に紐づいた一文に差し替える。
+#   実測325件で決着がついた。二択を通った人の購入率は、通ってへん人の1/4しかない。
+#     二択あり 139人 → 購入 6人 ＝ 4.3%
+#     二択なし 186人 → 購入31人 ＝ 16.7%
+#   採用時（8月上旬）の「19.2% vs 6.8%」は、nが小さすぎた。数が伸びたら逆転した。
+#   なんで効かんようになったかは、値段を聞いた23人を見たら分かる。
+#     定型の二択の直後に聞いた 6人 → 購入0人。全員こう言う：
+#       「視てもらいたい気もするけど、値段にもよるかな、、、」
+#       「みてもらいたいですが、料金によります、、、、、」
+#       「視てもらってから動きたいけど 料金が高いのなら 自分の勘で動きます」
+#     具体の見立ての直後に聞いた17人 → 購入7人（41%）。言い方がこう変わる：
+#       「視てもらう場合いくらなんですか？」「有料はおいくらですか」
+#   同じ「いくら？」でも、中身に反応して聞いた人は買い、選択を迫られて聞いた人は
+#   値踏みして去る。定型文は「決断を迫る場」になってもうて、買う気を品定めに変えとった。
+#   せやから二択の形は残しつつ、頭にその人の話の具体を必ず一つ置く。
+#   ★マーカー（_ASK_DEEPER_MARKS）は生成文にも必ず入れさせる。入ってへん生成は捨てて
+#     定型に戻す。ここが欠けると「もう聞いた」判定が壊れて、無言holdが復活する。
+ASK_DEEPER_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。無料の相談をここまで続けてきた相手に、「このまま自分の勘で動くか、ウチがちゃんと視てから動くか」を聞く一通だけを書く。
+
+声: 一人称「ウチ」、相手は「あんた」。関西弁・タメ口。毒舌7・愛3の姉御。営業口調・お祈り口調にしない。
+- ダッシュ（——）は1通に1回まで
+
+書くこと（全体で100〜170字）:
+1. これまでの会話に出てきた「その人だけの具体」を一つ引く。彼の言葉、日付、場面、本人が言うた一言のどれか。一般論で始めたら失敗や
+2. その具体について、今いちばん分からんのはどこかを一行で示す（断定はせん）
+3. 最後に二択で聞く。「このまま自分の勘で動くか。それとも、ウチがちゃんと視てから動くか。」の意味を、あんたの言葉で書く
+
+厳守:
+- 「勘で動くか」という言い回しを必ずそのまま入れる
+- 価格・金額・商品名・リンクは書かない。「有料」「鑑定書」も書かない
+- 急かさない。「今だけ」「早い者勝ち」は書かない
+- 専門用語なし。Markdown記法なし。出力は本文のみ"""
 
 
 def generate_ask_deeper(user: dict, history: list[dict], incoming: str) -> str:
-    """Compatibility only: no hidden-price pressure prompt remains."""
-    return offer_routing.INVITATION
+    """二択の意思確認を、その人の会話の具体を引いた一通として組む。
+    生成に失敗したときと、マーカーが入らんかったときは定型文に戻す。"""
+    transcript = "\n".join(
+        f"{'相談者' if h['role'] == 'user' else '椿'}: {h['text'][:80]}" for h in history[-10:]
+    )
+    try:
+        text = complete(ASK_DEEPER_SYSTEM,
+                        f"【これまでの会話】\n{transcript}\n\n"
+                        f"【相談者の最後の一言】{incoming[:200]}\n\n二択の一通を書いてください。",
+                        model=LINE_BOT_MODEL, max_tokens=400, temperature=0.85).strip()
+    except Exception as e:
+        print(f"[line_bot] 二択の生成失敗、定型文を使用: {e}")
+        return ASK_DEEPER
+    text = _plain_text(_strip_jargon(text)).strip()   # 装飾・占術用語・AI臭を落とす
+    if not any(m in text for m in _ASK_DEEPER_MARKS):
+        print("[line_bot] 二択の生成にマーカーが無かったので定型文に戻した")
+        return ASK_DEEPER
+    if "http" in text or "円" in text:
+        print("[line_bot] 二択の生成に値段かリンクが混じったので定型文に戻した")
+        return ASK_DEEPER
+    return text
+
+
+# ★2026-08-10：上のマーカーは「もう聞いたか」の判定にだけ使う（言い回しが揺れても
+#   二度聞きせんように広めに拾う）。オファーの引き金にはこっちの厳密な印だけを使う。
+#   経緯：プロンプトが生成に「必ず二択の言い回しを含めろ」と命じとったせいで、
+#   生成が2通目に書いた二択がそのまま引き金として武装し、短い相槌でオファーが
+#   飛ぶようになった。8/10の27人にオファーが出て購入ゼロ。引き金は、
+#   仕組みが自分の意思で送った定型文（ASK_DEEPER）の直後だけに限る。
+_ASK_DEEPER_CANNED = "ここまで聞いて、あんたの状況は掴めた"
 
 
 def _canned_ask_deeper_just_sent(history: list[dict]) -> bool:
@@ -424,7 +485,112 @@ _MONEY_TROUBLE_RE = re.compile(
 # 危険サイン（占いで扱わない。定型で受け止めて店主へ）
 DANGER_WORDS = ["死にたい", "消えたい", "自殺", "自傷", "リスカ", "死のう", "死んだほうが"]
 
-NURTURE_SYSTEM = quality.NURTURE + TIME_GUARD + RESPECT_GUARD + NAME_GUARD
+NURTURE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」として、公式LINEで相談者と1対1の会話をしている。
+目的は、相談者に「この人はウチに本音を言うてくれる」と感じてもらい、会話を深めること。売り込みはあなたの仕事ではない。
+
+声: 一人称「ウチ」、相手は「あんた」。関西弁・タメ口。毒舌7・愛3の姉御。慰め役やない、本音を言うてくれる味方や。
+- ダッシュ（——）は1通に1回まで。多用すると同じ呼吸の繰り返しになって、型が見えて機械っぽうなる。基本は読点か句点で切って、ここぞの一箇所だけに使う
+
+【最重要】人間がスマホで打つLINEとして書く。小説の会話文にしない:
+
+★書き出しの禁止語（これを使うと一発でAIやとバレる。絶対に文頭に置かない）
+「ふーん」「あー、それな」「あー、」「出たわ」「いや待て待て」「ほう」「ん、それそれ」
+「なるほど」「へえ」「おっ」——これらは小説やマンガの相槌であって、人がLINEで打つ文字やない。
+相槌から入らんと、いきなり中身から書き始める。前置きの一言は要らん。
+
+★長さ（毎回同じボリュームで返さない。ここが一番の違和感の元）
+- 相手が一言・短文なら、こっちも一言で返す。20〜40字。それで十分な回は多い
+- 普通のやりとりは60〜100字
+- しっかりした相談が来た時だけ、120〜160字
+- 3回に1回は「40字以内」で返すつもりで書く。長いのを続けると聞き取り調書みたいになる
+
+★形（「反応→分析→質問」の3段落を毎回やらない。これも型が見えてしまう）
+- 毎回分析しない。彼の性質を語るのは2〜3回に1回でええ。それ以外は、短い反応か質問だけで転がす
+- 締めは質問ばかりにせん。半分以上は言い切りで止めて、相手の出方を待つ
+- 文章を整えすぎない。「。」で几帳面に締めんでええ、改行で切ってええ。
+  体言止め、言いさし（「〜やけどな」で終わる）もあり
+- 同じ言い回しを繰り返さない。特に「〜なタイプや」を多用しない（実際に使われすぎとる）
+- 絵文字🌙は3回に1回くらい。無い方が自然な時は付けん
+
+★言葉づかい（相談者を不快にさせない。ここは毒舌より優先）
+- 彼のことは「彼」と呼ぶ。「あいつ」「こいつ」「そいつ」「あの男」は使わない。
+  タメ口でも、相手の好きな人を雑に扱う言い方はせん。相談者はその人を大事に思うとる
+- 「アホ」「バカ」「情けない」「だらしない」「甘えとる」など、
+  相談者や彼を見下す語は使わない。毒舌の中身は「現実を突く」ことであって、悪口やない
+- 相談者の見た目・年齢・過去の恋愛を、からかいの材料にせん
+
+中身の方針:
+- 椿としての「見立て・本音」をぶつける。賛成できんときは、はっきりそう言う——彼に都合ようとらえすぎてる、それは自分の不安のためやろ、その動きは逆効果や、等。指摘のあとに愛を一滴残す
+- 【最重要・スタンス】毒舌の矛先は「彼・状況・現実」に向ける。相談者本人を責めへん。相談者が取った行動（追いLINE・問い詰め・不安の暴走など）は、まず「そら、そうなるわ」「あんたが悪いんやない」と当然の反応として肯定してから、現実を示す。「あんたのその聞き方が悪い」「あんたが◯◯したせいや」と本人に矛先を向けるのは禁止。厳しいことを言うのは相談者を勝たせるためで、椿は最後まで相談者の味方や
+- 【最重要・断定しない】「もう終わり」「その恋はもう無理」「脈はない」と、関係の結論を無料で断定せえへん。既読無視や冷たい態度を見ても「答えたくないだけで、心が完全に切れたかは別や」と、まだ分からん含みを残す。絶望させて終わらせると相談者は動く気力も失う。現実は厳しく示しても、希望の芽は残す（芽を掴むための"いつ・どう動くか"は、ちゃんと視る方で渡す、に繋げる）
+- 共感やオウム返しから入らない。相手の発言の要約を返さない。共感で受け止めるのは、相手がほんまに打ちのめされてる時だけ
+- 「大事」「素敵」「えらい」の安売りをしない。褒めるのは本当にええ動きの時だけ、その時は全力で
+- 相手が聞きたそうな答えに寄せない。前に言うた見立てと矛盾させない
+- 締めは質問が基本やが、毎回杓子定規に質問で終えない。言い切りで止めて相手の出方を待つ回も作る
+
+★質問する時の形（★2026-08-15追加・実測から）
+買うた人と買わんかった人で、会話の通数は同じ10通やった。違うたんは本人が書いた
+総文字数や（買うた人472字／買わんかった人326字）。1通あたり27字と22.8字。
+深さやのうて濃さで差がついとる。せやから、質問は「はい／いいえ」で終わる形にせん。
+- 彼の言葉を、そのまま書かせる（「彼、なんて言うたん。そのまま教えて」）
+- 場面を、いつ・どこで・何があったかで書かせる
+- 二つの気持ちのどっちが強いか、理由ごと書かせる
+「〜やんな？」「〜ちゃう？」で終わる確認だけの質問は、相手が「はい」で返して終いになる。
+それを続けると、通数だけ伸びて中身が薄い会話になる。
+
+※良い例文はここには置かない。例を見せると、その言い回しがそのままクセになって
+　全員に同じ相槌を返してまうから（実際にそうなった）。上の禁止語だけ守って、あとは自分の言葉で書く。
+
+厳守:
+- 処方箋（いつ・何を・どう動くか）は渡さない。「今は送るな」「待っとき」のような否定形の指示も処方箋であり、無料では渡さない。渡してええのは「彼の性質・今の状況・気持ちの読み」まで
+- 行動（どうしたらいい・ほっとくべきか・送るべきか等）を聞かれた時は、「無料では言えん」のような壁の宣言を絶対にしない。「無料」「有料」という言葉自体を相談者に向けて使わない。代わりにこの流れで返す：①まず相手の今の気持ちを一言で受け止める ②彼の性質・状況の読みを一つ足す（ここまでは今まで通り渡してええ）③彼についての「答えの形」だけ見せて、そこで止める——「心が離れたんか、意地が邪魔しとるだけなんか、そこの見極めが今いちばん大事なとこや」のように、答えそのものは言わずに、何が分かれ目なんかを名指しする。相手が「それはどう見分けるん？」と自分から聞き返してくる形が正解や
+- 【最重要】「このまま自分の勘で動くか、ウチが視てから決めるか」のような、視るか視ないかを問う二択を、あなたから書いてはならない。この問いは別の仕組みが、会話が十分深まってから一度だけ出す。あなたが早うに書くと、相手が彼のことを聞き返す前に会話が終わってまう（実害：2026-08-10、この二択を2通目で書くようになった結果、27人にオファーが飛んで購入ゼロやった）。彼についての問いを立てたら、その同じ返信の中で申し込みや意思確認の話に移らんこと
+- 料金・商品・リンク・会員の話を自分から切り出して売り込まない（オファーは別で出す）
+- 署名・モデル名を返信末尾へ勝手に足さない。実際に人が確認したという根拠のない説明をしない。
+- 【最重要・読み違い防止】相談者は自分のことを「私」「わたし」「うち」と呼ぶ。あなた（椿）が「あんたから？彼から？」「どっちや？」と二択で聞いた直後に「私」「わたし」「うち」とだけ返ってきたら、それは「相談者自身」という完全な答えや。「彼」「彼から」なら彼側。一語の短い返事は、必ず直前にあなたが投げた質問への答えとして解釈してから返す。意味が通るのに「『私』だけ来ても分からん」「それだけやと続きが分からん」と聞き返すのは絶対にしない（実害：陽子さんに「どっちや？」と聞いて「私」と完全な答えをもろたのに、聞き返して会話を壊した）
+- 内部の担当分けを顧客へ説明しない。実行できない引き継ぎや後日の対応を約束しない。
+- 【最重要・絶対厳禁】「このあと案内が来る」「料金はあとで送る」「もうちょい待っといて」のように、後から何かを届ける約束を絶対にしない。あなたは案内を送る仕組みを持っていない。約束しても永遠に届かず、相手は待ち続ける（実際にそうなった。三歳と一歳の子を抱えた人が「お待ちしてます」と返して、何も届かんかった）。
+　料金・申し込み方法・「どうしたら視てもらえるか」を聞かれたら、予告して終わらせず、「ほな、ちゃんと視てから言うわ。ここから先は片手間で答えるとこやない」の趣旨で受けて止める（「無料」「有料」という言葉は使わない）。止めた直後の案内は、別の仕組みが自動で出す。あなたはその存在に触れんでよい
+　★ただし値段そのものをはぐらかす言い方は絶対にしない。「金額は気にせんでええ」「お金のことは置いといて」「そこは心配せんでええ」は禁句。相手は値段を聞いとるのに「気にせんでええ」と返したら、無料やと受け取られる。金額に触れるなら黙って触れず、視ることだけを引き受けて止める（実害：まみさんに「金額は気にせんでええ」と返して、値段も案内も出さんまま会話が止まった）
+- 鑑定書の届き方・納期など単純な事実の質問には、椿自身が普通に答えてよい：届き方＝「鑑定書はPDFでこのLINEに届く（郵送やない）」、納期＝「こちらからの質問への返事をもらってから2営業日以内にここに届ける」。返金や複雑な手続きの相談だけは「そこはちょっと確認して、あとで返すな」と受ける（店主とは言わない）
+- 【言葉の指定・番号の呼び方】買うたあとにこっちへ送ってもらう数字のことは、必ず「購入のあとに出てくるオーダー番号」と書く。「番号」だけで済ませたらあかん。この商売には数字が二種類ある——Web診断の「鑑定番号」（4桁）と、購入後の「オーダー番号」（10桁）や。「決めたら番号だけ送ってな」と書くと、相談者にはどっちのことか分からん。実際、オファーを出したあとに4桁だけを送り返してくる人が何人もおる。「数字だけ打ってくれたらええ」と添えるのはかまへんが、「オーダー番号」の一語だけは必ず入れること
+- 【最重要・無料で鑑定する約束をしない】「視たる」「視てまとめる」「今日中に返す」「預かる」の類を、
+　絶対に書かん。あなたは、あとから鑑定を届ける仕組みを持ってへん。
+　実害（2026-08-17 ゆみこさん）：「彼の生まれと今の状況、こっちで預からせてもらうわ。
+　ちゃんと視て、今日中にここに返すからな」と書いてもうた。
+　相手はそれを信じて、彼の生年月日と状況をぜんぶ送ってきた。
+　★届ける仕組みが無いんやから、あの人はただ待たされるだけになる。
+　　金を払う話も出てへんのに、無料で鑑定する約束をした形や。これが一番重い事故や。
+　視る話に踏み込まず、「ここから先は片手間で答えるとこやない」で受けて止める。
+　止めた直後の案内は、別の仕組みが自動で出す。あなたはその存在に触れんでよい。
+- 【最重要・これから視るという宣言をしない】上と同じ事故の、いちばん出やすい形や。
+　「ちゃんと視るわ」「しっかり視させてもらうわ」「ここから先はウチが視る」
+　「視らせてもらうで」——この言い切りを、一通たりとも書かん。
+　実害（2026-08-16〜17 なぎさん）：三回続けて「ちゃんと視るわ🌙」で締めてもうた。
+　相手は三回とも「視てください」「みてもらってからです」と答えとる。
+　★言い切った時点で、相手は「これから何か届く」と読む。そこで返事が止まって待つ。
+　　届くもんは無い。相手は待ち続けるだけになる。
+　「視る」に触れてええんは、二択（勘で動くか／視てから動くかを選ばせる一通）だけや。
+　その一通は別の仕組みが書く。あなたは書かん。
+　受け止めるだけにして、見立てを渡す約束はせずに終う。
+- 【最重要・生年月日を自分から集めない】「彼の生まれ教えて」「生年月日送って」を、
+　あなたから言わん。生年月日を集める入口は別にあって、そこが定型で聞く作りになっとる。
+　あなたが集めにいくと、それは「無料で視たる」の合図になってまう。
+　相手が自分から送ってきた場合は、受け取ってよい。ただし、そこで鑑定を約束せんこと。
+- 【最重要・事実を作らない】相談者が言うてへんことを、事実として書かん。とくに数字や。
+　付き合った期間、会った回数、年齢、連絡が途切れた日数、子どもの人数——
+　これらを、本人が言うてへんのに、こっちで埋めたらあかん。
+　実害（2026-08-16 ふじのさん）：共感を強めよう思て「一年近く積み上げたもんやからな」と書いた。
+　実際の交際は三ヶ月で、本人に「付き合ったの3ヶ月くらいなんです」と指摘された。
+　★しかも、その一文が会話履歴に残って、あとから出たオファーの目次プレビューが
+　　「一年積み上げた二人を繋いだ意味の正体」と、こっちの作り話を事実として引き継いだ。
+　　嘘は一回で終わらん。履歴に残って、次の生成が事実として拾う。二重三重に伝染する。
+　期間や重みに触れたい時は、数字を出さんと「ここまで積み上げてきたもん」の形で書く。
+　★相談者が自分で言うた数字だけは、そのまま使うてええ
+- 『宿曜』の語・宿の名前・占い専門用語は出さない。「ウチが視たら」でよい
+- 復縁や結果を保証しない。過度に不安を煽らない。病気・健康・金運の断定をしない
+- 危険な行動（突撃・監視・自傷等）だけは毒舌でなく真剣に止める
+- 誤字は書かない。出力は返信本文のみ（説明や注釈は不要）""" + TIME_GUARD + RESPECT_GUARD + NAME_GUARD
 
 # 生年月日は届いたが状況が分からないときの定型ヒアリング（生成なし・トークン消費ゼロ）
 # 番号はあいさつメッセージ（①②=生年月日）の続き＝③④で揃えている
@@ -722,6 +888,8 @@ def _plain_text(text: str) -> str:
     """LINE送信前の最終ガード：Markdown記号・アスタリスク・コード風の異物・
     システム由来の英単語（meta等）を完全に除去する
     （LINEは装飾を解釈しないため、記号や異物がそのまま見えてしまう）。"""
+    if any(phrase in text for phrase in ("こちらからの自動返信は止めとくな", "今日はここで終わりにしよな")):
+        return ""  # Retired fallback copy must not reappear from conversation history.
     if re.search(r"店主.{0,12}(?:対応|確認)|(?:担当|運営).{0,8}(?:引き継|回す)", text):
         return ""  # Internal routing must not leak through generated or fallback copy.
     text = "\n".join(ln for ln in text.splitlines() if not _ARTIFACT_LINE_RE.match(ln))
@@ -1079,7 +1247,7 @@ _POST_OFFER_GUIDE = """
 
 2. ★「視てもらうまでの段取り」を、必ず一行入れる。ここは絶対に省かん。
    趣旨はこれや——「さっき送った商品ページから申し込んでくれたら、
-   購入のあとにオーダー番号が出る。その数字だけここに送ってくれたら、こちらからの質問への回答をもらってから鑑定を作成する」。
+   購入のあとにオーダー番号が出る。その数字だけここに送ってくれたら、すぐ鑑定に入れる」。
    これを椿の言葉で書く。
    ★「オーダー番号」の一語は必ず入れる。「番号」だけで済ませたらあかん。
      この商売には鑑定番号（4桁）もあるから、「番号」だけやとどっちか分からんようになる。
@@ -1096,14 +1264,18 @@ _POST_OFFER_GUIDE = """
 
 
 def generate_nurture(user: dict, history: list[dict], incoming: str,
-                     extra_system: str = "") -> str | None:
+                     extra_system: str = "") -> str:
     transcript = "\n".join(
         f"{'相談者' if h['role'] == 'user' else '椿'}: {h['text']}" for h in history
     )
     system = NURTURE_SYSTEM + extra_system
     blob = transcript + "\n" + incoming
     if _FORBIDDEN_LOVE_RE.search(blob):
-        system += "\n既婚・婚外の相談も裁かず、事実と推測を区別する。家族への影響や本人の安全も尊重する。"
+        system += _FORBIDDEN_LOVE_GUIDE
+    # 診断番号から入って、まだ本人の発言が浅いうち（4通目まで）だけ効かせる
+    if (sum(1 for h in history if h.get("role") == "user") < 4
+            and any("鑑定番号" in str(h.get("text", "")) for h in history if h.get("role") == "user")):
+        system += _FROM_DIAG_GUIDE
     prompt = (
         f"【今の日時】{now_context()}\n\n"
         f"【これまでの会話】\n{transcript or '（初回）'}\n\n"
@@ -1111,7 +1283,7 @@ def generate_nurture(user: dict, history: list[dict], incoming: str,
         f"{_internal_ref(user)}\n\n"
         "椿として返信を1つ書いてください。"
     )
-    text = complete(system, prompt, model=LINE_BOT_MODEL, max_tokens=400, temperature=0.4)
+    text = complete(system, prompt, model=LINE_BOT_MODEL, max_tokens=400, temperature=0.9)
     # 作り直しが必要なケース: ①宿名等の漏れ ②長すぎ（200字超は診断長文の判定220字と衝突する）
     problems = []
     if any(w in text for w in _JARGON):
@@ -1122,19 +1294,16 @@ def generate_nurture(user: dict, history: list[dict], incoming: str,
     #   ★ここに個別の検査を足さんこと。足したら会員返信がまた素通りする。
     problems += inspect_reply(
         incoming, text,
-        vocab=prompt + " " + str(user.get("display_name") or ""),
-        max_questions=1, allow_acknowledgement="訂正" in extra_system)
+        vocab=prompt + " " + str(user.get("display_name") or ""))
     if problems:
         print(f"[line_bot] 返信を作り直し: {problems}")
         # ★作り直しでも system は元のまま使う（NURTURE_SYSTEM に戻すと、
         #   オファー後の段取り指示や不倫の配慮が、書き直しの一回で全部落ちる）
         text = complete(system + "\n\n【厳重注意】" + "。".join(problems) + "。",
-                        prompt, model=LINE_BOT_MODEL, max_tokens=400, temperature=0.4)
+                        prompt, model=LINE_BOT_MODEL, max_tokens=400, temperature=0.9)
         if any(w in text for w in _JARGON):
             text = _strip_jargon(text)
         text = _META_LEAK_RE.sub("", text)  # 作り直しでも残ったら最終除去
-    if len(re.findall(r"[？?]", text)) > 1 or not _plain_text(text):
-        return None
     return text
 
 
@@ -1205,13 +1374,12 @@ def handle_event(ev: dict) -> None:
         existing = store.get_line_user(user_id)
         if existing and store.recent_line_chats(user_id, limit=1):
             stamp = f"再追加:{datetime.now().isoformat(timespec='seconds')}"
-            old = quality.MARK.sub("", _REFOLLOW_RE.sub("", str(existing.get("note") or "")))
+            old = _REFOLLOW_RE.sub("", str(existing.get("note") or ""))
             old = old.replace("ブロック/解除", "").strip("｜ ")
             fields["note"] = f"{stamp}｜{old}" if old else stamp
         store.upsert_line_user(user_id, **fields)
         try:  # 実際の友だち追加数をファネル計測に記録（ボタン押下でなく本当の追加）
             store.add_web_event("line_follow")
-            quality.record(user_id, "follow")
         except Exception as e:
             print(f"[line_bot] follow計測失敗（処理は継続）: {e}")
         return
@@ -1219,7 +1387,6 @@ def handle_event(ev: dict) -> None:
         store.upsert_line_user(user_id, bot="off", note="ブロック/解除")
         try:
             store.add_web_event("line_unfollow")
-            quality.record(user_id, "unfollow")
         except Exception as e:
             print(f"[line_bot] unfollow計測失敗: {e}")
         return
@@ -1233,11 +1400,6 @@ def handle_event(ev: dict) -> None:
     if not user:
         store.upsert_line_user(user_id, display_name=get_display_name(user_id))
         user = store.get_line_user(user_id) or {"user_id": user_id}
-
-    if quality.state(user) in {"ai", "complaint", "error", "decline"}:
-        if msg.get("type") == "text":
-            store.add_line_chat(user_id, "user", msg.get("text", "").strip())
-        return
 
     if msg.get("type") == "image":
         # 有料会員の画像は読み取って履歴に残す（💬会員相談の返信生成が参照する）。
@@ -1400,8 +1562,6 @@ def _reply_after_offer(user_id: str, user: dict, incoming: str, snd, history: li
     売り込みはせん（オファーは一人一回きりのまま）。受け止めを最大2通だけ返して、
     それ以降は今まで通り店主に渡す。
     """
-    if quality.state(user) in {"decline", "ai", "complaint", "error"}:
-        return
     if not _offer_already_sent(user_id):
         return                      # オファー前のholdは店主の対応域。触らん
     if _ORDER_NO_RE.search(incoming):
@@ -1433,16 +1593,12 @@ def _reply_after_offer(user_id: str, user: dict, incoming: str, snd, history: li
     if detect_signal(incoming) == "danger":
         snd(DANGER_REPLY)
         return
-    if _quality_turn(user_id, user, history, incoming, snd) is None:
-        return
     # オファー以降に椿が返した数を数える
     last_offer = max((i for i, h in enumerate(history)
                       if h["role"] == "assistant" and _is_offer_text(str(h["text"]))), default=None)
     if last_offer is None:
         return
-    after = [h for h in history[last_offer + 1:] if h["role"] == "assistant"
-             and "note.com/tsubaki_honne" not in h["text"]
-             and OFFER_FOLLOWUP_MARK not in h["text"]]
+    after = [h for h in history[last_offer + 1:] if h["role"] == "assistant"]
     if len(after) >= POST_OFFER_REPLIES:
         return                      # もう返した。ここから先は店主に任せる
     # ★2026-08-16：オファー後の返事には「オーダー番号を送るまでの段取り」を必ず入れる。
@@ -1764,55 +1920,13 @@ def _is_minor(user: dict) -> bool:
     return age < 18
 
 
-def _quality_turn(user_id, user, history, incoming, snd):
-    """Return normal decision; handle correction/closure before any sales path."""
-    if offer_routing.direct_price_question(incoming):
-        return {"kind": "normal", "ready": True}
-    try:
-        decision = quality.classify(history, incoming, complete, LINE_BOT_MODEL)
-    except Exception as exc:
-        print("[conversation] classification failed:", type(exc).__name__)
-        decision = {"kind": "error", "ready": False}
-    latest = store.recent_line_chats(user_id, limit=200)
-    current = store.get_line_user(user_id) or {}
-    if (not latest or latest[-1].get("role") != "user"
-            or latest[-1].get("text") != incoming
-            or (current.get("bot") or "on") != (user.get("bot") or "on")):
-        return None
-    kind = decision["kind"]
-    if kind == "normal":
-        return decision
-    if kind == "correction":
-        text = _retry(lambda: generate_nurture(user, history[:-1], incoming,
-            extra_system="\n今回は理解を訂正された。短く謝り、正しい理解に直して答える。販売や追加質問はしない。"), "訂正への返信")
-        if text:
-            text = re.sub(r"[^。！？?\n]+[？?]", "", text).strip()
-            if not any(w in text for w in ("ごめん", "申し訳", "すまん")):
-                text = "読み違えてごめんな。" + text
-    else:
-        text = {"closed": quality.CLOSE_REPLY, "decline": quality.DECLINE_REPLY,
-                "ai": quality.AI_REPLY, "complaint": quality.COMPLAINT_REPLY}.get(kind, quality.HANDOFF_REPLY)
-    latest = store.recent_line_chats(user_id, limit=200)
-    current = store.get_line_user(user_id) or {}
-    if (not latest or latest[-1].get("role") != "user" or latest[-1].get("text") != incoming
-            or (current.get("bot") or "on") != (user.get("bot") or "on")):
-        return None
-    if kind in {"error", "ai"} or (text and snd(text)):
-        fields = {"bot": "hold"} if kind in {"ai", "complaint", "error", "decline"} else {}
-        quality.set_state(user_id, kind, **fields)
-        quality.record(user_id, "state", state=kind, source="classifier")
-        if kind in {"ai", "complaint", "error"}:
-            quality.review_task(user_id, kind, latest[-1])
-    return None
-
-
 def _auto_reply(user_id, user, incoming, reply_token="", **kwargs):
     with _OFFER_LOCKS[hash(user_id) % len(_OFFER_LOCKS)]:
         current = store.get_line_user(user_id)
-        if not current or (current.get("bot") or "on") != "on":
-            return
         recent = store.recent_line_chats(user_id, limit=1)
-        if not recent or recent[-1].get("role") != "user" or recent[-1].get("text") != incoming:
+        if (not current or (current.get("bot") or "on") != "on"
+                or not recent or recent[-1].get("role") != "user"
+                or recent[-1].get("text") != incoming):
             return
         return _auto_reply_locked(user_id, current, incoming, reply_token, **kwargs)
 
@@ -1840,19 +1954,7 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
     # オファー済み・二択済み・無料上限は、ブロック→再追加より後だけで数える（仕切り直し）。
     # 診断済み判定(diag_sent)とLLMへの文脈(transcript)は全履歴のまま＝診断の二重送信を防ぐ
     state_hist = _since_refollow(history, _refollow_ts(user.get("note")))
-    if quality.state(user) in {"ai", "complaint", "error", "decline"}:
-        return
-    if _member_status(user) != "free":
-        return
-    if detect_signal(incoming) == "danger":
-        if snd(DANGER_REPLY):
-            store.upsert_line_user(user_id, bot="hold")
-        return
-    decision = _quality_turn(user_id, user, history, incoming, snd)
-    if decision is None:
-        return
-    if (allow_offer and offer_routing.pending(state_hist)
-            and (detect_signal(incoming) == "purchase" or not re.search(r"[？?]|教えて|知りたい", incoming))):
+    if allow_offer and offer_routing.pending(state_hist):
         if detect_signal(incoming) == "danger":
             if snd(DANGER_REPLY):
                 store.upsert_line_user(user_id, bot="hold")
@@ -1863,10 +1965,6 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
                       if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN
                       and ASK_MARKER not in h["text"])
     over_limit = bot_replies >= _effective_limit(state_hist)
-    if over_limit and _is_minor(user):
-        store.upsert_line_user(user_id, bot="hold")
-        quality.review_task(user_id, "minor_limit", history[-1])
-        return
 
     # 生年月日が二人分揃っていて、まだ無料診断を送っていなければ、自動で無料診断を返す
     #（「鑑定してほしい」等の購入ワードが同時に入っていても、診断が先。
@@ -1876,13 +1974,6 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
             return
 
     sig = detect_signal(incoming, history)
-    # A request for advice is not a purchase request. Answer it first.
-    if sig == "purchase_soft":
-        sig = None
-    if (allow_offer and decision.get("ready") and bot_replies >= 2
-            and not _money_trouble(state_hist)):
-        _route_offer(user_id, user, state_hist, incoming, snd)
-        return
     # ★2026-08-10：本人が自分の言葉で求めてへんうちは、まだ売りにいかん。
     #   実データ（8/10より前の249件）：発言6回以下でも、自分から料金や依頼を
     #   口にした人は 3/8＝37.5% 買う。一方こっちが振って相槌が返っただけの人は
@@ -1911,13 +2002,21 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
             # すでにオファー済みなら二度は送らない（続きは店主が手動で）
             store.upsert_line_user(user_id, bot="hold")
             return
+        # ★2026-08-08：オファーは、本人が「視てほしい」「進めたい」と言うてから出す。
+        #   「どうしたらいい」等の相談型（purchase_soft）は、まず二択の意思確認を挟む。
+        #   明示の依頼（purchase＝料金・申し込み・視てほしい等）だけが直接オファーへ行ける。
+        #   実測：意思を口にしてから受けた人は 19.2%、そうでない人は 6.8%（2.8倍）。
+        if sig == "purchase_soft" and not _asked_deeper(state_hist):
+            snd(generate_ask_deeper(user, history, incoming))
+            print(f"[line_bot] 相談型サイン。オファーの前に二択で意思を聞いた: {user_id}")
+            return
         # 購入サイン＝買う瞬間。上限を待たず、その場で個別鑑定オファーを自動送付
         #（送付後はhold＝納期・支払い等の続きの質問は店主がLINEアプリから手動で返す）
         _route_offer(user_id, user, state_hist, incoming, snd)
         return
 
     if live:
-        # Classification has already consumed time; no simulated human delay.
+        _human_pause()  # 人間らしい「間」を置いてから返信する
         # 待っている間に次のメッセージが届いていたら、この返信はスキップ
         #（新しいメッセージ側の処理が全履歴を見て返す＝二重返信・順番の乱れを防ぐ）
         history = store.recent_line_chats(user_id, limit=200)  # 「間」の後に読み直す
@@ -1932,7 +2031,7 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
 
     # 無料返信の上限：ナーチャリング返信（全履歴・診断と③④は数えない）が
     # FREE_REPLY_LIMIT通に達していたら停止する。未成年にはオファーを出さずに止めるだけ。
-    if over_limit and allow_offer and decision.get("ready"):
+    if over_limit and allow_offer:
         if _is_minor(user):
             # 未成年に有料オファーは送らん。せやけど、送らんまま会話だけ無限に続けるんもあかん。
             # ★2026-08-06：14歳の中学生に、一日で30通返し続けとった（合計62通）。
@@ -1948,25 +2047,46 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
             # すでにオファー済みなら二度は送らない（続きは店主が手動で）
             store.upsert_line_user(user_id, bot="hold")
             return
+        # ★2026-08-15（夜）：ここは「二択を一回出して、答えが“視てほしい”の形やなかったら
+        #   打ち切ってhold」やった。実際に止まった人を並べたら、全員が会話の途中やった。
+        #     ゆま  「浮気などではないですか？」        ← まっすぐな質問
+        #     やすこ「そんなにすぐ見れるの？」          ← 納期の質問＝買う直前
+        #     みゆき「彼から全然返信来なくなっちゃいましたよ😭」
+        #     waaaa 「どうにかさよならを無しにしたいです」
+        #   四人ともオファーを一度も見てへんまま止まっとった。二択の一回勝負がきつすぎる。
+        #   ★せやから通数では切らず、二択を最大三回まで出す。三回出しても言葉にならん人には、
+        #     こっちからオファーを出して、本人に見て決めてもらう。判断材料を渡さんまま
+        #     幕を引くほうが不親切や。
+        #   ★間隔は空ける（_effective_limit）。二択が続けざまに二回来たら詰問になる。
+        asks = _ask_deeper_count(state_hist)
+        if asks < ASK_DEEPER_MAX:
+            #   ここで「視てほしい」と言うてくれたら、その一言が購入サインとして
+            #   拾われて（_DECLINE_RE に ASK_DEEPER_MARK を入れてある）、
+            #   次のメッセージで上の purchase 分岐がオファーを出す。
+            #   bot は on のまま置いとく。返事を受け取らなあかんからな。
+            snd(generate_ask_deeper(user, history, incoming))
+            print(f"[line_bot] 意思確認 {asks + 1}/{ASK_DEEPER_MAX} 回目: {user_id}")
+            return
+        # 三回聞いた。ここから先は、金の話が出とるかどうかで分ける。
         if _money_trouble(state_hist):
-            if snd(quality.DECLINE_REPLY):
-                quality.set_state(user_id, "decline", bot="hold")
-                quality.record(user_id, "state", state="decline", source="explicit_budget")
+            # 「お金がない」と言うた人には売りにいかん。ここは変えん（07番の鉄則）。
+            #   ただし黙って終わらせもせん。引っかかりに一言返してから店主に渡す。
+            text = _retry(lambda: generate_nurture(user, history[-13:-1], incoming),
+                          "意思確認後の受け止め")
+            if text and _PROMISE_LATER_RE.search(text):
+                text = None                 # 「あとで返す」は届ける仕組みが無いので送らん
+            if text:
+                snd(text)
+            store.upsert_line_user(user_id, bot="hold")
+            print(f"[line_bot] 三回聞いたが金の事情が出とるので、売らずに受け止めた: {user_id}")
             return
         # 判断材料としてオファーを出す。買うか買わんかは本人が決めたらええ。
         _route_offer(user_id, user, state_hist, incoming, snd)
         return
 
-    if bot_replies >= FREE_REPLY_LIMIT + 3:
-        quality.set_state(user_id, "error", bot="hold")
-        quality.review_task(user_id, "long_conversation", history[-1])
-        return
-
-    transcript = history[-200:]  # 既に回答した情報・訂正を保持する
+    transcript = history[-13:]  # 会話プロンプトには直近だけ渡す（最後の1件=今回のメッセージ）
     text = _retry(lambda: generate_nurture(user, transcript[:-1], incoming), "返信の生成")
     if text is None:
-        quality.set_state(user_id, "error", bot="hold")
-        quality.review_task(user_id, "reply_generation", history[-1])
         return
 
     # ★最後の安全網（2026-08-07）。
@@ -1984,21 +2104,16 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
         if _offer_already_sent(user_id):
             store.upsert_line_user(user_id, bot="hold")
             return
+        # 予告を検知しても、本人がまだ「視てほしい」と言うてへんなら、まず二択で聞く
+        if not _asked_deeper(state_hist):
+            print(f"[line_bot] 生成が『あとで案内』と予告。オファーやのうて二択を送った: {user_id}")
+            snd(generate_ask_deeper(user, history, incoming))
+            return
+        print(f"[line_bot] 生成が『あとで案内』と予告したのでオファーに切り替え: {user_id}")
         _route_offer(user_id, user, state_hist, incoming, snd)
         return
 
-    if (over_limit and allow_offer and not _is_minor(user)
-            and not _money_trouble(state_hist)
-            and not any(offer_routing.INVITATION in h.get("text", "") for h in state_hist)):
-        text = re.sub(r"[^。！？?\n]+[？?]", "", text).strip()
-        text = (text + "\n\n" if text else "") + offer_routing.INVITATION
-    latest = store.recent_line_chats(user_id, limit=200)
-    current = store.get_line_user(user_id) or {}
-    if (latest and latest[-1].get("role") == "user" and latest[-1].get("text") == incoming
-            and (current.get("bot") or "on") == "on" and snd(text)):
-        state = "awaiting" if len(re.findall(r"[？?]", text)) == 1 else "answered"
-        quality.set_state(user_id, state)
-        quality.record(user_id, "state", state=state, source="reply")
+    snd(text)
 
 
 # ---------- 未返信スイープ（安全網） ----------
@@ -2017,11 +2132,14 @@ OFFER_FOLLOWUP_MARK = "この前の話、そのままになっとるな"
 # ★「案内はこれで最後にする」を必ず入れる。しつこうせん姿勢を明示すると同時に、
 #   下の _final 判定に引っかかって、二度目の追いフォローが止まる仕組みにもなっとる。
 OFFER_FOLLOWUP = (
-    "この前の話、そのままになっとるな。\n"
-    "鑑定の内容や申し込み方で、まだ分かりにくいところはある？\n"
-    "案内はこれで最後にするな。今は必要なければ返信せんで大丈夫やで。"
+    "この前の話、そのままになっとるな。\n\n"
+    "催促しに来たんやない。あんたが「視てほしい」て言うてくれたこと、ウチはちゃんと覚えとる。\n"
+    "せやから一回だけ、今どうなっとるか聞かせてほしい。\n\n"
+    "・バタバタしとって、それどころやなかったか\n"
+    "・状況の方が動いて、聞きたいことが変わったんか\n\n"
+    "どれでも、一言でええ。それに合わせて、こっちも動き方を変えるからな。\n\n"
+    "ほんで、案内はこれで最後にする。もう一回だけ、ここに置いとくで🌙"
 )
-
 
 
 def _resend_offer(uid: str, rows: list[dict], offer_idx: int) -> None:
@@ -2112,23 +2230,6 @@ def _post_offer_sweep(uid: str, user: dict, last: dict, age) -> bool:
     return len(store.recent_line_chats(uid, limit=200)) > before
 
 
-def _quality_followup(uid, observed):
-    with _OFFER_LOCKS[hash(uid) % len(_OFFER_LOCKS)]:
-        user = store.get_line_user(uid) or {}
-        current = store.recent_line_chats(uid, limit=200)
-        if ((user.get("bot") or "on") != "on" or _member_status(user) != "free"
-                or not current or not observed
-                or current[-1].get("text") != observed[-1].get("text")
-                or current[-1].get("id") != observed[-1].get("id")):
-            return False
-        text = quality.followup(user, current)
-        if text and _send(uid, "", text):
-            quality.set_state(uid, "followed_up")
-            quality.record(uid, "state", state="followed_up", source="sweep")
-            return True
-        return False
-
-
 def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
     """最後が相談者の発言のまま止まっている会話（bot=onのみ）に自動返信する。
     直近min_age_min分は通常のWebhook処理に任せて触らない（Webhook処理は間20〜35秒＋
@@ -2186,7 +2287,7 @@ def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
                         and timedelta(hours=24) <= _oage <= timedelta(hours=72)):
                     user = store.get_line_user(uid)
                     if (user and (user.get("bot") or "on").strip() == "hold"
-                            and quality.state(user) == "offered"):
+                            and quality.state(user) not in {"closed", "decline", "ai", "complaint", "error"}):
                         print(f"[sweep] オファー24hフォロー（状況確認＋再送）: {uid}")
                         _resend_offer(uid, rows, _offer_idx)
                         replied += 1
@@ -2205,8 +2306,12 @@ def sweep_unanswered(min_age_min: int = 3, max_age_hours: int = 48) -> int:
                 continue                                   # hold/offは店主の対応域。触らん
             if _is_minor(user):
                 continue                                   # 未成年は追いかけん
-            if _quality_followup(uid, rows):
-                replied += 1
+            if quality.state(user) in {"closed", "decline", "ai", "complaint", "error"}:
+                continue
+            asked = any(m in str(last["text"]) for m in _ASK_DEEPER_MARKS)
+            print(f"[sweep] オファー前の声かけ（{'二択で停止' if asked else '会話が途切れ'}）: {uid}")
+            _send(uid, "", PRE_OFFER_FOLLOWUP_ASKED if asked else PRE_OFFER_FOLLOWUP)
+            replied += 1
             continue
         if age < timedelta(minutes=min_age_min) or age > timedelta(hours=max_age_hours):
             continue

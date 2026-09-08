@@ -72,7 +72,6 @@ def test_plain_yes_cannot_pick_expensive_choice():
 
 @pytest.fixture
 def flow(monkeypatch):
-    monkeypatch.setattr(bot, "_quality_turn", lambda *a: {"kind":"normal", "ready":True})
     monkeypatch.setattr(bot.quality, "record", lambda *a, **k: None)
     history=[msg('user','相談です')]
     state={'bot':'on'}
@@ -213,7 +212,7 @@ def test_failed_classification_is_silent_and_creates_private_task(monkeypatch, f
     monkeypatch.setattr(r,"route",lambda *a:r.Decision("handoff","error",r.HANDOFF))
     monkeypatch.setattr(bot.store,"append_ops_event",lambda e:tasks.append(e))
     bot._route_offer("test",{},history,"相談です",send)
-    assert state["bot"] == "hold" and len(history)==1 and not calls
+    assert state["bot"] == "on" and len(history)==1 and not calls
     assert len(tasks)==1 and tasks[0]["kind"]=="task.set"
 
 
