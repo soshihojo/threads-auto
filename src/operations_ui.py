@@ -36,11 +36,19 @@ def render():
         else:
             report = financials(rows, datetime.combine(start_date, time.min, JST),
                                 datetime.combine(end_date + timedelta(days=1), time.min, JST))
+            payment_records = [e for e in events(rows) if e["kind"] == "payment.manual"
+                               or (e["kind"] == "stripe.receipt" and e["data"].get("livemode") is True
+                                   and e["data"].get("type", "").startswith(("charge.", "refund.")))]
             cs = st.columns(4)
-            cs[0].metric("記録済み入金", f'¥{report["receipts"]:,}')
-            cs[1].metric("Stripe返金", f'¥{report["refunds"]:,}')
-            cs[2].metric("入金 − Stripe返金", f'¥{report["net"]:,}')
+            cs[0].metric("記録済み入金", f'¥{report["receipts"]:,}' if payment_records else "未集計")
+            cs[1].metric("Stripe返金", f'¥{report["refunds"]:,}' if payment_records else "未集計")
+            cs[2].metric("入金 − Stripe返金", f'¥{report["net"]:,}' if payment_records else "未集計")
             cs[3].metric("記録済み作業時間", f'{report["minutes"] / 60:.1f} 時間')
+            if not payment_records:
+                st.info("入金明細がまだ登録されていません。実際の売上が0円という意味ではありません。"
+                        "ダウンロード済みのCSVは、この画面に自動では取り込まれません。")
+            elif report["receipts"] == 0:
+                st.caption("選択期間に集計対象の入金記録がありません。期間と明細の登録状況を確認してください。")
             st.caption("連携開始後のStripe本番決済と、確認して手入力した入金のみ。"
                        "過去の未登録取引・手動決済の返金・手数料・経費は含みません。利益や総売上ではありません。")
             if report["unlinked"]:
