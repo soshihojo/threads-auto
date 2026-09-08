@@ -147,7 +147,7 @@ st.caption(f"プロファイル: {profile['name']}　|　返信モード: 下書
 #   どっちも運用で使わんようになったんで、置いといても画面が重いだけや。
 #   ★消したんは画面だけ。コメント巡回も無料診断そのものも、裏では今までどおり動いとる
 #     （poll.yml と line_app.py の側）。ここで消えたんは「人が見る窓」だけやからな。
-VIEW_CONSULT, VIEW_MEMBERS = VIEWS = ["💬 会員相談", "👥 会員"]
+VIEW_CONSULT, VIEW_MEMBERS, VIEW_OPERATIONS = VIEWS = ["💬 会員相談", "👥 会員", "📋 対応と売上"]
 view = st.radio("画面", VIEWS, horizontal=True, key="view", label_visibility="collapsed")
 st.divider()
 
@@ -232,6 +232,11 @@ def _build_consult_context(cb, cmem, chist, incoming, _lmsgs, _refs, _span_h):
         f"　椿の返信: {str(h['reading'])[:1600]}"
         for h in reversed(_past)
     )
+    manual = cb.get("manual_replies", [])
+    if manual:
+        hist_str += "\n\n◆店主による公式LINEの手動対応記録（記録日時は実際の送信日時とは限らない）:\n" + "\n".join(
+            f"・記録 {r['created_at']} / 対応した受信ID {r['data'].get('chat_id', '')}: "
+            + str(r["data"].get("note") or "対応済み。本文未登録")[:1600] for r in manual[-12:])
     # ★★★2026-08-23：ここで【いま答えよとする相談】を履歴から外す。
     #   相談欄は未返信ぶんを自動で入れとる＝LINE直近と中身が丸かぶりや。
     #   実測：ema shimotsumaさん8/8件、riyoさん5/5件、なつみさん4/4件が重複しとった。
@@ -515,7 +520,14 @@ def _consult_board() -> tuple[str, list[dict], dict]:
 
     戻り値の先頭は「いつ取ってきたか」。古い内容を新しい顔で見せんために画面に出す。
     """
-    members = store.list_members()
+    from src.operations import acknowledgements, events, unacknowledged
+    members = [dict(m) for m in store.list_members()]
+    ops_rows = store.list_ops_events()
+    ack = acknowledgements(ops_rows)
+    manual_by_uid = {}
+    for record in events(ops_rows):
+        if record["kind"] == "reply.ack":
+            manual_by_uid.setdefault(record["user_id"], []).append(record)
     by_births = {}
     # ★★★2026-08-23：ここは【他人の会話が混ざる】いちばん危ない所や。
     #   前は by_births[key] = u と後勝ちで入れとった。
@@ -575,12 +587,7 @@ def _consult_board() -> tuple[str, list[dict], dict]:
         uid = str(u["user_id"]) if u else ""
         chats = chats_by_uid.get(uid, []) if uid else []
         # 末尾から続く「会員の発言」＝まだこっちが返せてないぶん
-        wrows = []
-        for r in reversed(chats):
-            if str(r.get("role")) != "user":
-                break
-            wrows.append(r)
-        wrows.reverse()
+        wrows = unacknowledged(chats, ack.get(uid))
         # ★2026-08-10：未返信を全部つないで相談欄に入れると、何日ぶんもの独り言が
         #   一塊になって「どれに答える話や」が分からんようになった（みのりさん・3日19件）。
         #   最後の発言から遡って、_BURST_GAP_H 時間以上あいたところで切る＝
@@ -620,6 +627,8 @@ def _consult_board() -> tuple[str, list[dict], dict]:
             "me_birth": str(m["me_birth"]), "him_birth": str(m["him_birth"]),
             "uid": uid, "line_name": str(u.get("display_name") or "") if u else "",
             "waiting": "\n".join(waiting),
+            "waiting_rows": wrows,
+            "manual_replies": manual_by_uid.get(uid, []),
             "waiting_recent": "\n".join(str(r.get("text") or "") for r in recent),
             # ★★★2026-08-23：日時つきの版も持っとく。
             #   相談欄は本文だけを入れとった＝椿には【いつ届いたか】が分からん。
@@ -675,9 +684,8 @@ if view == VIEW_CONSULT:
                         f"　<span style='color:gray'>／ 会員 {len(_board)}人"
                         f"　（LINE取得 {_fetched_at}）</span>",
                         unsafe_allow_html=True)
-        st.caption("🔴は「記録上、最後に喋ったのが会員」という意味です。LINE公式アプリから手で返した分は"
-                   "こちらに記録が残らないため、返信済みでも🔴が付いたままになります。"
-                   "この画面から送った分は記録されるので、使うほど正確になります。")
+        st.caption("🔴は受信ログ上の未対応候補です。公式LINEで手動返信した時は「対応済みにする」で記録してください。"
+                   "記録した受信だけを対象にするため、その後の新着相談は残ります。")
         _labels = [f"{'🔴' if b['waiting'] else '✅'} {b['nickname']}"
                    f"{'' if b['uid'] else '（LINE未リンク）'}　{b['last_ts']}" for b in _board]
         # ★★★2026-08-29：未返信の人が溜まった時のための一括モード。
@@ -744,8 +752,11 @@ if view == VIEW_CONSULT:
                         placeholder="LINEアプリからコピーして貼るだけでええ。空でも印は押せるが、"
                                     "貼っといた方が次の返信がずれん")
                     if st.button("対応済みにする", key=f"con_done_{cb['id']}"):
-                        _txt = (_manual or "").strip() or "［店主がLINEアプリから手動で返信（本文は未登録）］"
-                        store.add_line_chat(cb["uid"], "assistant", _txt)
+                        from src.operations import message_key, new_event
+                        store.append_ops_event(new_event(cb["uid"], "reply.ack", {
+                            "chat_id": str(cb["waiting_rows"][-1]["id"]),
+                            "chat_keys": [message_key(r) for r in cb["waiting_rows"]],
+                            "note": (_manual or "").strip(), "channel": "LINE公式・手動"}))
                         st.session_state.pop(f"con_manual_{cb['id']}", None)
                         _consult_board.clear()
                         st.rerun()
@@ -945,6 +956,10 @@ if view == VIEW_CONSULT:
 
 
 # ---------------- 会員リスト ----------------
+if view == VIEW_OPERATIONS:
+    from src.operations_ui import render
+    render()
+
 if view == VIEW_MEMBERS:
     st.caption("サブスク会員を登録（二人の生年月日を保存）。💬会員相談の画面で選ぶだけで返信を生成できます。")
     with st.expander("➕ 会員を登録する", expanded=False):

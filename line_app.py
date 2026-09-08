@@ -22,6 +22,8 @@ from src import line_bot, tokushoho, store, web_diag
 from src.config import env
 
 app = FastAPI()
+from src.payments import router as payments_router
+app.include_router(payments_router)
 store.init_db()
 
 # 未返信スイープ：生成失敗等で返信が落ちた会話を10分ごとに拾い直す安全網

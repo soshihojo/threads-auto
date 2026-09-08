@@ -73,7 +73,8 @@ def mine_customer_voice(*, days: int = 45, min_messages: int = 10) -> dict:
         + "\n".join(lines) + "\n\n"
         "上記をふまえ、お客様の声データを更新してください。"
     )
-    body = complete(_SYS, user, max_tokens=2000, temperature=0.4)
+    from .learning_output import GUARD, write_learning
+    body = complete(_SYS + GUARD, user, max_tokens=6000, temperature=0.4, require_complete=True)
 
     today = datetime.now().strftime("%Y-%m-%d")
     header = (
@@ -81,5 +82,5 @@ def mine_customer_voice(*, days: int = 45, min_messages: int = 10) -> dict:
         "※ このファイルは `voice-learn` コマンドが自動生成・上書きします。手で編集しても次回上書きされます。\n"
         "投稿生成時は、ここにある実際の悩み・言い回しの解像度で「私のことだ」と思わせること。\n\n"
     )
-    path.write_text(header + body.strip() + "\n", encoding="utf-8")
+    write_learning(path, header, body, today)
     return {"updated": True, "users": len(labels), "messages": len(user_msgs), "path": str(path)}

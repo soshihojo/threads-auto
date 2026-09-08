@@ -43,6 +43,7 @@ def _col(idx0: int) -> str:
 
 # 各ワークシートのヘッダ定義
 TABLES = {
+    "ops_events": ["id", "user_id", "kind", "created_at", "payload"],
     "posts": ["media_id", "text", "profile", "created_at", "views", "likes", "replies", "insights_at"],
     "processed_replies": ["reply_id", "post_id", "username", "text", "seen_at"],
     "draft_replies": ["reply_id", "post_id", "username", "in_text", "draft_text", "status", "created_at", "sent_at"],
@@ -229,6 +230,19 @@ def init_db() -> None:
     _CACHE.clear()  # 描画ごとに最新化（Streamlitは先頭で毎回呼ぶ）
     for name in TABLES:
         _ws(name)  # 無ければ作成
+
+
+def append_ops_event(event: dict) -> bool:
+    """Append-only; projections also deduplicate IDs after ambiguous API retries."""
+    _CACHE.pop("ops_events", None)
+    if any(str(r["id"]) == str(event["id"]) for r in _records("ops_events")):
+        return False
+    _append("ops_events", event)
+    return True
+
+
+def list_ops_events() -> list[dict]:
+    return _records("ops_events")
 
 
 # ---- posts ----

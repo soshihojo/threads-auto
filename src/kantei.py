@@ -660,7 +660,10 @@ html, body { font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", 
 
 def build_html(name: str, chapters: list[dict], today: str, *,
                sub: str = "個別鑑定書", title: str = "彼の本音",
-               meta_note: str = "この鑑定書は、あなたひとりのために視て、書いたものです。") -> str:
+               meta_note: str = "この鑑定書は、あなたひとりのために視て、書いたものです。",
+               summary: dict | None = None) -> str:
+    from .reading_summary import page
+    summary_html = page(summary) if summary else ""
     d = datetime.strptime(today, "%Y-%m-%d")
     date_jp = f"{d.year}年{d.month}月{d.day}日"
     toc_items = "".join(
@@ -680,7 +683,12 @@ def build_html(name: str, chapters: list[dict], today: str, *,
             f"</div>"
         )
     return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
-<title>鑑定書</title><style>{_CSS}</style></head><body>
+<title>鑑定書</title><style>{_CSS}
+.summary section {{ margin-top: 8mm; }}
+.summary h3 {{ color: #805d28; font-size: 12pt; margin-bottom: 3mm; }}
+.summary p {{ font-size: 11pt; line-height: 1.9; }}
+.summary .summary-note {{ margin-top: 9mm; font-size: 9pt; color: #746859; }}
+</style></head><body>
 <div class="page cover">
   <div class="flower">{_CAMELLIA}</div>
   <div class="sub">{html.escape(sub)}</div>
@@ -690,6 +698,7 @@ def build_html(name: str, chapters: list[dict], today: str, *,
   <div class="meta">鑑定日　{date_jp}<br>{html.escape(meta_note)}</div>
   <div class="sig">鑑定士　椿</div>
 </div>
+{summary_html}
 <div class="page toc">
   <h2>目次</h2>
   <ol>{toc_items}</ol>
@@ -1013,10 +1022,14 @@ def make_kantei(name: str, me_birth: str, him_birth: str, details: str,
     chapters = generate_chapters(name, me_birth, him_birth, details, today=today)
     total = sum(len(c["body"]) for c in chapters)
     _assert_clean(chapters)
+    from .reading_summary import generate as generate_summary
+    print("📝 本文から要点ページを作成中…")
+    summary = generate_summary(name, chapters)
+    _assert_clean([{"key": "summary", "title": "要点", "body": "\n".join(summary.values())}])
     stem = f"個別鑑定_{name}"
     html_path = OUT_DIR / f"{stem}.html"
     pdf_path = OUT_DIR / f"{stem}.pdf"
-    html_path.write_text(build_html(name, chapters, today), encoding="utf-8")
+    html_path.write_text(build_html(name, chapters, today, summary=summary), encoding="utf-8")
     html_to_pdf(html_path, pdf_path)
     # 納品用にダウンロードフォルダへも必ず置く（LINE公式アプリから添付しやすいように）。
     # ダウンロード側のファイル名は「個別鑑定_名前さん.pdf」（相談者に見える名前なので敬称付き）
@@ -1031,7 +1044,7 @@ def make_kantei(name: str, me_birth: str, him_birth: str, details: str,
     note_path.write_text(note, encoding="utf-8")
     print(f"💬 納品文: {note_path}")
     return {"html": str(html_path), "pdf": str(pdf_path), "download": str(dl_path),
-            "chars": total, "note": note, "note_path": str(note_path)}
+            "chars": total, "note": note, "note_path": str(note_path), "summary": summary}
 
 
 # ---------------- 月詠み（月額会員向けの月次ミニ鑑定書） ----------------
