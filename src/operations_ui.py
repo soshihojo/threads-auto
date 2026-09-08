@@ -51,7 +51,7 @@ def render():
     from .conversation_quality import report, offer_outcomes, VERSION
     latest, counts, offers = report(rows)
     with st.expander("LINE会話の満足・終了・商品案内", expanded=True):
-        st.caption("新しい会話処理の導入後の記録です。AI判定は満足度アンケートではありません。無返信を不満とは判定しません。")
+        st.caption("旧版の判定記録は参考情報です。現在、会話判定による定型返信・終了・自動停止は無効です。無返信を不満とは判定しません。")
         labels = {"closed":"終了の明示", "correction":"訂正に対応", "decline":"案内辞退",
                   "complaint":"不満・店主確認", "ai":"自動返信への質問・確認待ち", "error":"判定失敗・店主確認",
                   "awaiting":"質問の回答待ち", "answered":"回答済み", "offered":"商品案内済み",
