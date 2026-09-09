@@ -249,6 +249,10 @@ button:disabled { opacity:.5; }
 .iiate .iilim b { color:#d9a441; font-weight:600; }
 .codebox { border:1px dashed #b08d3e; border-radius:10px; text-align:center; padding:14px; margin-bottom:20px; }
 .codebox .lbl { font-size:12px; color:#b08d3e; letter-spacing:.3em; }
+.rest { text-align:center; font-size:15px; color:#d9a441; letter-spacing:.06em; margin:0 0 12px; font-weight:600; }
+.steps { margin:0 0 16px; padding-left:1.35em; }
+.steps li { font-size:14.5px; line-height:2.0; color:#e8ddcd; }
+.steps li b { color:#fff; }
 .codebox .ttl { font-size:11.5px; color:#a89b8c; margin-top:10px; letter-spacing:.06em; }
 .codebox .code { font-size:38px; letter-spacing:.3em; color:#fff; font-weight:600; }
 .linebtn { display:block; text-align:center; background:#06C755; color:#fff; text-decoration:none;
@@ -317,11 +321,20 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
   <a class="linebtn" id="lbtn" href="#">彼が“今”なに考えとるか、視てもらう</a>
   <!-- ★2026-09-03：番号の箱は、押すまで出さん。押す前に見せると
        「番号を控えなあかん」いう宿題が視界に入って、それが押さん理由になる。 -->
+  <!-- ★2026-09-09：押した後に【残りいくつか】を見せる。
+       実測：改修で「押す率」は46%→77%に上がったが、★押した人の56%が番号を送らんまま消える。
+       ★★押させることは足りとる。足りてへんのは「あと何をしたらええか」が見えてへんことや。
+       ★★★番号は押した瞬間に自動でコピーしとく。貼るだけにして、手間を一つ減らす。 -->
   <div id="afterbtn" style="display:none">
-  <p class="step" id="stept">押したら、番号は入っとる。<b>送信だけしてな。</b><br>開かん時は、下の番号をコピーして送ってくれたらええで🌙</p>
+  <p class="rest">あと、ふたつだけ。</p>
+  <ol class="steps">
+    <li><b>友だち追加</b>する（もう開いとるはずや）</li>
+    <li>下の<b>番号を送る</b>だけ</li>
+  </ol>
   <div class="codebox"><div class="lbl">あんたの鑑定番号</div><div class="code" id="code"></div>
     <button type="button" class="copybtn" id="copyb">番号をコピー</button>
     <div class="ttl">この番号は7日で切れる</div></div>
+  <p class="step" id="stept">開かんかったら、この番号を椿に送ってくれたらええで🌙</p>
   </div>
 
   <!-- ★2026-09-03：シェアの釦は丸ごと外した。押す前の画面に、外への出口を置かん。 -->
@@ -349,6 +362,15 @@ track("view");
 document.getElementById("lbtn").addEventListener("click", ()=>{
   track("line_click");
   var ab=document.getElementById("afterbtn"); if(ab) ab.style.display="block";
+  // ★押した瞬間にコピーしとく。友だち追加を挟んで戻ってきても、貼るだけで済む。
+  //   ★クリックはユーザー操作やから、ここでのコピーは許される。
+  try{
+    var el=document.getElementById("code"), b=document.getElementById("copyb");
+    if(el && el.textContent){
+      if(navigator.clipboard) navigator.clipboard.writeText(el.textContent).catch(function(){});
+      if(b){ b.textContent="コピーしたで"; setTimeout(function(){ b.textContent="番号をコピー"; },2600); }
+    }
+  }catch(_){}
 });
 // ★2026-08-13：「人に言えない関係」を追加した。
 //   実測で、購入者33人のうち13人（39%）がトークで不倫・既婚に触れとるのに、
