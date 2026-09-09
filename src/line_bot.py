@@ -310,23 +310,14 @@ _DECLINE_RE = re.compile(
 #   せやから問いを「買うか買わんか」やのうて「どう動くか」の二択にした。
 #   自分の勘で動くか、視てから動くか——これなら「視てほしい」が自然な返事になる。
 ASK_DEEPER = (
-    "ここまで聞いて、あんたの状況は掴めた。\n"
-    "\n"
-    "ほんで、正直に言うとくな。\n"
-    "ここから先——彼が今なに考えてて、あんたがいつ、どう動くべきか——\n"
-    "そこはな、片手間の読みで答えたらあかんとこや。ちゃんと盤面を見てから言いたい。\n"
-    "\n"
-    "せやから、一個だけ聞かせて。\n"
-    "\n"
-    "あんた、このまま自分の勘で動くか。\n"
-    "それとも、ウチがちゃんと視てから動くか。\n"
-    "\n"
-    "どっちや🌙"
+    "有料の鑑定書について、内容と料金の案内を見てみたい？\n"
+    "案内を見てから申し込むか決められるで。今は相談の続きを話してくれてもええよ。"
 )
+
 # ★2026-08-08：文面を改稿した時にマーカーも替えたら、旧文面で聞いた人を
 #   「まだ聞いてへん」と誤判定して二度聞きした（石井希美さんに実害）。
 #   マーカーは増やすだけにして、旧文面のも残す。
-_ASK_DEEPER_MARKS = ("自分の勘で動くか", "もっと深く視てほしいか",
+_ASK_DEEPER_MARKS = ("内容と料金の案内を見てみたい", "自分の勘で動くか", "もっと深く視てほしいか",
                      # ★2026-08-10：生成が「このまま【あんたの】勘で動くか」と書いて
                      #   マーカーを外した実例（月moonさん）。主語違いも拾えるよう短い形も足す
                      "勘で動くか")
@@ -386,43 +377,10 @@ def _effective_limit(history: list[dict]) -> int:
 #   せやから二択の形は残しつつ、頭にその人の話の具体を必ず一つ置く。
 #   ★マーカー（_ASK_DEEPER_MARKS）は生成文にも必ず入れさせる。入ってへん生成は捨てて
 #     定型に戻す。ここが欠けると「もう聞いた」判定が壊れて、無言holdが復活する。
-ASK_DEEPER_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。無料の相談をここまで続けてきた相手に、「このまま自分の勘で動くか、ウチがちゃんと視てから動くか」を聞く一通だけを書く。
-
-声: 一人称「ウチ」、相手は「あんた」。関西弁・タメ口。毒舌7・愛3の姉御。営業口調・お祈り口調にしない。
-- ダッシュ（——）は1通に1回まで
-
-書くこと（全体で100〜170字）:
-1. これまでの会話に出てきた「その人だけの具体」を一つ引く。彼の言葉、日付、場面、本人が言うた一言のどれか。一般論で始めたら失敗や
-2. その具体について、今いちばん分からんのはどこかを一行で示す（断定はせん）
-3. 最後に二択で聞く。「このまま自分の勘で動くか。それとも、ウチがちゃんと視てから動くか。」の意味を、あんたの言葉で書く
-
-厳守:
-- 「勘で動くか」という言い回しを必ずそのまま入れる
-- 価格・金額・商品名・リンクは書かない。「有料」「鑑定書」も書かない
-- 急かさない。「今だけ」「早い者勝ち」は書かない
-- 専門用語なし。Markdown記法なし。出力は本文のみ"""
-
-
 def generate_ask_deeper(user: dict, history: list[dict], incoming: str) -> str:
-    """二択の意思確認を、その人の会話の具体を引いた一通として組む。
-    生成に失敗したときと、マーカーが入らんかったときは定型文に戻す。"""
-    transcript = _conversation_transcript(_current_consultation(history)[-10:])
-    try:
-        text = complete(ASK_DEEPER_SYSTEM,
-                        f"【これまでの会話】\n{transcript}\n\n"
-                        f"【相談者の最後の一言】{incoming}\n\n二択の一通を書いてください。",
-                        model=LINE_BOT_MODEL, max_tokens=400, temperature=0.85).strip()
-    except Exception as e:
-        print(f"[line_bot] 二択の生成失敗、定型文を使用: {e}")
-        return ASK_DEEPER
-    text = _plain_text(_strip_jargon(text)).strip()   # 装飾・占術用語・AI臭を落とす
-    if not any(m in text for m in _ASK_DEEPER_MARKS):
-        print("[line_bot] 二択の生成にマーカーが無かったので定型文に戻した")
-        return ASK_DEEPER
-    if "http" in text or "円" in text:
-        print("[line_bot] 二択の生成に値段かリンクが混じったので定型文に戻した")
-        return ASK_DEEPER
-    return text
+    """案内の希望を一度だけ確認する。強い要求や個別の事実は生成しない。"""
+    return ASK_DEEPER
+
 
 
 # ★2026-08-10：上のマーカーは「もう聞いたか」の判定にだけ使う（言い回しが揺れても
@@ -1254,46 +1212,50 @@ _WILL_READ_RE = re.compile(
 )
 
 
-def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
-    """危険サイン／購入サインを判定する。
+def _intent_text(text: str) -> str:
+    # 引用を本人の依頼として使わない。閉じていない引用も保守的に除く。
+    return re.sub(r'「[^」]*(?:」|$)|『[^』]*(?:』|$)|“[^”]*(?:”|$)|"[^"]*(?:"|$)', '', text).strip()
 
-    history を渡すと、直前に椿が「無料ではここまで」と線を引いた場合に、
-    短い同意（「お願いします」「お金払えばいいの？」）も購入サインとして拾う。
-    """
+
+def _offer_declined(text: str) -> bool:
+    return bool(_MONEY_TROUBLE_RE.search(text) or _PRICE_DECLINE_RE.search(text)
+                or re.search(r"(?:今は|まだ|今回は).{0,12}(?:不要|結構|いいです|大丈夫|考え|迷|決めていません)"
+                             r"|(?:鑑定|案内|申し込|お願い|購入|視て|見て).{0,16}"
+                             r"(?:不要|いらない|やめ|しません|しない|望んでいない|言っていない|言ってません|言っていません)"
+                             r"|(?:視て|見て|みて)ほし(?:くない|いわけではない)"
+                             r"|考えさせて|少し考えたい", text))
+
+
+def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
+    """本人の明示依頼・商品質問と、一般的な相談を分ける。"""
     if any(w in text for w in DANGER_WORDS):
         return "danger"
-    if _MONEY_TROUBLE_RE.search(text):
-        return None                       # 「お金がない」は買う意思の逆。絶対に売りにいかん
-    # ★2026-08-10：値段の語が入っとるだけで購入サインにしとったせいで、
-    #   「有料はちょっと厳しいです」を購入意思と読んで撃っとった。値段に触れつつ
-    #   引いとる言い方は、買う気の逆や。語彙判定より先に弾く
-    if _PRICE_DECLINE_RE.search(text):
+    clean = _intent_text(text)
+    if _offer_declined(clean):
         return None
-    norm = _normalize_for_signal(text)    # 「どうしたら良い」→「どうしたらいい」等
-    if any(w in norm for w in PURCHASE_WORDS):
+    ending = r"(?:です|ます|ですね|な|ね|よ|！|!|。|？|\?|\s|🙏|🙇|🥹)*$"
+    request = r"(?:鑑定(?:を)?(?:お願いしたい|希望|受けたい)|(?:視|見|み|診)て(?:ほしい|欲しい|ください|下さい|もらいたい)|申し込みたい|購入したい|案内(?:を)?希望)"
+    last_clause = re.split(r"[。\n]", clean.rstrip("。\n "))[-1]
+    reported = bool(re.search(r"(?:彼|友達|友人|相手)(?:は|が|に).{0,24}(?:お願い|鑑定|視て|見て|みて|購入|申し込)", last_clause)
+                    and not re.search(r"(?:私|自分)(?:は|が).*(?:希望|お願い|受けたい)", last_clause))
+    if not reported and re.search(request + ending, clean):
         return "purchase"
-    if any(w in norm for w in PURCHASE_WORDS_SOFT):
+    # 単なる価格の言及や他人への依頼報告ではなく、商品情報への質問。
+    question = r"(?:いくら|教えて(?:ください|下さい)?|知りたい|見たい|見てみたい|ですか|ますか|でしょうか|\?|？)"
+    product = r"(?:鑑定|案内|料金|値段|金額|有料|申し込|購入|支払|届く|納期)"
+    if (re.search(product, clean) and re.search(question + r"(?:です|ます|でしょう|か|ね|な|[？?。！!\s])*$", clean)
+            and not re.search(r"(?:彼|友達|友人|他の|別の|病院|会社).{0,16}(?:料金|値段|支払|購入|申し込|鑑定|いくら|届く|納期)", clean)):
+        return "purchase"
+    if re.fullmatch(r"\s*(?:いくら|おいくら)(?:ですか)?[？?。\s]*", clean):
+        return "purchase"
+    if not reported and history and (_canned_ask_deeper_just_sent(history) or offer_routing.pending(history)):
+        if _ASSENT_RE.fullmatch(clean):
+            return "purchase"
+        if re.search(r"(?:お願いします|おねがいします|みてもらってから動きたい)" + ending, clean):
+            return "purchase"
+    norm = _normalize_for_signal(clean)
+    if any(w in norm for w in PURCHASE_WORDS_SOFT + PURCHASE_WORDS_MID_SOFT):
         return "purchase_soft"
-    if len(text) <= _PURCHASE_MID_LEN and any(w in norm for w in PURCHASE_WORDS_MID_SOFT):
-        return "purchase_soft"
-    if len(text) <= 40 and any(w in norm for w in PURCHASE_WORDS_SHORT):
-        return "purchase"
-    if len(text) <= _PURCHASE_MID_LEN and any(w in norm for w in PURCHASE_WORDS_MID):
-        return "purchase"
-    if len(text) <= _PURCHASE_MID_LEN and _DELIVERY_Q_RE.search(norm):
-        return "purchase"
-    if history and len(text) <= 40 and _ASSENT_RE.fullmatch(text):
-        last_bot = next((str(h["text"]) for h in reversed(history)
-                         if h.get("role") == "assistant"), "")
-        if _DECLINE_RE.search(last_bot):
-            return "purchase"
-    # 二択の後も、状況の補足や不安を依頼に置き換えない。
-    # 明示した依頼、または単独の選択回答だけを案内のサインにする。
-    if history and _canned_ask_deeper_just_sent(history):
-        if _DEEPER_YES_RE.search(text):
-            return "purchase"
-        if re.fullmatch(r"\s*(?:視て|見て|みて|診て|後者(?:です)?|お願いします|おねがいします)[。！!\s]*", text):
-            return "purchase"
     return None
 
 
@@ -2074,7 +2036,8 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
     state_hist = _since_refollow(history, _refollow_ts(user.get("note")))
     consultation_hist = _current_consultation(state_hist)
     # Drain answers to questions sent before the rollback, without asking new routing questions.
-    if allow_offer and offer_routing.pending(state_hist):
+    if (allow_offer and offer_routing.pending(state_hist)
+            and detect_signal(incoming, consultation_hist) == "purchase"):
         if detect_signal(incoming) == "danger":
             if snd(DANGER_REPLY):
                 store.upsert_line_user(user_id, bot="hold")
@@ -2104,7 +2067,7 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
     #   仕組みが自分の意思で「どっちや」と聞いた以上、その返事は答えとして受けなあかん。
     #   実害（りかさん）：二択の直後に「お願いします」と返したのに、発言4回やったせいで
     #   ゲートに止められ、オファーが出んまま「ほな、ちゃんと視るわ」で会話が終わった。
-    if (sig in ("purchase", "purchase_soft")
+    if (sig == "purchase_soft"
             and not _asked_in_own_words(incoming)
             and not _canned_ask_deeper_just_sent(consultation_hist)
             and _user_turns(consultation_hist) < OFFER_MIN_TURNS
@@ -2126,14 +2089,13 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
         #   「どうしたらいい」等の相談型（purchase_soft）は、まず二択の意思確認を挟む。
         #   明示の依頼（purchase＝料金・申し込み・視てほしい等）だけが直接オファーへ行ける。
         #   実測：意思を口にしてから受けた人は 19.2%、そうでない人は 6.8%（2.8倍）。
-        if sig == "purchase_soft" and not _asked_deeper(consultation_hist):
-            snd(generate_ask_deeper(user, consultation_hist, incoming))
-            print(f"[line_bot] 相談型サイン。オファーの前に二択で意思を聞いた: {user_id}")
+        if sig == "purchase_soft":
+            if not _asked_deeper(consultation_hist):
+                snd(generate_ask_deeper(user, consultation_hist, incoming))
+                return
+        else:
+            _route_offer(user_id, user, state_hist, incoming, snd)
             return
-        # 購入サイン＝買う瞬間。上限を待たず、その場で個別鑑定オファーを自動送付
-        #（送付後はhold＝納期・支払い等の続きの質問は店主がLINEアプリから手動で返す）
-        _route_offer(user_id, user, state_hist, incoming, snd)
-        return
 
     if live:
         _human_pause()  # 人間らしい「間」を置いてから返信する
@@ -2154,85 +2116,29 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
     # FREE_REPLY_LIMIT通に達していたら停止する。未成年にはオファーを出さずに止めるだけ。
     if over_limit and allow_offer:
         if _is_minor(user):
-            # 未成年に有料オファーは送らん。せやけど、送らんまま会話だけ無限に続けるんもあかん。
-            # ★2026-08-06：14歳の中学生に、一日で30通返し続けとった（合計62通）。
-            #   オファー自体は未成年ガードで正しく止まっとった。
-            #   問題は、止まる仕組みがこっちの経路に無かったこと。
-            #   購入サインの側は hold にして手動へ渡すのに、上限の側は素通りして
-            #   generate_nurture に落ちるだけやったので、無料の会話が無制限に伸びた。
-            #   上限に達したら、黙って hold にして自動返信を終う。オファーは出さん。
-            store.upsert_line_user(user_id, bot="hold")
-            print(f"[line_bot] 未成年が無料上限に達したので自動返信を止めた: {user_id}")
-            return
-        if _offer_already_sent(user_id):
-            # すでにオファー済みなら二度は送らない（続きは店主が手動で）
             store.upsert_line_user(user_id, bot="hold")
             return
-        # ★2026-08-15（夜）：ここは「二択を一回出して、答えが“視てほしい”の形やなかったら
-        #   打ち切ってhold」やった。実際に止まった人を並べたら、全員が会話の途中やった。
-        #     ゆま  「浮気などではないですか？」        ← まっすぐな質問
-        #     やすこ「そんなにすぐ見れるの？」          ← 納期の質問＝買う直前
-        #     みゆき「彼から全然返信来なくなっちゃいましたよ😭」
-        #     waaaa 「どうにかさよならを無しにしたいです」
-        #   四人ともオファーを一度も見てへんまま止まっとった。二択の一回勝負がきつすぎる。
-        #   ★せやから通数では切らず、二択を最大三回まで出す。三回出しても言葉にならん人には、
-        #     こっちからオファーを出して、本人に見て決めてもらう。判断材料を渡さんまま
-        #     幕を引くほうが不親切や。
-        #   ★間隔は空ける（_effective_limit）。二択が続けざまに二回来たら詰問になる。
-        asks = _ask_deeper_count(consultation_hist)
-        if asks < ASK_DEEPER_MAX:
-            #   ここで「視てほしい」と言うてくれたら、その一言が購入サインとして
-            #   拾われて（_DECLINE_RE に ASK_DEEPER_MARK を入れてある）、
-            #   次のメッセージで上の purchase 分岐がオファーを出す。
-            #   bot は on のまま置いとく。返事を受け取らなあかんからな。
+        # 回数は一度だけ案内の希望を尋ねるきっかけ。商品送付の同意には使わない。
+        if (not _asked_deeper(consultation_hist)
+                and not _offer_declined(incoming)
+                and not _money_trouble(state_hist)
+                and not _offer_already_sent(user_id)):
             snd(generate_ask_deeper(user, consultation_hist, incoming))
-            print(f"[line_bot] 意思確認 {asks + 1}/{ASK_DEEPER_MAX} 回目: {user_id}")
             return
-        # 三回聞いた。ここから先は、金の話が出とるかどうかで分ける。
-        if _money_trouble(state_hist):
-            # 「お金がない」と言うた人には売りにいかん。ここは変えん（07番の鉄則）。
-            #   ただし黙って終わらせもせん。引っかかりに一言返してから店主に渡す。
-            text = _retry(lambda: generate_nurture(user, consultation_hist[-13:-1], incoming),
-                          "意思確認後の受け止め")
-            if text and _PROMISE_LATER_RE.search(text):
-                text = None                 # 「あとで返す」は届ける仕組みが無いので送らん
-            if text:
-                snd(text)
-            store.upsert_line_user(user_id, bot="hold")
-            print(f"[line_bot] 三回聞いたが金の事情が出とるので、売らずに受け止めた: {user_id}")
-            return
-        # 判断材料としてオファーを出す。買うか買わんかは本人が決めたらええ。
-        _route_offer(user_id, user, state_hist, incoming, snd)
-        return
 
     transcript = consultation_hist[-13:]  # 会話プロンプトには直近だけ渡す（最後の1件=今回のメッセージ）
     text = _retry(lambda: generate_nurture(user, transcript[:-1], incoming), "返信の生成")
     if text is None:
         return
 
-    # ★最後の安全網（2026-08-07）。
-    #   生成が「このあと案内が来るから待っといて」と書いた＝生成自身が
-    #   「この人は買う話をしとる」と分かっとる、いうことや。
-    #   せやのに語彙リストが拾えてへんかったせいで、オファーが出んまま
-    #   「待っといて」だけ送って終わる事故が続いた。
-    #   実害（Misakiさん・たけうちももこさん）：どちらも「お待ちしてます」と
-    #   返してきて、案内は永遠に来んかった。三歳と一歳の子を抱えた人を待たせた。
-    #   予告を検知したら、その文は捨てて、代わりにオファーを送る。
-    # ★2026-08-17：「ちゃんと視るわ」だけで終わる型も、ここで同じ扱いにする（_WILL_READ_RE）。
-    #   届ける約束をした点は同じで、相手が待たされる点も同じや。
-    if (allow_offer and (_PROMISE_LATER_RE.search(text) or _WILL_READ_RE.search(text))
-            and not _is_minor(user)):
-        if _offer_already_sent(user_id):
-            store.upsert_line_user(user_id, bot="hold")
-            return
-        # 予告を検知しても、本人がまだ「視てほしい」と言うてへんなら、まず二択で聞く
-        if not _asked_deeper(consultation_hist):
-            print(f"[line_bot] 生成が『あとで案内』と予告。オファーやのうて二択を送った: {user_id}")
-            snd(generate_ask_deeper(user, consultation_hist, incoming))
-            return
-        print(f"[line_bot] 生成が『あとで案内』と予告したのでオファーに切り替え: {user_id}")
-        _route_offer(user_id, user, state_hist, incoming, snd)
-        return
+    # AI自身の約束は依頼の証拠ではない。案内に切り替えず、通常返信を作り直す。
+    if _PROMISE_LATER_RE.search(text) or _WILL_READ_RE.search(text):
+        text = _retry(lambda: generate_nurture(
+            user, transcript[:-1], incoming,
+            extra_system="\n案内・鑑定開始・後で届ける約束は書かず、最新の相談内容だけに答える。"),
+            "案内予告を含まない返信")
+        if not text or _PROMISE_LATER_RE.search(text) or _WILL_READ_RE.search(text):
+            return  # 未送信のまま既存の再試行に任せる。店主交代や会話終了は送らない。
 
     snd(text)
 
