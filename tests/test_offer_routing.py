@@ -170,7 +170,7 @@ def test_general_price_question_cannot_become_a_recommendation():
 
 
 @pytest.mark.parametrize('path',['purchase','limit','promise'])
-def test_all_offer_entry_paths_use_router(monkeypatch,flow,path):
+def test_only_customer_intent_can_trigger_router(monkeypatch,flow,path):
     history,state,calls,send=flow
     history[:]=[msg('assistant','相談への返信') for _ in range(8)]+[msg('user','お願いします')]
     monkeypatch.setattr(bot,'_handle_code',lambda *a:False)
@@ -182,10 +182,10 @@ def test_all_offer_entry_paths_use_router(monkeypatch,flow,path):
     monkeypatch.setattr(bot,'_ask_deeper_count',lambda *a:bot.ASK_DEEPER_MAX)
     monkeypatch.setattr(bot,'_money_trouble',lambda *a:False)
     monkeypatch.setattr(bot,'_route_offer',lambda *a:calls.append('route'))
-    monkeypatch.setattr(bot,'generate_nurture',lambda *a:'あとで案内する')
+    monkeypatch.setattr(bot,'generate_nurture',lambda *a,**k:'あとで案内する')
     monkeypatch.setattr(bot,'_PROMISE_LATER_RE',__import__('re').compile('あとで案内'))
     bot._auto_reply('test',{},'お願いします',live=False)
-    assert calls==['route']
+    assert calls == (['route'] if path == 'purchase' else [])
 
 
 @pytest.mark.parametrize('answer,key',[('後者です','shiomi'),('2つ目でお願いします','shiomi'),
