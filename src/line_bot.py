@@ -162,225 +162,17 @@ OFFER_AFTER = (
     f"{URL_NOTE}"
 )
 
-# 冒頭生成に失敗したときのフォールバック
-# ★2026-08-24：生成が落ちた時の固定文も、同じ考え方に揃えた。
-#   前は「相談が増えてて、本気の子を優先する」やった。★あれは椿の都合の話や。
-#   理由は【仕事の中身が変わるから】に置き直す。
+# 商品案内は受付・購入の同意を推測せず、確認済みの商品説明だけを返す。
+# 相談者の発言を引用した冒頭や、上位商品が必要という個別理由は生成しない。
 OFFER_INTRO_FALLBACK = (
-    "「視てほしい」——受け取った。ほな、ウチが何をするんか、先に言うとくわ。\n\n"
-    "ここまでは、あんたが話してくれたことと、ウチの勘で答えてきた。それはそれで本気で視とる。\n"
-    "せやけど、ここから先——彼が今どこに立っとって、あんたがいつ、どう動くか。\n"
-    "そこは、二人の生まれた日を突き合わせて盤面を見んと、当てずっぽうになる。\n"
-    "当てずっぽうで背中を押すんが、いちばんやったらあかんことやからな。\n\n"
-    "一人ぶんちゃんと組むのに、まる一日かかる。せやからそこは、仕事として受けとる。\n"
-    "あんたの場合、ちゃんと視るならこれや。"
+    "ここから先は有料の鑑定になるから、内容と料金を先に伝えるで。"
+    "申し込むかどうかは、見てから決めてな。"
 )
-
-OFFER_INTRO_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。無料で数回相談に乗ってきた相手に、有料鑑定の案内へ橋渡しする「冒頭の一言」だけを書く。
-
-声: 一人称「ウチ」、相手は「あんた」。関西弁・タメ口。毒舌7・愛3の姉御。しんみりした共感調やお祈り営業口調にせず、椿らしく正直に言い切る。
-- ダッシュ（——）は1通に1回まで。多用すると同じ呼吸の繰り返しになって、型が見えて機械っぽうなる。基本は読点か句点で切って、ここぞの一箇所だけに使う
-
-★★★2026-08-24 全面改定：ここが【無料から有料への落差】が出る一点や。
-  前は「相談が増えとって、本気の子から順に視る」で橋を架けとった。
-  ★あれは【椿の都合】の話や。「忙しいから金取る」に読める。
-  ★★ほんで「金を払う＝本気」いう含みが出る。まだ迷とる人を、そっと責める形になっとった。
-  ★★★せやから、理由を【仕事の中身が変わるから】に組み替える。
-    無料の相談と、盤面を見て組む鑑定は、別の仕事や。そこを説明する。
-    数の話は、最後に軽う添えるだけにする。
-
-書くこと（140〜220字・この後に商品メニューが続く前提）:
-1. 相手が「視てほしい」と言うてくれたことを、まず受け取る。もう始まっとる、いう温度で。
-   （例：「『視てほしい』——受け取った。ほな、ウチが何をするんか先に言うとくわ」）
-2. ★ここまで無料で何を渡したかを、具体的に一つ数える。
-   その人の話に出てきた実物（彼の言葉・日付・場面）に触れて、
-   「ここまでは、あんたの話とウチの勘で届く範囲や」と、無料の仕事に区切りを付ける。
-   ——タダの雑談やのうて、ちゃんと仕事しとった、と示す。
-3. ★★ここから先が別の仕事になる理由を言う。椿の都合やのうて、仕事の性質として。
-   「ここから先は、二人の生まれた日を突き合わせて盤面を見んと、当てずっぽうになる。
-     当てずっぽうで背中を押すんが、いちばんやったらあかんことや」——この筋で書く。
-   一人ぶんを組むのに時間がかかる、いう話は、ここに軽う添えてよい（相談が増えとる、は最後に一言まで）。
-4. 「あんたの場合、ちゃんと視るならこれや。」で締める（この一文で必ず終える）
-   ★2026-08-15：前は末尾に👇を付けとった。椿は会話中ずっと🌙しか使わんのに、
-     この一通だけ指差しの絵文字が二つ並んで、急に売り文句の顔になっとった。外した
-
-厳守: 価格・リンク・商品名は書かない（後ろに続くメニューに任せる）。共感・承認の安売りをしない。専門用語・絵文字なし。出力は本文のみ"""
-
-# ★2026-08-15：「値段によります」の形で聞かれた人専用の冒頭。
-#   実測：この形で聞いた6人は全員買うてへん（0/6）。一方「いくらですか」と
-#   条件を付けずに聞いた17人は7人買うとる（41%）。同じ質問でも中身が違う。
-#   前者は値踏みのモードに入っとる人や。そこへ数字だけ返したら、数字だけで判断される。
-#   せやから値段からは逃げん。逃げんけど、数字の前にその人固有の見立てを一つ置いて、
-#   「何に払うんか」を先に分からせる。相談が増えとる云々の枕は、ここでは書かせん。
-OFFER_INTRO_SYSTEM_PRICED = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。無料で数回相談に乗ってきた相手が、いま「値段による」「料金によります」と、条件つきで値段を聞いてきた。その返事の「冒頭の一言」だけを書く。
-
-声: 一人称「ウチ」、相手は「あんた」。関西弁・タメ口。毒舌7・愛3の姉御。しんみりした共感調やお祈り営業口調にせず、正直に言い切る。
-- ダッシュ（——）は1通に1回まで
-
-書くこと（100〜160字・この後に商品メニューが続く前提）:
-1. 値段を聞かれたことに正面から触れる。はぐらかさん。「値段の話やな」と受ける
-2. そのうえで、数字を出す前に、この会話でまだ言うてへん見立てを一つ出す。
-   彼の言葉・日付・場面など、その人だけの具体に必ず触れる。一般論はあかん
-3. 「何に払うことになるんか」を一行で示して、下のメニューに渡す
-
-厳守:
-- 価格・金額・リンク・商品名は書かない（すぐ下のメニューに数字が出る）
-- 「相談が増えてきて」「本気の子を優先」の類は書かない（値踏みしとる人には逆効果や）
-- 安いとも高いとも言わん。値引きをちらつかせん。急かさん
-- 専門用語・絵文字なし。Markdown記法なし。出力は本文のみ"""
-
-# 「値段による／料金によります／高いのなら」＝条件つきの値段質問（値踏みのモード）
-_PRICE_CONDITIONAL_RE = re.compile(
-    r"(?:値段|料金|金額|価格|お値段)[^。\n]{0,6}(?:による|によります|次第|にもよる|によりけり)"
-    r"|(?:高い|高け)(?:のなら|んなら|ければ|れば)"
-    r"|(?:値段|料金|金額|価格)[^。\n]{0,10}(?:みてから|見てから|聞いてから)"
-)
-
-
-# 鑑定書の目次プレビューに載せる章タイトル（商品構成として固定。リードだけ個別化する）
-KANTEI_TOC_TITLES = ["あんたという人", "彼という人", "二人の縁",
-                     "彼の今の本音", "いつ、何を、どう動くか", "やったらあかんこと"]
-
-OFFER_TOC_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿」。有料の個別鑑定書（全8章・約10,000字のPDF）のオファーに載せる「この人専用の目次プレビュー」を書く。
-これまでの相談内容を踏まえて、次の6つの章タイトルそれぞれに、その人の状況に触れた短いリード（15〜28字）を付ける。
-
-出力形式（この6行だけ・この順番・各行「タイトル——リード」）:
-あんたという人——…
-彼という人——…
-二人の縁——…
-彼の今の本音——…
-いつ、何を、どう動くか——…
-やったらあかんこと——…
-
-ルール:
-- 関西弁の椿の声。相談で出た具体（彼の言葉・場面・状況）をリードに織り込んで「自分のための鑑定書」と分からせる
-- ★【最重要】リードに使うてええんは【相談者本人が書いたこと】だけや。
-　渡す会話には椿の発言も混ざっとる。椿が言うたことを、事実として拾たらあかん。
-　「相談者:」の行に出てくることだけを材料にする。「椿:」の行は、話の流れを掴むためだけに読む。
-- ★期間・回数・年齢の数字は、リードに書かん。本人が自分で言うた数字であっても書かん。
-　実害（2026-08-16 ふじのさん）：椿が返信で「一年近く積み上げた」と書いてもうたのを、
-　この目次が拾て「一年積み上げた二人を繋いだ意味の正体」と出した。
-　実際の交際は三ヶ月で、本人に「付き合ったの3ヶ月くらいなんです」と指摘された。
-　★数字を出さんでも「ここまで積み上げたもんの正体」で十分に伝わる。数字は要らん。
-- 中身の答えは書かない（読みたくなる入口だけ。「〜の正体」「〜をここで視る」のような形）
-- 復縁や結果の保証・煽り・『宿曜』等の専門用語は書かない。出力は6行のみ"""
-
-
-OFFER_WHY_SHIOMI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿」。関西弁・毒舌・姉御肌。
-有料オファーの中で、「あんたの場合は鑑定書だけやと足りん。暦（九十日ぶんの日付）まで要る」と
-薦めるための【三つの理由】だけを書く。
-
-出力形式（この形だけ。前置きも締めも書かない）:
-★見出しの一行に、カッコ（　）や【　】を使わない。そのまま文として書く。
-
-一つ。見出しになる一行（カッコで括らない）
-
-（二〜四行の中身）
-
-二つ。見出しになる一行（カッコで括らない）
-
-（二〜四行の中身）
-
-三つ。見出しになる一行（カッコで括らない）
-
-（二〜四行の中身）
-
-★最重要のルール:
-- 理由は【この人の会話に実際に出てきた具体】だけで組む。一般論を書いたら、この文は死ぬ。
-- ★材料に使えるんは【相談者本人が書いたこと】だけや。渡す会話には椿の発言も混ざっとる。
-  椿が言うたことを事実として拾たらあかん。「相談者:」の行だけを材料にする。
-- ★本人が使た言葉は、そのまま引用して使う（「〜」で括る）。自分の言葉が返ってくるのが一番効く。
-- 期間・回数・年齢の数字は書かん。本人が言うた数字であっても書かん。
-
-【暦が要る理由の型（この人に当てはまるもんを選ぶ。当てはまらんもんは使わん）】
-・毎日／頻繁に連絡がある人
-　→「打てる手が毎日ある＝毎日間違えられる。手数が多い人ほど日付が要る」
-・日付のある予定が先にある人（試験・帰省・季節・行事・手術・来訪）
-　→「その日までの積み方と、その日の一手が要る」
-・待つ形が確定しとる人（相手が動くまで／時期が先）
-　→「待つ時間に形をつけんと、途中で必ず崩れる」
-・送りすぎ／急ぎすぎ／我慢しすぎで失敗した履歴がある人
-　→「中身やのうて【間】の問題や。間は日付でしか設計でけへん」
-・同じところを何回も回っとる人（既読スルー→また来る、別れる→戻る、など）
-　→「同じ所を回る人は、区切りを外から入れなあかん」
-
-【書き方】
-- 一つ目は、その人にいちばん強う当てはまるもんを置く
-- 三つ目は、必ず「このままやとどうなるか」に着地させる（脅さん。事実として置く）
-- 保証・煽り・「宿曜」等の専門用語・Markdown記号は使わん
-- 出力はこの三つのブロックだけ"""
-
-
-def _offer_why_shiomi(transcript: str) -> str:
-    """★2026-08-27：この人に暦が要る理由を三つ作る（失敗したら空＝理由なしでオファーは送る）。
-
-    横に並べて「どっちや」と聞く形をやめて、見立てで潮見を薦める形にしたときに足した。
-    ここが一般論になったら、この型は死ぬ。会話に出てきた具体だけで組ませる。
-    """
-    try:
-        raw = complete(OFFER_WHY_SHIOMI_SYSTEM,
-                       f"【これまでの会話】\n{transcript}\n\n三つの理由を書いてください。",
-                       model=LINE_BOT_MODEL, max_tokens=700, temperature=0.8).strip()
-        if any(w in raw for w in _JARGON):
-            raw = _strip_jargon(raw)
-        raw = raw.replace("**", "").replace("##", "")
-        # 見出しがカッコで括られて返ることがあるんで、機械でも外す
-        raw = re.sub(r"(?m)^(一つ|二つ|三つ)。\s*[（(](.+?)[）)]\s*$", r"\\1。\\2", raw)
-        # 「一つ。」「二つ。」「三つ。」が揃うてへんかったら載せん（オファー自体は送る）
-        if not all(k in raw for k in ("一つ。", "二つ。", "三つ。")):
-            return ""
-        return ("★せやけどな。あんたの場合、それだけやと足りん。\n\n"
-                "理由を三つ言うで。ぜんぶ、あんたが自分で話してくれたことや。\n\n"
-                + raw + "\n")
-    except Exception as e:
-        print(f"[line_bot] 潮見を薦める理由の生成に失敗（理由なしでオファー送付）: {e}")
-        return ""
-
-
-def _offer_toc(transcript: str) -> str:
-    """その人の相談内容に合わせた鑑定書の目次プレビューを組み立てる（失敗時は空＝目次なし）。"""
-    try:
-        raw = complete(OFFER_TOC_SYSTEM,
-                       f"【これまでの会話】\n{transcript}\n\n目次プレビューを書いてください。",
-                       model=LINE_BOT_MODEL, max_tokens=500, temperature=0.8).strip()
-        if any(w in raw for w in _JARGON):
-            raw = _strip_jargon(raw)
-        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-        good = [ln for ln in lines if any(ln.startswith(t) for t in KANTEI_TOC_TITLES)]
-        if len(good) < 4:  # 形式が崩れていたら載せない（オファー自体は送る）
-            return ""
-        return ("あんたの場合の鑑定書、中身はもう組んである。\n\n"
-                "📜 あんた専用・個別鑑定書（全8章・約10,000字）\n"
-                + "\n".join(f"・{ln}" for ln in good[:6])
-                + "\n（ほか、まえがき・むすびに を含む全8章）\n\n")
-    except Exception as e:
-        print(f"[line_bot] 目次プレビュー生成失敗（目次なしでオファー送付）: {e}")
-        return ""
 
 
 def generate_offer(user: dict, history: list[dict], incoming: str) -> str:
-    """フロントの自動オファー＝個別鑑定書（本鑑定・3,980円）。
-    ★2026-07-28、199円一問から本鑑定に戻した（199円の方が売れなかったため）。
-    199円は自動では出さず、💴ダッシュボードから手動で出す時のために温存。
-    その人の状況に触れる冒頭の一言＋目次プレビュー＋商品メニュー（価格・リンク・数量限定）を組んで返す。"""
-    transcript = "\n".join(
-        f"{'相談者' if h['role'] == 'user' else '椿'}: {h['text'][:80]}" for h in history[-8:]
-    )
-    # 値踏みのモードで聞いてきた人には、数字の前に見立てを一つ置く冒頭に切り替える
-    priced = bool(_PRICE_CONDITIONAL_RE.search(incoming or ""))
-    system = OFFER_INTRO_SYSTEM_PRICED if priced else OFFER_INTRO_SYSTEM
-    if priced:
-        print("[line_bot] 条件つきの値段質問。見立てを一手足す冒頭に切り替えた")
-    try:
-        intro = complete(system,
-                         f"【これまでの会話】\n{transcript}\n\n"
-                         f"【相談者の最後の一言】{(incoming or '')[:200]}\n\n"
-                         "冒頭の一言を書いてください。",
-                         model=LINE_BOT_MODEL, max_tokens=300, temperature=0.9).strip()
-    except Exception as e:
-        print(f"[line_bot] オファー冒頭の生成失敗、固定文を使用: {e}")
-        intro = OFFER_INTRO_FALLBACK
-    return f"{intro}\n\n{_offer_toc(transcript)}{_offer_why_shiomi(transcript)}{OFFER_MENU}"
+    """依頼受付を捏造しない、二商品の確認済み案内。LLMや顧客履歴に依存しない。"""
+    return OFFER_INTRO_FALLBACK + "\n\n" + OFFER_MENU
 
 
 _OFFER_LOCKS = [threading.RLock() for _ in range(64)]
@@ -614,13 +406,11 @@ ASK_DEEPER_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つ
 def generate_ask_deeper(user: dict, history: list[dict], incoming: str) -> str:
     """二択の意思確認を、その人の会話の具体を引いた一通として組む。
     生成に失敗したときと、マーカーが入らんかったときは定型文に戻す。"""
-    transcript = "\n".join(
-        f"{'相談者' if h['role'] == 'user' else '椿'}: {h['text'][:80]}" for h in history[-10:]
-    )
+    transcript = _conversation_transcript(_current_consultation(history)[-10:])
     try:
         text = complete(ASK_DEEPER_SYSTEM,
                         f"【これまでの会話】\n{transcript}\n\n"
-                        f"【相談者の最後の一言】{incoming[:200]}\n\n二択の一通を書いてください。",
+                        f"【相談者の最後の一言】{incoming}\n\n二択の一通を書いてください。",
                         model=LINE_BOT_MODEL, max_tokens=400, temperature=0.85).strip()
     except Exception as e:
         print(f"[line_bot] 二択の生成失敗、定型文を使用: {e}")
@@ -715,6 +505,39 @@ def _since_refollow(history: list[dict], cutoff: str) -> list[dict]:
     if not cutoff:
         return history
     return [h for h in history if str(h.get("created_at") or "") >= cutoff]
+
+def _current_consultation(history: list[dict]) -> list[dict]:
+    """30日以上空けて番号診断を再受領した場合だけ、今回の会話を切り出す。
+
+    保存履歴や案内済み判定は変更しない。番号の再送だけでは回数をリセットしない。
+    日時が不明・不正な場合も既存の数え方を保つ。
+    """
+    start = 0
+    for i in range(1, len(history) - 1):
+        row, following = history[i], history[i + 1]
+        if (row.get("role") != "user" or not _find_code(str(row.get("text", "")))[0]
+                or following.get("role") != "assistant"
+                or not str(following.get("text", "")).startswith(WEB_DIAG_INTRO.strip())):
+            continue
+        try:
+            previous = datetime.fromisoformat(str(history[i - 1].get("created_at", "")))
+            current = datetime.fromisoformat(str(row.get("created_at", "")))
+            delivered = datetime.fromisoformat(str(following.get("created_at", "")))
+            if (current - previous).total_seconds() >= 30 * 86400 and delivered >= current:
+                start = i
+        except (ValueError, TypeError):
+            continue
+    return history[start:]
+
+
+def _conversation_transcript(history: list[dict]) -> str:
+    """発言の途中切りをせず、日時・話者と本文を分けて渡す。"""
+    return "\n".join(
+        f"【発言日時: {h.get('created_at') or '記録なし'}】\n"
+        f"{'相談者' if h.get('role') == 'user' else '椿'}: {h.get('text', '')}"
+        for h in history
+    )
+
 # ASK_DEEPER への「断り・保留」。これが返ってきたら売らん
 # ここに引っかかる返事には売りに行かん（断り・迷い・ただの相槌）。
 # ★2026-08-10：穴が2つあって、実際に迷いの表明へオファーを撃っとった（全員買うてへん）。
@@ -750,13 +573,14 @@ _DEEPER_YES_RE = re.compile(
     r"|(?:視|見|み|診)てから(?:動|決め|進)"
     r"|(?:お願い|おねがい)し(?:ます|たい)"
 )
+# 短い同意は全文が回答の時だけ。「それで彼が…」「はい、でも…」は含めない。
 _ASSENT_RE = re.compile(
-    r"^\s*(?:はい|うん|ぜひ|お願い|おねがい|よろしく|やりたい|やってほし|"
-    r"受けたい|視てほし|見てほし|申し込|それで|わかりました|分かりました|"
-    r"承知|本気|払え|有料|して欲しい|してほしい|頼み|"
-    # ASK_DEEPER（勘で動くか、視てから動くか）への自然な返事
-    r"視て|見て|みて|診て|後者|ウチに|椿に|勘では動)"
+    r"\s*(?:はい|うん|ぜひ|お願い(?:します)?|おねがい(?:します)?|"
+    r"よろしく(?:お願いします)?|やりたい(?:です)?|受けたい(?:です)?|"
+    r"して欲しい(?:です)?|してほしい(?:です)?|"
+    r"視て|見て|みて|診て|後者(?:です)?|それでお願いします)[。！!\s]*"
 )
+
 
 # 「お金がない・払えない」は購入サインの正反対。ここでオファーを送ったら最悪や。
 # 金額の心配を買う意思と読み違えんように、先に弾く。
@@ -1194,6 +1018,8 @@ def _plain_text(text: str) -> str:
         return ""  # Retired fallback copy must not reappear from conversation history.
     if re.search(r"店主.{0,12}(?:対応|確認)|(?:担当|運営).{0,8}(?:引き継|回す)", text):
         return ""  # Internal routing must not leak through generated or fallback copy.
+    if re.search(r"[「『](?:視|見|み|診)て(?:ほしい|欲しい)[」』][^。\n]{0,24}受け(?:取|と)", text):
+        return ""  # Retired consent acknowledgement must not be echoed from old history.
     text = "\n".join(ln for ln in text.splitlines() if not _ARTIFACT_LINE_RE.match(ln))
     text = _META_LEAK_RE.sub("", text)                     # 文中に紛れたmeta等を除去
     text = text.replace("**", "").replace("__", "")
@@ -1456,26 +1282,17 @@ def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
         return "purchase"
     if len(text) <= _PURCHASE_MID_LEN and _DELIVERY_Q_RE.search(norm):
         return "purchase"
-    if history and len(text) <= 40 and _ASSENT_RE.match(text):
+    if history and len(text) <= 40 and _ASSENT_RE.fullmatch(text):
         last_bot = next((str(h["text"]) for h in reversed(history)
                          if h.get("role") == "assistant"), "")
         if _DECLINE_RE.search(last_bot):
             return "purchase"
-    # ★ASK_DEEPER（二択の意思確認）の直後だけは、受けを逆にする。
-    #   同意の語を数え上げるんやのうて、「断りやなければ視てほしい」で受ける。
-    #   実害（2026-08-08・石井希美さん）：二択に「みて」と答えたのに、
-    #   ひらがなが同意語に無うて拾えず、無言のまま hold になった。
-    #   二択に答えてくれた人を語彙の穴で取りこぼすのは、もう終わりにする。
-    # ★2026-08-11：ここは30字以内しか見とらんかった。定型の二択に、丁寧に長う
-    #   答えてくれた人が丸ごと落ちる（橋本明花さん65字：「ヒントになるような感じで
-    #   動きたいと思ってます」＝完全に前向きな返事やのに無反応でholdになった）。
-    #   二択への返事は長さで切らん。断りかどうかだけで見る。
+    # 二択の後も、状況の補足や不安を依頼に置き換えない。
+    # 明示した依頼、または単独の選択回答だけを案内のサインにする。
     if history and _canned_ask_deeper_just_sent(history):
-        # はっきり「視てほしい」と書いてあるなら、長さも前置きの断り語も見ん
         if _DEEPER_YES_RE.search(text):
             return "purchase"
-        if len(text) <= 200 and (_REFUSAL_NEGATED_RE.search(text)
-                                 or not _REFUSAL_RE.search(text)):
+        if re.fullmatch(r"\s*(?:視て|見て|みて|診て|後者(?:です)?|お願いします|おねがいします)[。！!\s]*", text):
             return "purchase"
     return None
 
@@ -1567,9 +1384,8 @@ _POST_OFFER_GUIDE = """
 
 def generate_nurture(user: dict, history: list[dict], incoming: str,
                      extra_system: str = "") -> str:
-    transcript = "\n".join(
-        f"{'相談者' if h['role'] == 'user' else '椿'}: {h['text']}" for h in history
-    )
+    history = _current_consultation(history)
+    transcript = _conversation_transcript(history)
     system = NURTURE_SYSTEM + extra_system
     blob = transcript + "\n" + incoming
     if _FORBIDDEN_LOVE_RE.search(blob):
@@ -2254,8 +2070,9 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
     history = store.recent_line_chats(user_id, limit=200)
     diag_sent = _diag_count(history) > 0  # オファー等の長文は診断とみなさない
     # オファー済み・二択済み・無料上限は、ブロック→再追加より後だけで数える（仕切り直し）。
-    # 診断済み判定(diag_sent)とLLMへの文脈(transcript)は全履歴のまま＝診断の二重送信を防ぐ
+    # 診断済み・案内済みの履歴は保持。長期中断後の再診断は会話の回数と文脈だけ区切る。
     state_hist = _since_refollow(history, _refollow_ts(user.get("note")))
+    consultation_hist = _current_consultation(state_hist)
     # Drain answers to questions sent before the rollback, without asking new routing questions.
     if allow_offer and offer_routing.pending(state_hist):
         if detect_signal(incoming) == "danger":
@@ -2264,10 +2081,10 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
             return
         _route_offer(user_id, user, state_hist, incoming, snd)
         return
-    bot_replies = sum(1 for h in state_hist
+    bot_replies = sum(1 for h in consultation_hist
                       if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN
                       and ASK_MARKER not in h["text"])
-    over_limit = bot_replies >= _effective_limit(state_hist)
+    over_limit = bot_replies >= _effective_limit(consultation_hist)
 
     # 生年月日が二人分揃っていて、まだ無料診断を送っていなければ、自動で無料診断を返す
     #（「鑑定してほしい」等の購入ワードが同時に入っていても、診断が先。
@@ -2276,7 +2093,7 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
         if _try_free_diagnosis(user_id, user, incoming, snd, history):
             return
 
-    sig = detect_signal(incoming, history)
+    sig = detect_signal(incoming, consultation_hist)
     # ★2026-08-10：本人が自分の言葉で求めてへんうちは、まだ売りにいかん。
     #   実データ（8/10より前の249件）：発言6回以下でも、自分から料金や依頼を
     #   口にした人は 3/8＝37.5% 買う。一方こっちが振って相槌が返っただけの人は
@@ -2289,10 +2106,10 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
     #   ゲートに止められ、オファーが出んまま「ほな、ちゃんと視るわ」で会話が終わった。
     if (sig in ("purchase", "purchase_soft")
             and not _asked_in_own_words(incoming)
-            and not _canned_ask_deeper_just_sent(history)
-            and _user_turns(state_hist) < OFFER_MIN_TURNS
+            and not _canned_ask_deeper_just_sent(consultation_hist)
+            and _user_turns(consultation_hist) < OFFER_MIN_TURNS
             and not over_limit):
-        print(f"[line_bot] まだ早い（発言{_user_turns(state_hist)}回・本人からの依頼なし）"
+        print(f"[line_bot] まだ早い（発言{_user_turns(consultation_hist)}回・本人からの依頼なし）"
               f"ので売らずに会話を続ける: {user_id}")
         sig = None
     if sig in ("purchase", "purchase_soft") and allow_offer:
@@ -2309,8 +2126,8 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
         #   「どうしたらいい」等の相談型（purchase_soft）は、まず二択の意思確認を挟む。
         #   明示の依頼（purchase＝料金・申し込み・視てほしい等）だけが直接オファーへ行ける。
         #   実測：意思を口にしてから受けた人は 19.2%、そうでない人は 6.8%（2.8倍）。
-        if sig == "purchase_soft" and not _asked_deeper(state_hist):
-            snd(generate_ask_deeper(user, history, incoming))
+        if sig == "purchase_soft" and not _asked_deeper(consultation_hist):
+            snd(generate_ask_deeper(user, consultation_hist, incoming))
             print(f"[line_bot] 相談型サイン。オファーの前に二択で意思を聞いた: {user_id}")
             return
         # 購入サイン＝買う瞬間。上限を待たず、その場で個別鑑定オファーを自動送付
@@ -2327,10 +2144,11 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
         if last_user != incoming:
             return
         state_hist = _since_refollow(history, _refollow_ts(user.get("note")))
-        bot_replies = sum(1 for h in state_hist
+        consultation_hist = _current_consultation(state_hist)
+        bot_replies = sum(1 for h in consultation_hist
                           if h["role"] == "assistant" and len(h["text"]) <= _DIAG_LEN
                           and ASK_MARKER not in h["text"])
-        over_limit = bot_replies >= _effective_limit(state_hist)
+        over_limit = bot_replies >= _effective_limit(consultation_hist)
 
     # 無料返信の上限：ナーチャリング返信（全履歴・診断と③④は数えない）が
     # FREE_REPLY_LIMIT通に達していたら停止する。未成年にはオファーを出さずに止めるだけ。
@@ -2361,20 +2179,20 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
         #     こっちからオファーを出して、本人に見て決めてもらう。判断材料を渡さんまま
         #     幕を引くほうが不親切や。
         #   ★間隔は空ける（_effective_limit）。二択が続けざまに二回来たら詰問になる。
-        asks = _ask_deeper_count(state_hist)
+        asks = _ask_deeper_count(consultation_hist)
         if asks < ASK_DEEPER_MAX:
             #   ここで「視てほしい」と言うてくれたら、その一言が購入サインとして
             #   拾われて（_DECLINE_RE に ASK_DEEPER_MARK を入れてある）、
             #   次のメッセージで上の purchase 分岐がオファーを出す。
             #   bot は on のまま置いとく。返事を受け取らなあかんからな。
-            snd(generate_ask_deeper(user, history, incoming))
+            snd(generate_ask_deeper(user, consultation_hist, incoming))
             print(f"[line_bot] 意思確認 {asks + 1}/{ASK_DEEPER_MAX} 回目: {user_id}")
             return
         # 三回聞いた。ここから先は、金の話が出とるかどうかで分ける。
         if _money_trouble(state_hist):
             # 「お金がない」と言うた人には売りにいかん。ここは変えん（07番の鉄則）。
             #   ただし黙って終わらせもせん。引っかかりに一言返してから店主に渡す。
-            text = _retry(lambda: generate_nurture(user, history[-13:-1], incoming),
+            text = _retry(lambda: generate_nurture(user, consultation_hist[-13:-1], incoming),
                           "意思確認後の受け止め")
             if text and _PROMISE_LATER_RE.search(text):
                 text = None                 # 「あとで返す」は届ける仕組みが無いので送らん
@@ -2387,7 +2205,7 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
         _route_offer(user_id, user, state_hist, incoming, snd)
         return
 
-    transcript = history[-13:]  # 会話プロンプトには直近だけ渡す（最後の1件=今回のメッセージ）
+    transcript = consultation_hist[-13:]  # 会話プロンプトには直近だけ渡す（最後の1件=今回のメッセージ）
     text = _retry(lambda: generate_nurture(user, transcript[:-1], incoming), "返信の生成")
     if text is None:
         return
@@ -2408,9 +2226,9 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
             store.upsert_line_user(user_id, bot="hold")
             return
         # 予告を検知しても、本人がまだ「視てほしい」と言うてへんなら、まず二択で聞く
-        if not _asked_deeper(state_hist):
+        if not _asked_deeper(consultation_hist):
             print(f"[line_bot] 生成が『あとで案内』と予告。オファーやのうて二択を送った: {user_id}")
-            snd(generate_ask_deeper(user, history, incoming))
+            snd(generate_ask_deeper(user, consultation_hist, incoming))
             return
         print(f"[line_bot] 生成が『あとで案内』と予告したのでオファーに切り替え: {user_id}")
         _route_offer(user_id, user, state_hist, incoming, snd)
