@@ -22,14 +22,28 @@ def resumed_history(gap_days=40):
 
 @pytest.mark.parametrize('incoming', ['自分の勘だと判断できません。お願いします',
                                      '料金を知りたいです', '少し考えたいです'])
-def test_offer_cannot_invent_consent_even_if_model_would(monkeypatch, incoming):
-    monkeypatch.setattr(b, 'complete', lambda *a, **k: pytest.fail('offer must not use a model'))
+def test_offer_always_carries_the_real_menu(monkeypatch, incoming):
+    """★2026-09-10：生成が何を返しても、商品の中身（価格・リンク）は必ず載る。
+
+    9/9のPRは、この保証を「生成そのものを禁じる」ことで取ろうとして、
+    オファーの冒頭・専用目次・潮見を薦める理由を丸ごと外した。実害として、
+    みか♪さんに流産の話の直後、椿の声でもない定型の同意確認が出た。
+    生成は戻す。守るべき線は【メニューが必ず付くこと】の方や。
+    """
+    monkeypatch.setattr(b, 'complete', lambda *a, **k: 'モデルの出力')
     text = b.generate_offer({}, [message('user', '前の相談の話', '2020-01-01')], incoming)
-    assert text == b.OFFER_INTRO_FALLBACK + '\n\n' + b.OFFER_MENU
-    assert '受け取った' not in text and '中身はもう組んである' not in text
-    assert '理由を三つ' not in text and '前の相談の話' not in text
+    assert b.OFFER_MENU in text
     assert b.URL_KANTEI in text and b.URL_SHIOMI in text
-    assert '3,980円' in text and '9,800円' in text and '有料' in text
+    assert '3,980円' in text and '9,800円' in text
+
+
+def test_offer_falls_back_to_fixed_intro_when_the_model_dies(monkeypatch):
+    """生成が落ちても、オファー自体は送る（冒頭だけ固定文に落ちる）。"""
+    def boom(*a, **k):
+        raise RuntimeError('model down')
+    monkeypatch.setattr(b, 'complete', boom)
+    text = b.generate_offer({}, [message('user', '前の相談の話', '2020-01-01')], 'お願いします')
+    assert text == b.OFFER_INTRO_FALLBACK + '\n\n' + b.OFFER_MENU
 
 
 @pytest.mark.parametrize('days,expected', [(29, 10), (30, 3), (40, 3)])
@@ -67,12 +81,30 @@ def test_old_offer_still_prevents_duplicate_offer(monkeypatch):
     assert b._offer_already_sent('synthetic') is True
 
 
-def test_permission_question_is_fixed_and_never_uses_customer_history(monkeypatch):
-    monkeypatch.setattr(b, 'complete', lambda *a, **k: pytest.fail('question cannot use model'))
+def test_permission_question_uses_the_persons_own_details(monkeypatch):
+    """★2026-09-10：二択は、その人の話の具体を頭に置いた一通に戻す。
+
+    実測325件で、定型の二択の直後に値段を聞いた6人は購入0人。
+    具体の見立ての直後に聞いた17人は7人が購入（41%）。同じ「いくら？」でも、
+    中身に反応して聞いた人は買い、選択を迫られて聞いた人は値踏みして去る。
+    """
+    monkeypatch.setattr(b, 'complete',
+                        lambda *a, **k: '3日前の「もう何もない」いう一言な。'
+                                        'このまま自分の勘で動くか、ウチが視てから動くか。')
     result = b.generate_ask_deeper({}, [], '状況の補足')
-    assert result == b.ASK_DEEPER
-    assert '有料' in result and '内容と料金' in result
-    assert '決めや' not in result and '勘で動くか' not in result
+    assert '3日前' in result and b.ASK_DEEPER_MARK in result
+
+
+@pytest.mark.parametrize('bad', ['そこは3,980円やで。勘で動くか、視てから動くか',
+                                 'https://example.com を見て。勘で動くか、視てから動くか',
+                                 'マーカーの無い、ただの返事'])
+def test_permission_question_falls_back_when_the_generation_is_unusable(monkeypatch, bad):
+    """値段・リンクが混じった時と、マーカーが無い時は定型文に戻す。
+
+    マーカーが欠けると「もう聞いたか」の判定が壊れて、無言holdが復活する。
+    """
+    monkeypatch.setattr(b, 'complete', lambda *a, **k: bad)
+    assert b.generate_ask_deeper({}, [], '状況の補足') == b.ASK_DEEPER
 
 
 def test_old_turns_do_not_force_immediate_offer_or_question(monkeypatch):
