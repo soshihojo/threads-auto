@@ -81,7 +81,12 @@ def main() -> int:
         return 0
     ws = ss._ws("processed_replies")
     col = ss._col(ss.TABLES["processed_replies"].index("posted_at"))
-    idx = {str(r.get("reply_id")): i for i, r in enumerate(ss._records("processed_replies"))}
+    # ★_records は空行を飛ばすんで、その並びで行番号を数えたら【全部ずれる】。
+    #   生の行（_data_rows）で数えること。reply_id は先頭の列や。
+    idx = {}
+    for i, row in enumerate(ss._data_rows("processed_replies")):
+        if row and str(row[0]).strip():
+            idx[str(row[0])] = i
     reqs = [{"range": f"{col}{ss.FIRST_DATA_ROW + idx[rid]}", "values": [[ts]]}
             for rid, ts in found.items() if rid in idx]
     for n in range(0, len(reqs), 500):        # 一度に投げ過ぎて落とさん
