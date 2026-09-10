@@ -146,18 +146,42 @@ def test_old_consent_acknowledgement_is_blocked_before_transport(text):
 @pytest.mark.parametrize('incoming', [
     'それで別の相手ができていました',
     'その後も連絡はありません',
-    'はい、でもまだ決めていません',
     'それで彼から連絡がありました',
     'もう疲れました',
     '勘で動くのは怖いです',
-    'ありがとうございます',
-    '少し考えたいです',
 ])
-def test_story_after_choice_is_not_a_request(incoming):
+def test_after_choice_a_non_refusal_is_taken_as_yes(incoming):
+    """★2026-09-10：二択の直後は「断りやなければ、視てほしい」で受ける（8月の設計）。
+
+    9/9のPRはここを「明示の依頼だけ」に絞った。実データ25,568通で測ると
+    購入サインが996件→223件（-78%）まで落ちる。落ちる中身が致命的やった：
+      「現在の彼の気持ち、視てもらえますか？」「視てもらう場合いくらなんですか？」
+      「みてからうごく」——どれも本人が答えとるのに None になっとった。
+
+    元の設計の根拠はこれや。仕組みが自分から「どっちや」と聞いた以上、
+    返ってきたもんは答えとして受けなあかん。語彙の穴で取りこぼした実害：
+      ・石井希美さん(8/08) 二択に「みて」→ ひらがなが同意語に無く無言hold
+      ・橋本明花さん(8/11) 65字の前向きな返事 → 30字の上限で落ちて無言hold
+
+    ★代償は正直に書いておく。話の続きを書いた人にもオファーが出る。
+      そこを止めたいなら、止めるべきは detect_signal やのうて、
+      二択の直後に「答えか、話の続きか」を分ける判定を足す方や。
+    """
     history = [message('assistant', b.ASK_DEEPER, '2020-03-01T10:00:00'),
                message('user', incoming, '2020-03-01T10:01:00')]
     assert b._canned_ask_deeper_just_sent(history)
-    assert b.detect_signal(incoming, history) is None
+    assert b.detect_signal(incoming, history) == 'purchase'
+
+
+@pytest.mark.parametrize('incoming', ['視てほしいとは言っていません', '今は鑑定をお願いしません',
+                                     '案内はいらないです', '料金についてはまだ考えたいです',
+                                     # ★保留・お礼も「まだ是やない」。8月の拒否判定が拾う
+                                     'はい、でもまだ決めていません', '少し考えたいです',
+                                     'ありがとうございます'])
+def test_a_clear_refusal_or_hold_after_choice_is_not_yes(incoming):
+    """断り・保留・お礼だけの返事は、二択の直後でもオファーに繋げん。"""
+    history = [message('assistant', b.ASK_DEEPER, '2020-03-01T10:00:00')]
+    assert b.detect_signal(incoming, history) != 'purchase'
 
 
 @pytest.mark.parametrize('incoming', ['みて', '後者です', 'お願いします',
@@ -168,7 +192,8 @@ def test_explicit_request_after_choice_still_gets_information(incoming):
     assert b.detect_signal(incoming, history) == 'purchase'
 
 
-def test_story_after_choice_continues_conversation(monkeypatch):
+def test_answer_after_choice_reaches_the_offer(monkeypatch):
+    """二択の直後の返事は、断りでなければオファーへ渡す（8月の設計）。"""
     incoming = 'それで別の相手ができていました'
     history = [message('assistant', '以前の返事', '2020-03-01T09:00:00') for _ in range(7)]
     history += [message('assistant', b.ASK_DEEPER, '2020-03-01T10:00:00'),
@@ -179,12 +204,12 @@ def test_story_after_choice_continues_conversation(monkeypatch):
     monkeypatch.setattr(b.store, 'upsert_line_user', lambda uid, **k: state.update(k))
     monkeypatch.setattr(b, '_handle_code', lambda *a: False)
     monkeypatch.setattr(b, '_send', lambda uid, token, text: sent.append(text) or True)
-    monkeypatch.setattr(b, '_route_offer', lambda *a: pytest.fail('story is not consent'))
+    routed = []
+    monkeypatch.setattr(b, '_route_offer', lambda *a: routed.append('offer'))
     monkeypatch.setattr(b, 'generate_ask_deeper', lambda *a: pytest.fail('do not immediately repeat choice'))
     monkeypatch.setattr(b, 'generate_nurture', lambda *a: 'その後の状況も話してくれたんやな。')
     b._auto_reply('synthetic', state, incoming, live=False)
-    assert sent == ['その後の状況も話してくれたんやな。']
-    assert state['bot'] == 'on'
+    assert routed == ['offer'] and sent == []
 
 
 @pytest.mark.parametrize('text', [
@@ -211,8 +236,7 @@ def test_actual_requests_and_product_questions_remain_available(text):
 
 
 @pytest.mark.parametrize('count', [1, 3])
-@pytest.mark.parametrize('incoming', ['それで別の相手ができていました', 'どうしたらいいですか',
-                                    '視てほしいとは言っていません'])
+@pytest.mark.parametrize('incoming', ['どうしたらいいですか', '視てほしいとは言っていません'])
 def test_no_automatic_offer_after_questions(monkeypatch, count, incoming):
     h = [message('assistant', '通常の返事', '2020-03-01') for _ in range(20)]
     h += [message('assistant', b.ASK_DEEPER, '2020-03-01') for _ in range(count)]
@@ -232,7 +256,9 @@ def test_no_automatic_offer_after_questions(monkeypatch, count, incoming):
 
 @pytest.mark.parametrize('second', ['通常の相談への返事。', 'あとで案内する', None])
 def test_model_promise_is_retried_without_offer_or_handoff(monkeypatch, second):
-    h = [message('assistant', b.ASK_DEEPER, '2020-03-01'),
+    # ★二択の直後にせん。ここで見たいんは「モデルが『あとで案内する』と
+    #   空約束したら、オファーもholdもせずに作り直す」ことだけや。
+    h = [message('assistant', '前の相談への返事。', '2020-03-01'),
          message('user', 'その後は連絡がありません', '2020-03-01')]
     state, sent, attempts = {'bot': 'on'}, [], []
     monkeypatch.setattr(b.store, 'get_line_user', lambda *a: dict(state))

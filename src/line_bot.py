@@ -1492,39 +1492,118 @@ def _offer_declined(text: str) -> bool:
 
 
 def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
-    """本人の明示依頼・商品質問と、一般的な相談を分ける。"""
+    """危険サイン／購入サインを判定する。
+
+    history を渡すと、直前に椿が「無料ではここまで」と線を引いた場合に、
+    短い同意（「お願いします」「お金払えばいいの？」）も購入サインとして拾う。
+
+    ★★★2026-09-10 差し戻し：9/9のPR #9/#10が、ここを「明示の依頼の言い回しだけ」に
+      絞り込んどった。実データ25,568通で測った結果、購入サインが996件→223件（-78%）。
+      落ちとるんが致命的やった：
+        「現在の彼の気持ち、視てもらえますか？」  → None（「もらえますか」が型に無い）
+        「視てもらう場合いくらなんですか？」      → None
+        「みてからうごく」                        → None（二択への返事）
+      ★三つ目と二つ目は、下のコメントに「41%が買う型」として書いてある文言そのものや。
+      せやから拾いは8月の形に戻す。★ただしPRが足した捏造よけは残す：
+        ・_intent_text …「彼が『お願いします』と言うた」の引用・伝聞を落とす
+        ・_offer_declined … 「お金がない」「高すぎる」の断りを先に弾く
+        ・reported … 他人への依頼を、本人の依頼と読まん
+    """
     if any(w in text for w in DANGER_WORDS):
         return "danger"
+    # ★PR #9/#10 由来。引用・伝聞・否定を落としてから意思を見る（捏造よけ）
     clean = _intent_text(text)
     if _offer_declined(clean):
+        return None                       # 「お金がない」「高すぎる」は買う意思の逆
+    if _MONEY_TROUBLE_RE.search(clean):
         return None
-    ending = r"(?:です|ます|ですね|な|ね|よ|！|!|。|？|\?|\s|🙏|🙇|🥹)*$"
-    request = r"(?:鑑定(?:を)?(?:お願いしたい|希望|受けたい)|(?:視|見|み|診)て(?:ほしい|欲しい|ください|下さい|もらいたい)|申し込みたい|購入したい|案内(?:を)?希望)"
+    # ★2026-08-10：値段の語が入っとるだけで購入サインにしとったせいで、
+    #   「有料はちょっと厳しいです」を購入意思と読んで撃っとった。値段に触れつつ
+    #   引いとる言い方は、買う気の逆や。語彙判定より先に弾く
+    if _PRICE_DECLINE_RE.search(clean):
+        return None
+    # ★PR #9/#10 由来。「彼にお願いした」を本人の依頼と読まん。
+    #   ★2026-09-10：助詞を「の」まで、語を「料金・支払・届く・荷物」まで広げた。
+    #     元の型は「彼の支払いが遅れています」「彼の荷物はいつ届くのですか？」を
+    #     素通りさせとって、下の総取り経路で purchase になっとった。
     last_clause = re.split(r"[。\n]", clean.rstrip("。\n "))[-1]
-    reported = bool(re.search(r"(?:彼|友達|友人|相手)(?:は|が|に).{0,24}(?:お願い|鑑定|視て|見て|みて|購入|申し込)", last_clause)
-                    and not re.search(r"(?:私|自分)(?:は|が).*(?:希望|お願い|受けたい)", last_clause))
-    if not reported and re.search(request + ending, clean):
+    if (re.search(r"(?:彼|彼女|友達|友人|相手|他の人|別の人)(?:は|が|に|の)"
+                  r".{0,24}(?:お願い|鑑定|視て|見て|みて|購入|申し込|料金|値段|支払|届く|荷物|納期)",
+                  last_clause)
+            and not re.search(r"(?:私|自分)(?:は|が).*(?:希望|お願い|受けたい)", last_clause)):
+        return None
+    # ★依頼の言葉が【カギカッコの中にしか無い】＝引用や。本人が今言うたんやない。
+    #   実例：「彼に『お願いします』と送りました」「『視てほしい」。
+    #   _intent_text が引用を落とした結果、依頼の語が消えるかどうかで見分ける。
+    _WANT = r"(?:お願い|鑑定|視て|見て|みて|購入|申し込|やってほしい|してほしい)"
+    if clean != text and re.search(_WANT, text) and not re.search(_WANT, clean):
+        return None
+    if not clean.strip():
+        return None
+
+    # ★PR #9/#10 由来で【残す価値があった】拾い。8月の語彙リストが取りこぼす
+    #   言い回しを型で拾う（「鑑定希望」「案内希望」「視てください」など）。
+    #   語彙リストより先に置く。こっちの方が精度が高い。
+    _ENDING = r"(?:です|ます|ですね|な|ね|よ|！|!|。|？|\?|\s|🙏|🙇|🥹)*$"
+    _REQUEST = (r"(?:鑑定(?:を)?(?:お願いしたい|希望|受けたい)"
+                r"|(?:視|見|み|診)て(?:ほしい|欲しい|ください|下さい|もらいたい|もらえますか)"
+                r"|申し込みたい|購入したい|案内(?:を)?希望)")
+    if re.search(_REQUEST + _ENDING, clean):
         return "purchase"
-    # 単なる価格の言及や他人への依頼報告ではなく、商品情報への質問。
-    question = r"(?:いくら|教えて(?:ください|下さい)?|知りたい|見たい|見てみたい|ですか|ますか|でしょうか|\?|？)"
-    product = r"(?:鑑定|案内|料金|値段|金額|有料|申し込|購入|支払|届く|納期)"
-    if (re.search(product, clean) and re.search(question + r"(?:です|ます|でしょう|か|ね|な|[？?。！!\s])*$", clean)
-            and not re.search(r"(?:彼|友達|友人|他の|別の|病院|会社).{0,16}(?:料金|値段|支払|購入|申し込|鑑定|いくら|届く|納期)", clean)):
+    _QUESTION = r"(?:いくら|教えて(?:ください|下さい)?|知りたい|見たい|見てみたい|ですか|ますか|でしょうか|\?|？)"
+    _PRODUCT = r"(?:鑑定|案内|料金|値段|金額|有料|申し込|購入|支払|届く|納期)"
+    if (re.search(_PRODUCT, clean)
+            and re.search(_QUESTION + r"(?:です|ます|でしょう|か|ね|な|[？?。！!\s])*$", clean)
+            and not re.search(r"(?:彼|友達|友人|他の|別の|病院|会社)"
+                              r".{0,16}(?:料金|値段|支払|購入|申し込|鑑定|いくら|届く|納期)", clean)):
         return "purchase"
     if re.fullmatch(r"\s*(?:いくら|おいくら)(?:ですか)?[？?。\s]*", clean):
         return "purchase"
-    if not reported and history and (_canned_ask_deeper_just_sent(history) or offer_routing.pending(history)):
-        if _ASSENT_RE.fullmatch(clean):
-            return "purchase"
-        if re.search(r"(?:お願いします|おねがいします|みてもらってから動きたい)" + ending, clean):
-            return "purchase"
-    norm = _normalize_for_signal(clean)
-    if any(w in norm for w in PURCHASE_WORDS_SOFT + PURCHASE_WORDS_MID_SOFT):
+
+    norm = _normalize_for_signal(clean)   # 「どうしたら良い」→「どうしたらいい」等
+    if any(w in norm for w in PURCHASE_WORDS):
+        return "purchase"
+    if any(w in norm for w in PURCHASE_WORDS_SOFT):
         return "purchase_soft"
+    if len(clean) <= _PURCHASE_MID_LEN and any(w in norm for w in PURCHASE_WORDS_MID_SOFT):
+        return "purchase_soft"
+    if len(clean) <= 40 and any(w in norm for w in PURCHASE_WORDS_SHORT):
+        return "purchase"
+    if len(clean) <= _PURCHASE_MID_LEN and any(w in norm for w in PURCHASE_WORDS_MID):
+        return "purchase"
+    if len(clean) <= _PURCHASE_MID_LEN and _DELIVERY_Q_RE.search(norm):
+        return "purchase"
+    # ★PR #9/#10 由来で【残す価値があった】拾い。offer_routing が「どっちや」と
+    #   聞いた直後の返事は、その答えとして受ける（「後者です」等）。
+    #   8月の型は ASK_DEEPER の直後しか見てへんかったんで、ここが抜けとった。
+    if history and offer_routing.pending(history):
+        if _ASSENT_RE.fullmatch(clean) or re.search(r"(?:前者|後者|こっち|そっち)", clean):
+            return "purchase"
+    if history and len(clean) <= 40 and _ASSENT_RE.match(clean):
+        last_bot = next((str(h["text"]) for h in reversed(history)
+                         if h.get("role") == "assistant"), "")
+        if _DECLINE_RE.search(last_bot):
+            return "purchase"
+    # ★ASK_DEEPER（二択の意思確認）の直後だけは、受けを逆にする。
+    #   同意の語を数え上げるんやのうて、「断りやなければ視てほしい」で受ける。
+    #   実害（2026-08-08・石井希美さん）：二択に「みて」と答えたのに、
+    #   ひらがなが同意語に無うて拾えず、無言のまま hold になった。
+    #   二択に答えてくれた人を語彙の穴で取りこぼすのは、もう終わりにする。
+    # ★2026-08-11：ここは30字以内しか見とらんかった。定型の二択に、丁寧に長う
+    #   答えてくれた人が丸ごと落ちる（橋本明花さん65字：「ヒントになるような感じで
+    #   動きたいと思ってます」＝完全に前向きな返事やのに無反応でholdになった）。
+    #   二択への返事は長さで切らん。断りかどうかだけで見る。
+    if history and _canned_ask_deeper_just_sent(history):
+        # はっきり「視てほしい」と書いてあるなら、長さも前置きの断り語も見ん
+        if _DEEPER_YES_RE.search(clean):
+            return "purchase"
+        if len(clean) <= 200 and (_REFUSAL_NEGATED_RE.search(clean)
+                                  or not _REFUSAL_RE.search(clean)):
+            return "purchase"
     return None
 
 
-# ---------- 返信生成 ----------
+
 def _internal_ref(user: dict) -> str:
     parts = []
     for key, label in (("me_birth", "相談者"), ("him_birth", "彼")):
