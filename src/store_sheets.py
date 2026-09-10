@@ -188,6 +188,28 @@ def _records(name: str) -> list[dict]:
     return out
 
 
+def _records_with_rows(name: str) -> list[tuple[int, dict]]:
+    """(実シート行番号, レコード) を返す。
+
+    ★2026-09-10：id で行を探す作りが事故った。手貼りで id が重複すると
+      _find_row が【最初の一致】を返すんで、印が別の行に付く。
+      実例：id=1044 が2行あって、9/12 2:45 の行に posted が付き、
+      実際に出した 9/10 16:41 の行は scheduled のまま残った。
+      ★実害は三つ。未来の投稿が出えへん／出した行が再配信を試み続ける／
+        同じ本文の二重予約で予定の半分が消える。
+      せやから印は【行番号】で付ける。id が重複しても正しい行に当たる。
+    """
+    headers = TABLES[name]
+    out = []
+    for i, row in enumerate(_data_rows(name)):
+        if not any(c != "" for c in row):
+            continue
+        out.append((FIRST_DATA_ROW + i,
+                    {h: (row[j] if j < len(headers) and j < len(row) else "")
+                     for j, h in enumerate(headers)}))
+    return out
+
+
 def _append(name: str, row: dict) -> None:
     headers = TABLES[name]
     # table_range をヘッダ(B2)にすると、その表の最終行の次（B列〜）に追記される。
@@ -471,19 +493,27 @@ def due_scheduled(now_iso: str, account: str | None = None) -> list[dict]:
     """
     now = parse_dt(now_iso) or datetime.now()
     table = sched_table(account)
-    due = []
-    for r in _records(table):
+    due, seen = [], {}
+    for idx, r in _records_with_rows(table):
+        seen.setdefault(str(r.get("id")), []).append(idx)
         if r.get("status") != "scheduled":
             continue
         t = parse_dt(r.get("scheduled_at"))
         if t and t <= now:
-            due.append((t, r))
+            # ★印を付ける先を、id やのうて【行番号】で持って回る（下の _row）
+            due.append((t, {**r, "_row": idx}))
+    dup = {k: v for k, v in seen.items() if len(v) > 1}
+    if dup:
+        print(f"[sheets] ⚠ {table} に id の重複が {len(dup)}種ある: "
+              f"{ {k: v for k, v in list(dup.items())[:5]} }　"
+              f"（行番号で印を付けるんで配信は狂わんが、貼り直しの時は採番を確かめること）")
     due.sort(key=lambda x: x[0])
     return [r for _, r in due]
 
 
 def mark_scheduled(post_id: int, status: str, *, media_id: str | None = None,
-                   error: str | None = None, account: str | None = None) -> None:
+                   error: str | None = None, account: str | None = None,
+                   row: int | None = None) -> None:
     """予約行に印を付ける。
 
     ★★2026-08-31：account を渡したら、そのアカウントのシートを触る。
@@ -492,7 +522,8 @@ def mark_scheduled(post_id: int, status: str, *, media_id: str | None = None,
         （8/17〜18に同じ本文が十本二重に出た事故がそれや。二度と繰り返さん）
     """
     table = sched_table(account)
-    idx = _find_row(table, "id", post_id)
+    # ★row（実シート行番号）が来たらそっちを使う。id 重複でも正しい行に当たる
+    idx = row if row else _find_row(table, "id", post_id)
     if not idx:
         return
     updates = {"status": status}

@@ -41,12 +41,14 @@ def run_due(client: ThreadsClient, account: str | None = None) -> dict:
         #   「同じ本文は二度と出さん」を最後の壁にする。
         if store.was_posted_before(text):
             store.mark_scheduled(row["id"], "skipped", account=account,
+                                 row=row.get("_row"),
                                  error="同一本文を配信済み（再配信ループ防止）")
             print(f"⏭  予約スキップ（配信済み本文）: id={row['id']}")
             continue
         try:
             media_id = client.publish_thread(text)
-            store.mark_scheduled(row["id"], "posted", media_id=media_id, account=account)
+            store.mark_scheduled(row["id"], "posted", media_id=media_id, account=account,
+                                 row=row.get("_row"))
             store.save_post(media_id, text, profile["name"])
             stats["posted"] += 1
             print(f"✅ 予約投稿 配信: id={row['id']} media_id={media_id}")
@@ -57,7 +59,8 @@ def run_due(client: ThreadsClient, account: str | None = None) -> dict:
             print(f"🚫 アカウントが止められとる。予約は {len(due)} 本そのまま残す: {e}")
             raise
         except Exception as e:
-            store.mark_scheduled(row["id"], "failed", error=str(e), account=account)
+            store.mark_scheduled(row["id"], "failed", error=str(e), account=account,
+                                 row=row.get("_row"))
             stats["failed"] += 1
             print(f"❌ 予約投稿 失敗: id={row['id']} {e}")
     return stats
