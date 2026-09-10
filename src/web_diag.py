@@ -359,6 +359,13 @@ const SRC=(()=>{try{
 }catch(_){ return ""; }})();
 function track(e){ try{ navigator.sendBeacon("/shindan/track?e="+e+"&vid="+encodeURIComponent(VID)); }catch(_){} }
 track("view");
+// ★★★2026-09-10：LINEの oaMessage 形式は【スマホのアプリ専用】や。
+//   PCで開くと line.me/R/oaMessage/... は www.line.me/en/（LINEの会社トップ）へ
+//   飛ばされて、追加画面に着かん。実測で確認した（PCのUAで2回リダイレクト）。
+//   ★PCの人は診断を終えたのに、その場で丸ごと落ちとった。
+//   せやから端末で行き先を分ける。PCは lin.ee（追加ページ・PCでもスマホでも着く）。
+const IS_APP=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||"");
+if(!IS_APP) track("view_pc");   // PCがどれだけ来とるか測れるようにしとく
 document.getElementById("lbtn").addEventListener("click", ()=>{
   track("line_click");
   var ab=document.getElementById("afterbtn"); if(ab) ab.style.display="block";
@@ -432,9 +439,16 @@ document.getElementById("f").addEventListener("submit", async (e)=>{
       "ここまでが、生まれから視える分や。<br>"+
       "彼が<b>“今”なに考えとって</b>、なんで黙っとるか。<br>"+
       "そこは、<b>あんたに直接、言うわ。</b>";
-    document.getElementById("lbtn").href=j.line_oa_url||j.line_url;
-    if(!j.line_oa_url){ document.getElementById("stept").innerHTML=
-      "追加したら、この番号だけ送ってな。<br>すぐに“彼の今の本音”を視て返すで🌙"; }
+    // ★スマホだけ oaMessage（トークが開いて番号が入っとる）。
+    //   PCは lin.ee の追加ページへ。番号は手で貼ってもらう（コピー釦が効く）。
+    const USE_OA = IS_APP && j.line_oa_url;
+    document.getElementById("lbtn").href = USE_OA ? j.line_oa_url : (j.line_url||j.line_oa_url);
+    if(!USE_OA){
+      document.getElementById("stept").innerHTML=
+        "追加したら、この番号だけ送ってな。<br>すぐに“彼の今の本音”を視て返すで🌙";
+      const li=document.querySelectorAll(".steps li");
+      if(li.length>1) li[1].innerHTML="コピーした<b>番号を送る</b>だけ";
+    }
     document.getElementById("copyb").onclick=async()=>{
       const b=document.getElementById("copyb");
       try{ await navigator.clipboard.writeText(j.code); }

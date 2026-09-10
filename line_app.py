@@ -90,8 +90,14 @@ def tokushoho_page() -> str:
 
 @app.post("/shindan/track")
 def shindan_track(e: str, background_tasks: BackgroundTasks, vid: str = "") -> dict:
-    """診断ページの計測ビーコン（view=表示 / line_click=LINEボタン押下。vid=訪問者の匿名ID）。"""
-    if e in ("view", "line_click"):
+    """診断ページの計測ビーコン（view=表示 / line_click=LINEボタン押下。vid=訪問者の匿名ID）。
+
+    ★2026-09-10：view_pc を足した。PC/タブレットからの来訪だけを別に数える。
+      LINEの oaMessage 形式がPCでは会社トップへ飛ばされて追加できんかった件の
+      影響がどれだけあるかを、あとから測れるようにするため。★ここは白名簿や。
+      新しい印を足したら【必ずここにも足す】。抜けると黙って捨てられる。
+    """
+    if e in ("view", "line_click", "view_pc"):
         background_tasks.add_task(store.add_web_event, e, vid[:64])
     return {"ok": True}
 
