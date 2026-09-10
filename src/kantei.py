@@ -13,6 +13,7 @@ PDF化はローカルのGoogle Chrome（headless）を使う。
 from __future__ import annotations
 
 import html
+import json
 import re
 import shutil
 import subprocess
@@ -1024,7 +1025,14 @@ def make_kantei(name: str, me_birth: str, him_birth: str, details: str,
     _assert_clean(chapters)
     from .reading_summary import generate as generate_summary
     print("📝 本文から要点ページを作成中…")
-    summary = generate_summary(name, chapters)
+    try:
+        summary = generate_summary(name, chapters)
+    except Exception:
+        # 本文8章は生成に金も時間もかかる。要点ページで落ちても捨てん（2026-09-10）
+        bak = OUT_DIR / f"章退避_{name}_{today}.json"
+        bak.write_text(json.dumps(chapters, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"💾 本文8章は退避した: {bak}")
+        raise
     _assert_clean([{"key": "summary", "title": "要点", "body": "\n".join(summary.values())}])
     stem = f"個別鑑定_{name}"
     html_path = OUT_DIR / f"{stem}.html"

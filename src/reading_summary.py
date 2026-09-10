@@ -1,6 +1,7 @@
 """A short, source-grounded action page for a completed reading."""
 import html
 import json
+import re
 
 from .llm import complete
 
@@ -28,11 +29,37 @@ def validate(summary):
     return summary
 
 
-def generate(name, chapters):
+def _parse(text):
+    """モデルがコードフェンスや前置きを付けても拾えるようにする。"""
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```[A-Za-z]*\s*", "", t)
+        t = re.sub(r"\s*```\s*$", "", t).strip()
+    if not t.startswith("{"):
+        i, j = t.find("{"), t.rfind("}")
+        if i == -1 or j <= i:
+            raise ValueError("返答にJSONオブジェクトが見つかりません")
+        t = t[i:j + 1]
+    return json.loads(t)
+
+
+def generate(name, chapters, tries: int = 3):
     source = "\n\n".join(c["title"] + "\n" + c["body"] for c in chapters)
-    response = complete(SYSTEM, f"呼び名：{name}\n\n完成した本文：\n{source}",
-                        max_tokens=3000, temperature=0.3, require_complete=True)
-    return validate(json.loads(response))
+    user = f"呼び名：{name}\n\n完成した本文：\n{source}"
+    last = None
+    for n in range(tries):
+        # 形式で落ちるだけで本文8章を捨てるのは高すぎる。作り直して拾う（2026-09-10）
+        extra = "" if n == 0 else (
+            "\n\n【厳重注意】前回の返答は形式が違うた。前置き・説明・コードブロックを"
+            "一切付けず、{ から始まり } で終わるJSONオブジェクトだけを返すこと。"
+            "キーは situation, action, avoid, review の4つ。各値は40〜140字の一段落。")
+        try:
+            return validate(_parse(complete(SYSTEM + extra, user, max_tokens=3000,
+                                            temperature=0.3, require_complete=True)))
+        except (ValueError, json.JSONDecodeError) as e:
+            last = e
+            print(f"  ⚠ 要点ページの形式が不正やった（{n + 1}/{tries}）: {e}")
+    raise ValueError(f"要点ページを{tries}回作り直しても形式が整わんかった: {last}")
 
 
 def page(summary):

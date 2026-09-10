@@ -1,0 +1,46 @@
+name: daily-report
+# デイリーレポートのスプシを毎日埋める。日を跨いだ直後に前日ぶんを確定させる。
+#
+# ★なんで「直近7日を書き直す」のか（前日ぶんだけ足す作りにせん理由）
+#   ・GitHub Actions の schedule は間引かれる。実際 poll.yml が7時間半発火せんかった。
+#     ★前日ぶんだけ足す作りやと、飛んだ日が永久に空白のまま残る。
+#     ★★7日ぶん書き直す作りなら、次に走った時に穴が勝手に埋まる。cronの不発が自己修復する。
+#   ・表示回数は投稿直後には確定せん。あとから伸びる。
+#     ★00:10に一回書いて終わりにすると、実際より低い数字が残る。
+#
+# ★数式の列（G/J/L/N/P）とフォロー数（E列）は【空いとる時だけ】入れる。
+#   店主が式を直したり、Threadsのインサイトから手で入れた値は上書きせん。
+on:
+  schedule:
+    - cron: "10 15 * * *"     # UTC15:10 ＝ JST 00:10（日を跨いだ10分後）
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "さかのぼって書き直す日数（既定7）"
+        required: false
+        default: "7"
+
+# ★重ねん。同じ行を二回書く事故を防ぐ（他のジョブと同じ考え方）
+concurrency:
+  group: daily-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    env:
+      STORE_BACKEND: sheets
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_KEY: ${{ secrets.GOOGLE_SHEET_KEY }}
+      REPORT_SHEET_KEY: ${{ secrets.REPORT_SHEET_KEY }}
+      THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+      THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+      THREADS_ACCESS_TOKEN_B: ${{ secrets.THREADS_ACCESS_TOKEN_B }}
+      THREADS_USER_ID_B: ${{ secrets.THREADS_USER_ID_B }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - name: fill daily report
+        run: python tools/daily_report.py --days ${{ github.event.inputs.days || '7' }}
