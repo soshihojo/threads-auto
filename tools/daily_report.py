@@ -52,21 +52,80 @@ from tools.uriage import (KANTEI, OFFER_MARKS, SHIOMI, _shiomi_names,  # noqa: E
 
 JST = timezone(timedelta(hours=9))
 FOLLOWER_TAB = "_フォロワー"
+LEGEND_TAB = "_指標の定義"
 HEADER_ROW, FIRST_ROW = 2, 3
-# ★2026-09-10：列は固定で持たん。【2行目の見出しを読んで列を決める】。
-#   店主が列を足したり消したりした翌日に、黙って隣の列へ書き込む事故を防ぐため。
-#   実際この日、フォロー数を消して診断率を足す組み替えがあった。
-DATA_COLS = {"日": "日", "ポスト数": "ポスト数", "ポスト表示回数": "表示",
-             "コメント数": "コメ", "診断完了数": "診断", "LINE追加数": "追加",
-             "ブロック数": "ブロック", "オファー到達数": "オファー",
-             "購入数": "購入", "売上": "売上"}
-# 率の列は（分子の見出し, 分母の見出し）で持つ。列がずれても式が壊れん
-RATE_COLS = {"コメント率": ("コメント数", "ポスト表示回数"),
-             "診断率": ("診断完了数", "コメント数"),
+
+# ★★★2026-09-10 全面見直し。
+#   前は率の分子と分母が【別の集団】を数えとった。オファーは何日も前に追加した人に
+#   出るのに、その日のLINE追加数で割っとった。せやから 1150% みたいな数字が並んだ。
+#   ★実測：オファーの97%・購入の95%は【追加から7日以内】に起きとる（中央値0日）。
+#   　　　　せやから追加後の指標は【その日追加した人を7日追う】形（コホート）にする。
+#   　　　　これで率は必ず100%以下に収まって、「どの日の集客が良かったか」が読める。
+COHORT_DAYS = 7
+
+# 列は見出しで決める。順番もここが正。走るたびに2行目へ書き戻す
+HEADERS = ["日", "ポスト数", "ポスト表示回数", "1本あたり表示", "コメント数", "コメント率",
+           "診断完了数", "LINE追加数", "LINE追加率",
+           "オファー到達数", "オファー到達率", "購入数", "購入率", "ブロック数", "ブロック率",
+           "コホート売上", "当日売上", "コホート確定"]
+DATA_COLS = {"日": "日", "ポスト数": "ポスト数", "ポスト表示回数": "表示", "コメント数": "コメ",
+             "診断完了数": "診断", "LINE追加数": "追加",
+             "オファー到達数": "オファー", "購入数": "購入", "ブロック数": "ブロック",
+             "コホート売上": "コホート売上", "当日売上": "当日売上", "コホート確定": "確定"}
+# 率の列は（分子の見出し, 分母の見出し）。列が動いても式が追随する
+RATE_COLS = {"1本あたり表示": ("ポスト表示回数", "ポスト数"),
+             "コメント率": ("コメント数", "ポスト表示回数"),
              "LINE追加率": ("LINE追加数", "診断完了数"),
-             "ブロック率": ("ブロック数", "LINE追加数"),
              "オファー到達率": ("オファー到達数", "LINE追加数"),
-             "購入率": ("購入数", "オファー到達数")}
+             "購入率": ("購入数", "LINE追加数"),
+             "ブロック率": ("ブロック数", "LINE追加数")}
+# 見た目（走るたびに揃える）。★2026-09-10：全列に明示的に当てること。
+#   列の割り当てを変えた時、【前の割り当ての書式がその列に残る】。実際この日、
+#   前にコメント率やった F列に％書式が残っとって、コメント数41が「4100.00%」と出た。
+#   指定した列だけ直しても直らん。全部を上書きする。
+_N = {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}
+_P = {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}
+_Y = {"numberFormat": {"type": "CURRENCY", "pattern": "¥#,##0"}}
+FORMATS = {"日": {"numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}},
+           "ポスト数": _N, "ポスト表示回数": _N, "1本あたり表示": _N,
+           "コメント数": _N, "コメント率": {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}},
+           "診断完了数": _N, "LINE追加数": _N, "LINE追加率": _P,
+           "オファー到達数": _N, "オファー到達率": _P,
+           "購入数": _N, "購入率": _P, "ブロック数": _N, "ブロック率": _P,
+           "コホート売上": _Y, "当日売上": _Y,
+           "コホート確定": {"numberFormat": {"type": "TEXT"}}}
+
+LEGEND = [
+    ["列", "意味", "数え方", "なんでこう数えるか"],
+    ["ポスト数", "その日に出した投稿", "posts。★削除済みは数えん",
+     "insights_atが空のまま2日たった投稿はThreads上にもう無い。8/9深夜の41本連投が実例で、"
+     "本数だけ数えると1本あたり表示が172まで落ちて実態と違う数字になる"],
+    ["ポスト表示回数", "その日の投稿の総表示", "posts.views の合計", ""],
+    ["1本あたり表示", "表示回数 ÷ ポスト数", "式", "★集客が痩せた時にいちばん先に動く。本数を増やして誤魔化しても、ここは下がる"],
+    ["コメント数", "その日の投稿に付いたコメント", "processed_replies を【投稿の日】に寄せる",
+     "表示回数と同じ「その日の投稿」の話に揃える。巡回が止まった日に翌日へ付け替わる問題も消える"],
+    ["コメント率", "コメント数 ÷ 表示回数", "式", "投稿の刺さり方。1本あたり表示とは別の軸で見る"],
+    ["診断完了数", "その日に診断を終えた人", "web_events の submit", ""],
+    ["LINE追加数", "その日に友だち追加した人", "line_users の新規", ""],
+    ["LINE追加率", "追加数 ÷ 診断完了数", "式", "診断からLINEへの落ち。数分の差やから同じ日で割ってええ"],
+    ["オファー到達数", "★その日追加した人のうち、7日以内にオファーを受けた人数", "コホート",
+     "★オファーは何日も前に追加した人に出る。その日のオファー数をその日の追加数で割っとったから"
+     "1150%みたいな数字が出とった。実測でオファーの97%は7日以内や"],
+    ["オファー到達率", "オファー到達数 ÷ LINE追加数", "式", "必ず100%以下になる。会話がオファーまで届く割合"],
+    ["購入数", "★その日追加した人のうち、7日以内に買うた人数", "コホート", "実測で購入の95%は7日以内"],
+    ["購入率", "購入数 ÷ LINE追加数", "式", "★追加1人あたりの成約率。ここが集客の質そのもの"],
+    ["ブロック数", "★その日追加した人のうち、7日以内にブロックした人数", "コホート",
+     "line_users の note『ブロック/解除』と updated_at。web_events側は人に紐付かん"],
+    ["ブロック率", "ブロック数 ÷ LINE追加数", "式", "会話が削っとらんかの見張り"],
+    ["コホート売上", "★その日追加した人が7日以内に払った額", "コホート",
+     "★『その日の集客がいくらになったか』。日をまたぐ入金もその日の手柄に付ける"],
+    ["当日売上", "その日に入った額", "カレンダー", "こっちは店の実感に合う数字。合計はこの列で見る"],
+    ["コホート確定", "7日たったか", "", "★直近7日は追いかけ途中や。その行の率はまだ伸びる。読む時は必ずここを見る"],
+    ["", "", "", ""],
+    ["売上の内訳", "鑑定3,980円／潮見9,800円", "10桁のオーダー番号の数",
+     "月詠みの月額と構えは入っとらん。STORESの管理画面が正で、この列は傾向を見るためのもん"],
+]
+
 # insights_at が空のままこの日数を過ぎたら「もう無い投稿」とみなす
 GRACE_DAYS = 2
 
@@ -118,61 +177,98 @@ def refresh_insights(days: int) -> None:
 # ---------------------------------------------------------------- 集計
 def collect(d_from: str, d_to: str) -> list[dict]:
     ok = lambda d: d_from <= d <= d_to                                # noqa: E731
-    limit = (datetime.now(JST).date() - timedelta(days=GRACE_DAYS)).isoformat()
+    today = datetime.now(JST).date()
+    limit = (today - timedelta(days=GRACE_DAYS)).isoformat()
 
-    posts, views = Counter(), Counter()
+    # ── その日に出した投稿の成績 ──
+    posts, views, post_day = Counter(), Counter(), {}
     for r in ss._records("posts"):
         d = str(r.get("created_at"))[:10]
-        if not ok(d):
-            continue
         has = bool(str(r.get("insights_at") or "").strip())
         if not has and d < limit:
             continue                                                  # もう無い投稿
+        post_day[str(r.get("media_id"))] = d
+        if not ok(d):
+            continue
         posts[d] += 1
         try:
             views[d] += int(float(r.get("views") or 0))
         except (TypeError, ValueError):
             pass
 
-    # ★コメントは【書かれた本当の時刻】で数える。posted_at が無い古い行だけ seen_at に落とす。
-    #   seen_at は巡回が見つけた時刻やから、巡回が止まった日は翌日へ付け替わる。
-    #   実例：8/10は巡回が3コマしか動かずコメント9件、翌8/11の朝5時に20件まとめて拾って121件。
+    # コメントは【付いた投稿を出した日】に寄せる。表示回数と同じ集団の話に揃うし、
+    # 巡回が止まった日に翌日へ付け替わる問題も消える
     com = Counter()
     for r in ss._records("processed_replies"):
-        d = (str(r.get("posted_at") or "") or str(r.get("seen_at") or ""))[:10]
-        if ok(d):
+        d = post_day.get(str(r.get("post_id")))
+        if d and ok(d):
             com[d] += 1
 
-    ev = defaultdict(Counter)
+    diag = Counter()
     for r in ss._records("web_events"):
         d = str(r.get("created_at"))[:10]
-        if ok(d):
-            ev[d][r.get("event")] += 1
+        if r.get("event") == "submit" and ok(d):
+            diag[d] += 1
 
-    users = {u["user_id"]: str(u.get("display_name") or "") for u in ss._records("line_users")}
+    # ── 追加した人を7日追う（コホート） ──
+    join, block = {}, {}
+    for r in ss._records("line_users"):
+        u, d = r.get("user_id"), str(r.get("created_at"))[:10]
+        if u and d:
+            join[u] = d
+        if u and "ブロック" in str(r.get("note") or ""):
+            b = str(r.get("updated_at"))[:10]
+            if b:
+                block[u] = b
     ledger = _shiomi_names()
-    off, buy = defaultdict(set), defaultdict(list)
-    for r in ss._records("line_chats"):
-        d = str(r.get("created_at"))[:10]
-        if not ok(d):
-            continue
+    names = {r["user_id"]: str(r.get("display_name") or "") for r in ss._records("line_users")}
+    offer, buy = {}, {}
+    for r in sorted(ss._records("line_chats"), key=lambda r: str(r.get("created_at"))):
+        u, d = r.get("user_id"), str(r.get("created_at"))[:10]
         t = str(r.get("text") or "")
         if r.get("role") == "user":
             if re.search(r"(?<!\d)\d{10}(?!\d)", re.sub(r"[\s\-]", "", t)):
-                buy[d].append(r["user_id"])
+                buy.setdefault(u, []).append(d)
         elif any(m in t for m in OFFER_MARKS):
-            off[d].add(r["user_id"])
+            offer.setdefault(u, d)
+
+    def within(day: str, when: str | None) -> bool:
+        """追加日から COHORT_DAYS 日以内に起きたか。"""
+        if not when or when < day:
+            return False
+        return (date.fromisoformat(when) - date.fromisoformat(day)).days <= COHORT_DAYS
+
+    cohort = defaultdict(list)
+    for u, d in join.items():
+        cohort[d].append(u)
+
+    # ── 当日売上（カレンダー）。店の実感に合う方の数字 ──
+    price = lambda u: SHIOMI if is_shiomi_row(u, names.get(u, ""), ledger) else KANTEI  # noqa: E731
+    day_sales = Counter()
+    for u, ds in buy.items():
+        for d in ds:
+            day_sales[d] += price(u)
 
     out = []
     d = date.fromisoformat(d_from)
     while d.isoformat() <= d_to:
         k = d.isoformat()
-        us = buy.get(k, [])
-        s = sum(1 for u in us if is_shiomi_row(u, users.get(u, ""), ledger))
+        us = cohort.get(k, [])
+        n_off = sum(1 for u in us if within(k, offer.get(u)))
+        n_buy = n_blk = 0
+        yen = 0
+        for u in us:
+            hit = next((x for x in buy.get(u, []) if within(k, x)), None)
+            if hit:
+                n_buy += 1
+                yen += price(u)
+            if within(k, block.get(u)):
+                n_blk += 1
+        mature = (today - d).days >= COHORT_DAYS
         out.append({"日": k, "ポスト数": posts[k], "表示": views[k], "コメ": com[k],
-                    "診断": ev[k]["submit"], "追加": ev[k]["line_follow"],
-                    "ブロック": ev[k]["line_unfollow"], "オファー": len(off.get(k, ())),
-                    "購入": len(us), "売上": s * SHIOMI + (len(us) - s) * KANTEI})
+                    "診断": diag[k], "追加": len(us), "オファー": n_off, "購入": n_buy,
+                    "ブロック": n_blk, "コホート売上": yen, "当日売上": day_sales[k],
+                    "確定": "✓" if mature else f"集計中（あと{COHORT_DAYS - (today - d).days}日）"})
         d += timedelta(days=1)
     return out
 
@@ -191,24 +287,30 @@ def _as_date(v) -> str:
     return f"{m[1]}-{int(m[2]):02d}-{int(m[3]):02d}" if m else ""
 
 
-def _columns(ws) -> dict[str, str]:
-    """2行目の見出しを読んで {見出し: 列記号} を返す。"""
-    head = ws.row_values(HEADER_ROW)
-    out = {}
-    for i, name in enumerate(head):
-        name = str(name).strip()
-        if name:
-            out.setdefault(name, rowcol_to_a1(1, i + 1).rstrip("1"))
-    missing = [h for h in DATA_COLS if h not in out]
-    if missing:
-        raise SystemExit(f"❌ 2行目に見出しが見つからん: {missing}\n"
-                         f"   見つかった見出し: {list(out)}")
-    return out
+def _columns(ws, dry: bool) -> dict[str, str]:
+    """2行目の見出しを揃えてから {見出し: 列記号} を返す。
+
+    ★2026-09-10：見出しは【この道具が持つ】ことにした。前は手で並べ替えられた列を
+      読むだけやったんで、列を消された時に古い数値が式の場所に残って
+      診断率が2200%のまま居座る、みたいなことが起きた。走るたびに書き戻す。
+    """
+    head = [str(x).strip() for x in ws.row_values(HEADER_ROW)]
+    want = [""] + HEADERS                      # A列は空け、B列から
+    if head[:len(want)] != want and not dry:
+        ss_range = f"{_colname(1)}{HEADER_ROW}"
+        ws.update(range_name=ss_range, values=[HEADERS])
+        print(f"[report] 2行目の見出しを揃えた（{len(HEADERS)}列）")
+    return {h: _colname(i + 1) for i, h in enumerate(HEADERS)}
+
+
+def _colname(i: int) -> str:
+    """0始まりの列番号を A,B,C… に。"""
+    return rowcol_to_a1(1, i + 1).rstrip("1")
 
 
 def write(sh, rows: list[dict], dry: bool) -> None:
     ws = sh.sheet1
-    col = _columns(ws)
+    col = _columns(ws, dry)
     dcol = col["日"]
 
     have = ws.get(f"{dcol}{FIRST_ROW}:{dcol}", value_render_option="UNFORMATTED_VALUE")
@@ -233,16 +335,8 @@ def write(sh, rows: list[dict], dry: bool) -> None:
     for head, key in DATA_COLS.items():
         for r in rows:
             reqs.append({"range": f"{col[head]}{row_of[r['日']]}", "values": [[r[key]]]})
-
-    # 率の列は【毎回入れ直す】。
-    # ★2026-09-10：最初は「空いとる所だけ」にしとった。★それやと列を組み替えた時に
-    #   直らん。列を消すとSheetsが中身をひとつ隣へ寄せるんで、式やった所に
-    #   【古い数値】が残る。空やないから飛ばされて、診断率が2200%のまま居座った。
-    #   ★★率の列の中身はこの道具が決めるもんや。毎回上書きするのが筋。
-    #     見出しから分子と分母を引くんで、列が動いても正しい式になる。
+    # 率の列は毎回入れ直す。列を組み替えた時に古い数値が残るのを直せんくなるため
     for head, (num, den) in RATE_COLS.items():
-        if head not in col:
-            continue
         for r in rows:
             n = row_of[r["日"]]
             reqs.append({"range": f"{col[head]}{n}",
@@ -252,8 +346,23 @@ def write(sh, rows: list[dict], dry: bool) -> None:
         print(f"[report] --dry-run：{len(reqs)}セル書く予定（新しい行 {added or 'なし'}）")
         return
     ws.batch_update(reqs, value_input_option="USER_ENTERED")
+    for head, fmt in FORMATS.items():
+        ws.format(f"{col[head]}{FIRST_ROW}:{col[head]}{hi}", fmt)
     print(f"[report] {len(rows)}日ぶん・{len(reqs)}セル書いた"
           f"（行 {lo}〜{hi}、新しい行 {added or 'なし'}）")
+
+
+def write_legend(sh, dry: bool) -> None:
+    """指標の意味を別タブに置く。数字だけ見て読み違えんように。"""
+    if dry:
+        return
+    try:
+        ws = sh.worksheet(LEGEND_TAB)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=LEGEND_TAB, rows=len(LEGEND) + 10, cols=4)
+    ws.update(range_name="A1", values=LEGEND)
+    ws.format("A1:D1", {"textFormat": {"bold": True}})
+    print(f"[report] 「{LEGEND_TAB}」タブを更新した")
 
 
 def snapshot_followers(sh, dry: bool) -> None:
@@ -312,15 +421,18 @@ def main() -> int:
 
     rows = collect(d_from, d_to)
     print(f"\n期間 {d_from} 〜 {d_to}")
-    print("日付        投稿 表示回数  コメ  診断  追加 ブロ オファー 購入   売上")
+    print("日付        投稿 表示回数 1本 コメ 診断 追加 ｵﾌｧｰ 購入 ﾌﾞﾛｯｸ  ｺﾎｰﾄ売上  当日売上 確定")
     for r in rows:
-        print(f"{r['日']} {r['ポスト数']:4d} {r['表示']:8,d} {r['コメ']:5d} {r['診断']:5d} "
-              f"{r['追加']:5d} {r['ブロック']:4d} {r['オファー']:7d} {r['購入']:4d} {r['売上']:8,d}")
+        per = r["表示"] // r["ポスト数"] if r["ポスト数"] else 0
+        print(f"{r['日']} {r['ポスト数']:4d} {r['表示']:8,d} {per:4d} {r['コメ']:4d} {r['診断']:4d} "
+              f"{r['追加']:4d} {r['オファー']:4d} {r['購入']:4d} {r['ブロック']:5d} "
+              f"{r['コホート売上']:9,d} {r['当日売上']:9,d}  {r['確定']}")
     print()
 
     gc = gspread.authorize(Credentials.from_service_account_info(_creds_info(), scopes=SCOPES))
     sh = gc.open_by_key(key)
     write(sh, rows, a.dry_run)
+    write_legend(sh, a.dry_run)
     snapshot_followers(sh, a.dry_run)
     return 0
 
