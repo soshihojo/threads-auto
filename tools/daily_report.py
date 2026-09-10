@@ -134,8 +134,14 @@ def collect(d_from: str, d_to: str) -> list[dict]:
         except (TypeError, ValueError):
             pass
 
-    com = Counter(str(r.get("seen_at"))[:10] for r in ss._records("processed_replies")
-                  if ok(str(r.get("seen_at"))[:10]))
+    # ★コメントは【書かれた本当の時刻】で数える。posted_at が無い古い行だけ seen_at に落とす。
+    #   seen_at は巡回が見つけた時刻やから、巡回が止まった日は翌日へ付け替わる。
+    #   実例：8/10は巡回が3コマしか動かずコメント9件、翌8/11の朝5時に20件まとめて拾って121件。
+    com = Counter()
+    for r in ss._records("processed_replies"):
+        d = (str(r.get("posted_at") or "") or str(r.get("seen_at") or ""))[:10]
+        if ok(d):
+            com[d] += 1
 
     ev = defaultdict(Counter)
     for r in ss._records("web_events"):

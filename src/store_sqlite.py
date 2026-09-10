@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS processed_replies (
     post_id    TEXT,
     username   TEXT,
     text       TEXT,
-    seen_at    TEXT DEFAULT CURRENT_TIMESTAMP
+    seen_at    TEXT DEFAULT CURRENT_TIMESTAMP,
+    posted_at  TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS draft_replies (
     reply_id   TEXT PRIMARY KEY,
@@ -180,11 +181,17 @@ def is_reply_seen(reply_id: str) -> bool:
         return c.execute("SELECT 1 FROM processed_replies WHERE reply_id=?", (reply_id,)).fetchone() is not None
 
 
-def mark_reply_seen(reply_id: str, post_id: str, username: str, text: str) -> None:
+def mark_reply_seen(reply_id: str, post_id: str, username: str, text: str,
+                    posted_at: str = "") -> None:
+    """posted_at はコメントが書かれた本当の時刻（sheets側と同じ役目）。"""
     with conn() as c:
+        cols = {r[1] for r in c.execute("PRAGMA table_info(processed_replies)")}
+        if "posted_at" not in cols:      # 既存のDBに後から足す
+            c.execute("ALTER TABLE processed_replies ADD COLUMN posted_at TEXT DEFAULT ''")
         c.execute(
-            "INSERT OR IGNORE INTO processed_replies(reply_id, post_id, username, text) VALUES (?,?,?,?)",
-            (reply_id, post_id, username, text),
+            "INSERT OR IGNORE INTO processed_replies(reply_id, post_id, username, text, posted_at)"
+            " VALUES (?,?,?,?,?)",
+            (reply_id, post_id, username, text, str(posted_at or "")),
         )
 
 

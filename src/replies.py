@@ -263,7 +263,8 @@ def process_replies(client: ThreadsClient) -> dict:
             if not rid or store.is_reply_seen(rid):
                 continue
             if ruser and my_username and ruser == my_username:
-                store.mark_reply_seen(rid, post_id, ruser, rtext)  # 自分の返信は無視
+                store.mark_reply_seen(rid, post_id, ruser, rtext,
+                                      r.get("timestamp") or "")  # 自分の返信は無視
                 continue
             pending.append((r, post_id, permalink))
 
@@ -301,7 +302,8 @@ def process_replies(client: ThreadsClient) -> dict:
         rtext = r.get("text", "") or ""
         ruser = r.get("username", "") or ""
 
-        store.mark_reply_seen(rid, post_id, ruser, rtext)
+        # ★APIのtimestamp＝コメントが書かれた本当の時刻。巡回の遅れに左右されん
+        store.mark_reply_seen(rid, post_id, ruser, rtext, r.get("timestamp") or "")
         stats["new_replies"] += 1
 
         # --- リード検知 ---

@@ -45,7 +45,7 @@ def _col(idx0: int) -> str:
 TABLES = {
     "ops_events": ["id", "user_id", "kind", "created_at", "payload"],
     "posts": ["media_id", "text", "profile", "created_at", "views", "likes", "replies", "insights_at"],
-    "processed_replies": ["reply_id", "post_id", "username", "text", "seen_at"],
+    "processed_replies": ["reply_id", "post_id", "username", "text", "seen_at", "posted_at"],
     "draft_replies": ["reply_id", "post_id", "username", "in_text", "draft_text", "status", "created_at", "sent_at"],
     "leads": ["reply_id", "post_id", "username", "text", "keyword", "notified", "created_at"],
     # ★2026-08-31：末尾に account を足した。Threadsを二本まわすため。
@@ -156,6 +156,12 @@ def _ws(name: str):
     existing = _api(ws.get, hdr_rng)
     if not existing or not any(existing[0]):
         _api(ws.update, range_name=f"{_col(0)}{HEADER_ROW}", values=[headers])
+    elif len(existing[0]) < len(headers):
+        # ★2026-09-10：列を後から足した時に、見出しだけ空のまま残る問題。
+        #   _append は位置で書くんで中身は正しい列に入るが、見出しが無いと
+        #   人が開いた時に何の列か分からん。足りん分だけ書き足す。
+        n = len(existing[0])
+        _api(ws.update, range_name=f"{_col(n)}{HEADER_ROW}", values=[headers[n:]])
     return ws
 
 
@@ -275,11 +281,20 @@ def is_reply_seen(reply_id: str) -> bool:
     return _find_row("processed_replies", "reply_id", reply_id) is not None
 
 
-def mark_reply_seen(reply_id: str, post_id: str, username: str, text: str) -> None:
+def mark_reply_seen(reply_id: str, post_id: str, username: str, text: str,
+                    posted_at: str = "") -> None:
+    """★posted_at は【コメントが書かれた本当の時刻】（Threads APIのtimestamp）。
+
+    seen_at は「巡回が見つけた時刻」やから、巡回が止まった日はコメントが翌日に
+    付け替わる。実例：8/10は巡回が3コマしか動かず、コメント9件しか記録されてへんのに
+    返信は26件送っとった。翌8/11の朝5時に20件まとめて拾って、8/11が121件に膨らんだ。
+    ★日別の集計はこっちを使う（2026-09-10）。
+    """
     if is_reply_seen(reply_id):
         return
     _append("processed_replies", {"reply_id": reply_id, "post_id": post_id,
-                                  "username": username, "text": text, "seen_at": _now()})
+                                  "username": username, "text": text,
+                                  "seen_at": _now(), "posted_at": str(posted_at or "")})
 
 
 def unmark_reply_seen(reply_id: str) -> None:
