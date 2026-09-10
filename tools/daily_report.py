@@ -20,10 +20,14 @@
 　　実例：8/9の深夜に41本の連投があって、その41本は削除済みでAPIが404を返す。
 　　本数だけ数えると1本あたり表示回数が172まで落ちて、実態と違う数字になる。
 
-★フォロー数（E列）
+★列は固定で持たん。2行目の見出しを読んで書き込む列を決める。
+　　店主が列を足したり消したりした翌日に、黙って隣の列へ書き込む事故を防ぐため。
+　　率の列（コメント率・診断率など）は【空いとる所だけ】式を入れる。手で直した式は触らん。
+
+★フォロワー総数
 　　Threads APIの followers_count は【総数しか返さん】。since/until を付けても値が変わらん。
-　　せやから走るたびに総数を「_フォロワー」タブへ記録して、前日との差で日別の増加を出す。
-　　★記録が2日ぶん貯まるまでE列は空のまま。過去に手で入れた値は上書きせん。
+　　日別の増加を出す道は「毎日の総数をひかえて差を取る」以外に無いんで、
+　　本表に列が無い今も「_フォロワー」タブへ記録だけ残す。後で列を足せる。
 """
 from __future__ import annotations
 import argparse
@@ -36,6 +40,7 @@ from pathlib import Path
 
 import gspread
 from google.oauth2.service_account import Credentials
+from gspread.utils import rowcol_to_a1
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src import store_sheets as ss                                    # noqa: E402
@@ -48,12 +53,20 @@ from tools.uriage import (KANTEI, OFFER_MARKS, SHIOMI, _shiomi_names,  # noqa: E
 JST = timezone(timedelta(hours=9))
 FOLLOWER_TAB = "_フォロワー"
 HEADER_ROW, FIRST_ROW = 2, 3
-# 列の割り当て。数式の列（G/J/L/N/P）はここに入れん＝値で塗り潰さん
-COLS = {"B": "日", "C": "ポスト数", "D": "表示", "F": "コメ", "H": "診断",
-        "I": "追加", "K": "ブロック", "M": "オファー", "O": "購入", "Q": "売上"}
-FORMULAS = {"G": '=IFERROR(F{r}/D{r},"-")', "J": '=IFERROR(I{r}/H{r},"-")',
-            "L": '=IFERROR(K{r}/I{r},"-")', "N": '=IFERROR(M{r}/I{r},"-")',
-            "P": '=IFERROR(O{r}/M{r},"-")'}
+# ★2026-09-10：列は固定で持たん。【2行目の見出しを読んで列を決める】。
+#   店主が列を足したり消したりした翌日に、黙って隣の列へ書き込む事故を防ぐため。
+#   実際この日、フォロー数を消して診断率を足す組み替えがあった。
+DATA_COLS = {"日": "日", "ポスト数": "ポスト数", "ポスト表示回数": "表示",
+             "コメント数": "コメ", "診断完了数": "診断", "LINE追加数": "追加",
+             "ブロック数": "ブロック", "オファー到達数": "オファー",
+             "購入数": "購入", "売上": "売上"}
+# 率の列は（分子の見出し, 分母の見出し）で持つ。列がずれても式が壊れん
+RATE_COLS = {"コメント率": ("コメント数", "ポスト表示回数"),
+             "診断率": ("診断完了数", "コメント数"),
+             "LINE追加率": ("LINE追加数", "診断完了数"),
+             "ブロック率": ("ブロック数", "LINE追加数"),
+             "オファー到達率": ("オファー到達数", "LINE追加数"),
+             "購入率": ("購入数", "オファー到達数")}
 # insights_at が空のままこの日数を過ぎたら「もう無い投稿」とみなす
 GRACE_DAYS = 2
 
@@ -158,41 +171,6 @@ def collect(d_from: str, d_to: str) -> list[dict]:
     return out
 
 
-# ---------------------------------------------------------------- フォロワー
-def follower_gains(sh, dry: bool) -> dict[str, int]:
-    """総数を今日ぶん記録して、日別の増加を返す。{日付: 増えた数}"""
-    try:
-        ws = sh.worksheet(FOLLOWER_TAB)
-    except gspread.WorksheetNotFound:
-        if dry:
-            return {}
-        ws = sh.add_worksheet(title=FOLLOWER_TAB, rows=400, cols=2)
-        ws.update(range_name="A1", values=[["記録日", "フォロワー総数"]])
-    snaps = {str(r[0])[:10]: int(r[1]) for r in ws.get("A2:B") if len(r) >= 2 and str(r[1]).strip()}
-
-    today = datetime.now(JST).date().isoformat()
-    if today not in snaps:
-        try:
-            c = ThreadsClient(env("THREADS_ACCESS_TOKEN", required=True), env("THREADS_USER_ID"))
-            n = int(c._get(f"{c.user_id}/threads_insights",
-                           {"metric": "followers_count"})["data"][0]["total_value"]["value"])
-            snaps[today] = n
-            if not dry:
-                ws.append_row([today, n], value_input_option="USER_ENTERED")
-            print(f"[report] フォロワー総数 {n} を記録した")
-        except Exception as e:
-            print(f"[report] フォロワー総数が取れん: {str(e)[:110]}")
-
-    # 記録日Dの総数は「D-1日の終わり」の値。せやから D-1日の増加 = snap(D) - snap(D-1)
-    gains = {}
-    for d, n in snaps.items():
-        prev = (date.fromisoformat(d) - timedelta(days=1)).isoformat()
-        if prev in snaps:
-            gains[prev] = n - snaps[prev]
-    return gains
-
-
-# ---------------------------------------------------------------- 書き込み
 def _as_date(v) -> str:
     """B列の値を YYYY-MM-DD に均す。
 
@@ -207,49 +185,62 @@ def _as_date(v) -> str:
     return f"{m[1]}-{int(m[2]):02d}-{int(m[3]):02d}" if m else ""
 
 
-def write(sh, rows: list[dict], gains: dict[str, int], dry: bool) -> None:
+def _columns(ws) -> dict[str, str]:
+    """2行目の見出しを読んで {見出し: 列記号} を返す。"""
+    head = ws.row_values(HEADER_ROW)
+    out = {}
+    for i, name in enumerate(head):
+        name = str(name).strip()
+        if name:
+            out.setdefault(name, rowcol_to_a1(1, i + 1).rstrip("1"))
+    missing = [h for h in DATA_COLS if h not in out]
+    if missing:
+        raise SystemExit(f"❌ 2行目に見出しが見つからん: {missing}\n"
+                         f"   見つかった見出し: {list(out)}")
+    return out
+
+
+def write(sh, rows: list[dict], dry: bool) -> None:
     ws = sh.sheet1
-    have = ws.get(f"B{FIRST_ROW}:B", value_render_option="UNFORMATTED_VALUE")
-    row_of = {}
+    col = _columns(ws)
+    dcol = col["日"]
+
+    have = ws.get(f"{dcol}{FIRST_ROW}:{dcol}", value_render_option="UNFORMATTED_VALUE")
+    row_of, last = {}, FIRST_ROW - 1
     for i, v in enumerate(have):
         d = _as_date(v[0]) if v else ""
         if d:
             row_of[d] = FIRST_ROW + i
-    nxt = FIRST_ROW + len(have)
+            last = FIRST_ROW + i
+    nxt = last + 1
 
-    reqs, added = [], []
+    added = []
     for r in rows:
-        d = r["日"]
-        if d not in row_of:
-            row_of[d] = nxt
-            added.append(d)
+        if r["日"] not in row_of:
+            row_of[r["日"]] = nxt
+            added.append(r["日"])
             nxt += 1
     lines = sorted(row_of[r["日"]] for r in rows)
     lo, hi = lines[0], lines[-1]
 
-    # 数式は「空いとる所だけ」入れる。店主が式を直しとったら触らん
-    cur_f = {c: ws.get(f"{c}{lo}:{c}{hi}", value_render_option="FORMULA") for c in FORMULAS}
-    # フォロー数も「値が出せる日だけ」入れる。手で入れた値を空で潰さん
-    cur_e = ws.get(f"E{lo}:E{hi}", value_render_option="UNFORMATTED_VALUE")
+    reqs = []
+    for head, key in DATA_COLS.items():
+        for r in rows:
+            reqs.append({"range": f"{col[head]}{row_of[r['日']]}", "values": [[r[key]]]})
 
-    for col, key in COLS.items():
-        for r in rows:
-            reqs.append({"range": f"{col}{row_of[r['日']]}", "values": [[r[key]]]})
-    for col, tpl in FORMULAS.items():
-        for r in rows:
-            i = row_of[r["日"]] - lo
-            got = cur_f[col][i] if i < len(cur_f[col]) else []
-            if not (got and str(got[0]).strip()):
-                reqs.append({"range": f"{col}{row_of[r['日']]}",
-                             "values": [[tpl.format(r=row_of[r["日"]])]]})
-    for r in rows:
-        g = gains.get(r["日"])
-        if g is None:
+    # 率の列は【毎回入れ直す】。
+    # ★2026-09-10：最初は「空いとる所だけ」にしとった。★それやと列を組み替えた時に
+    #   直らん。列を消すとSheetsが中身をひとつ隣へ寄せるんで、式やった所に
+    #   【古い数値】が残る。空やないから飛ばされて、診断率が2200%のまま居座った。
+    #   ★★率の列の中身はこの道具が決めるもんや。毎回上書きするのが筋。
+    #     見出しから分子と分母を引くんで、列が動いても正しい式になる。
+    for head, (num, den) in RATE_COLS.items():
+        if head not in col:
             continue
-        i = row_of[r["日"]] - lo
-        got = cur_e[i] if i < len(cur_e) else []
-        if not (got and str(got[0]).strip()):
-            reqs.append({"range": f"E{row_of[r['日']]}", "values": [[g]]})
+        for r in rows:
+            n = row_of[r["日"]]
+            reqs.append({"range": f"{col[head]}{n}",
+                         "values": [[f'=IFERROR({col[num]}{n}/{col[den]}{n},"-")']]})
 
     if dry:
         print(f"[report] --dry-run：{len(reqs)}セル書く予定（新しい行 {added or 'なし'}）")
@@ -257,6 +248,37 @@ def write(sh, rows: list[dict], gains: dict[str, int], dry: bool) -> None:
     ws.batch_update(reqs, value_input_option="USER_ENTERED")
     print(f"[report] {len(rows)}日ぶん・{len(reqs)}セル書いた"
           f"（行 {lo}〜{hi}、新しい行 {added or 'なし'}）")
+
+
+def snapshot_followers(sh, dry: bool) -> None:
+    """フォロワー総数を毎日ひかえておく。
+
+    ★Threads APIの followers_count は【総数しか返さん】。since/until を付けても
+      値が動かん（4日ぶん試して確認済み）。せやから日別の増加は、
+      毎日の総数をひかえて差を取る以外に出しようがない。
+      ★今は本表にフォロー数の列は無いが、記録だけは残す。
+        後から列を足した時に、その日から先は差分で埋められるようにするため。
+    """
+    today = datetime.now(JST).date().isoformat()
+    try:
+        ws = sh.worksheet(FOLLOWER_TAB)
+    except gspread.WorksheetNotFound:
+        if dry:
+            return
+        ws = sh.add_worksheet(title=FOLLOWER_TAB, rows=400, cols=2)
+        ws.update(range_name="A1", values=[["記録日", "フォロワー総数"]])
+    if any(str(r[0])[:10] == today for r in ws.get("A2:B") if r):
+        return
+    try:
+        c = ThreadsClient(env("THREADS_ACCESS_TOKEN", required=True), env("THREADS_USER_ID"))
+        n = int(c._get(f"{c.user_id}/threads_insights",
+                       {"metric": "followers_count"})["data"][0]["total_value"]["value"])
+    except Exception as e:
+        print(f"[report] フォロワー総数が取れん: {str(e)[:110]}")
+        return
+    if not dry:
+        ws.append_row([today, n], value_input_option="USER_ENTERED")
+    print(f"[report] フォロワー総数 {n} を記録した")
 
 
 def main() -> int:
@@ -292,7 +314,8 @@ def main() -> int:
 
     gc = gspread.authorize(Credentials.from_service_account_info(_creds_info(), scopes=SCOPES))
     sh = gc.open_by_key(key)
-    write(sh, rows, follower_gains(sh, a.dry_run), a.dry_run)
+    write(sh, rows, a.dry_run)
+    snapshot_followers(sh, a.dry_run)
     return 0
 
 
