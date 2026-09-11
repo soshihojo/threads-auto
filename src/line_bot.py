@@ -807,8 +807,14 @@ _ASSENT_RE = re.compile(
 
 # 「お金がない・払えない」は購入サインの正反対。ここでオファーを送ったら最悪や。
 # 金額の心配を買う意思と読み違えんように、先に弾く。
+# ★2026-09-11：「余裕」を単体で拾うんをやめた。
+#   実害：彼から来たLINEの「大変で余裕がない中でのSNSと返信が別なのは」を
+#   金の話と読んで、その人には二度と売りにいかん判定が立っとった（髙橋明香里さん）。
+#   心の余裕・時間の余裕の話の方が、うちの相談では圧倒的に多い。
+#   金の話として拾うんは、金を指す語と一緒に出た時だけにする。
 _MONEY_TROUBLE_RE = re.compile(
-    r"(?:お金|金銭|余裕|金額|予算).{0,8}(?:ない|無い|なくて|なくって|厳しい|きつい|高い|無理)"
+    r"(?:お金|金銭|金額|予算).{0,8}(?:ない|無い|なくて|なくって|厳しい|きつい|高い|無理)"
+    r"|(?:お金|金銭|金額|予算|経済的|金銭的).{0,6}余裕.{0,6}(?:ない|無い|なく|が無)"
     r"|(?:払え|出せ|買え)(?:ん|ない|へん|ません)"
     r"|(?:高くて|高いので|高いから)"
 )
@@ -1483,7 +1489,10 @@ def _intent_text(text: str) -> str:
 
 
 def _offer_declined(text: str) -> bool:
-    return bool(_MONEY_TROUBLE_RE.search(text) or _PRICE_DECLINE_RE.search(text)
+    """はっきり断っとるか。★2026-09-11：ここから _MONEY_TROUBLE_RE を外した。
+    「お金がない」は断りやのうて事情や。案内を見てから本人が決めたらええ。
+    値段を見て引いとる言い方（_PRICE_DECLINE_RE）は今まで通り断りとして扱う。"""
+    return bool(_PRICE_DECLINE_RE.search(text)
                 or re.search(r"(?:今は|まだ|今回は).{0,12}(?:不要|結構|いいです|大丈夫|考え|迷|決めていません)"
                              r"|(?:鑑定|案内|申し込|お願い|購入|視て|見て).{0,16}"
                              r"(?:不要|いらない|やめ|しません|しない|望んでいない|言っていない|言ってません|言っていません)"
@@ -1514,9 +1523,9 @@ def detect_signal(text: str, history: list[dict] | None = None) -> str | None:
     # ★PR #9/#10 由来。引用・伝聞・否定を落としてから意思を見る（捏造よけ）
     clean = _intent_text(text)
     if _offer_declined(clean):
-        return None                       # 「お金がない」「高すぎる」は買う意思の逆
-    if _MONEY_TROUBLE_RE.search(clean):
-        return None
+        return None                       # 「高すぎる」等、値段を見て引いとる言い方
+    # ★2026-09-11：_MONEY_TROUBLE_RE でここを落とすんはやめた。
+    #   金が苦しい話をしながら「視てほしい」と言う人はおる。両立する。
     # ★2026-08-10：値段の語が入っとるだけで購入サインにしとったせいで、
     #   「有料はちょっと厳しいです」を購入意思と読んで撃っとった。値段に触れつつ
     #   引いとる言い方は、買う気の逆や。語彙判定より先に弾く
@@ -2463,9 +2472,16 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
             store.upsert_line_user(user_id, bot="hold")
             return
         # 回数は一度だけ案内の希望を尋ねるきっかけ。商品送付の同意には使わない。
+        # ★2026-09-11：金の話が出た人でも【オファーまでは出す】ことにした（店主の判断）。
+        #   前は _money_trouble が履歴を全部見て、一度でも当たったら
+        #   その会話では二度と売りにいかんかった。★これが誤爆で詰まっとった。
+        #   実例：髙橋明香里さん。彼から来たLINEのスクショの中の
+        #   「大変で余裕がない中でのSNSと返信が別なのは」——彼の【心の】余裕の話や。
+        #   それを金の話と読んで、19往復しても二択が一度も出んかった。
+        #   ★止めるんは「はっきり断っとる時」だけにする（_offer_declined）。
+        #     金が苦しいかどうかは、本人が案内を見てから決めたらええ。
         if (not _asked_deeper(consultation_hist)
                 and not _offer_declined(incoming)
-                and not _money_trouble(state_hist)
                 and not _offer_already_sent(user_id)):
             snd(generate_ask_deeper(user, consultation_hist, incoming))
             return
