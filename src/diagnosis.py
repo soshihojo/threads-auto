@@ -186,19 +186,37 @@ _PARROT_MIN_BLOCK = 3     # 3字以上そろった一致だけ数える
 _PARROT_MIN_LEN = 8       # 頭がこれより短い時は見ん（「せやな」等で誤検知する）
 
 
+# ★2026-09-12：助詞を落としてから比べる。
+#   実害：佐藤由香さんへの返信が4通とも「言い直してから本題」になっとったのに、
+#   検査を全部すり抜けた。「話しをしてる」→「話はしてるけど」のように
+#   助詞が一文字挟まるだけで一致の塊が切れて、一致率0.50（基準0.60）で逃げとった。
+_PARROT_DROP = re.compile(r"[はがをにへとものやでねよなかさぞ]|けど|けれど|から|ので|んや|です|ます|だと|思う")
+
+
+def _squash(s: str) -> str:
+    """助詞と語尾を落として、言い直しを見抜けるようにする。"""
+    return _PARROT_DROP.sub("", re.sub(r"\s", "", s))
+
+
 def parrot_head(incoming: str, text: str) -> str | None:
     """返信の頭が、相手の発言の言い直しになっとったら、拾うた一致を返す。"""
     import difflib
     if not incoming or not text:
         return None
-    head = re.sub(r"\s", "", re.split(r"[。、！？!?\n]", text.strip(), maxsplit=1)[0])
-    src = re.sub(r"\s", "", incoming)
-    if len(head) < _PARROT_MIN_LEN or len(src) < _PARROT_MIN_LEN:
+    # ★短い前置き（「その一言、」「ほんなら、」）を置いて頭をずらす逃げ方がある。
+    #   継いで一つにすると薄まって逆に拾えんくなるんで、【句ごとに別々に】見る。
+    src = _squash(incoming)
+    if len(src) < _PARROT_MIN_LEN:
         return None
-    blocks = difflib.SequenceMatcher(None, head, src).get_matching_blocks()
-    hits = [head[b.a:b.a + b.size] for b in blocks if b.size >= _PARROT_MIN_BLOCK]
-    cover = sum(len(h) for h in hits) / len(head)
-    return "／".join(hits) if cover >= _PARROT_COVER else None
+    for q in re.split(r"[。、！？!?\n]", text.strip())[:3]:
+        head = _squash(q)
+        if len(head) < _PARROT_MIN_LEN:
+            continue                      # 「ほんなら」みたいな前置きは飛ばして次の句を見る
+        blocks = difflib.SequenceMatcher(None, head, src).get_matching_blocks()
+        hits = [head[b.a:b.a + b.size] for b in blocks if b.size >= _PARROT_MIN_BLOCK]
+        if sum(len(h) for h in hits) / len(head) >= _PARROT_COVER:
+            return "／".join(hits)
+    return None
 
 
 # ★★★2026-09-03：文面の検品を【ここ】に一本化した。
