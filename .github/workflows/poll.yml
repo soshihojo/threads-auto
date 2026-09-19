@@ -29,7 +29,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        account: [a, b]
+        # ★2026-09-20：椿さん（b）の巡回を止めた（店主の指示）。
+        #   ★理由は二つ。①bのアカウントは削除申請済みで、10/9に確定する。
+        #   ②Sheetsの読み取り上限（60回/分・サービスアカウント共通）を、
+        #     LINEボット・予約投稿・巡回で食い合うて429が出とる。
+        #     実害：9/19 23:48の poll (a) と、21:48の replies (b) が429で落ちた。
+        #   ★bを外すと、巡回の読み取りが半分になって、LINEボット側の余裕が増える。
+        #   ★戻す時は [a, b] に戻すだけでええ。
+        account: [a]
     concurrency:
       group: threads-poll-${{ matrix.account }}
       cancel-in-progress: false

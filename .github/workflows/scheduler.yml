@@ -78,7 +78,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        account: [a, b]
+        # ★2026-09-20：椿さん（b）の返信巡回を止めた（店主の指示）。poll.yml も同じく [a] にした。
+        #   ★片方だけ外しても、もう片方の便から同じ仕事が回り続けるんで、二つとも外す。
+        #   ★run-due（予約投稿）は b も動かしたまま。止めるんは返信巡回だけや。
+        account: [a]
     concurrency:
       group: threads-poll-${{ matrix.account }}   # ★poll.yml と同じ名前にすること
       cancel-in-progress: false
