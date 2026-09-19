@@ -402,30 +402,43 @@ def _route_offer(user_id, user, history, incoming, snd):
 
 def _route_offer_locked(user_id, user, history, incoming, snd):
     """Send the restored legacy two-product offer with existing delivery guards."""
+    # ★2026-09-20：ここの出口はどれも黙って引き返しとった。
+    #   実害（美寿樹さん）：「みてほしい」にオファーが出んまま、スイープが5分おきに
+    #   「対応した」と数え続けた。どこで止まったんか、ログから一切分からんかった。
+    #   ★せやから、引き返す時は必ず理由を一行残す。
     if _is_minor(user) or _member_status(user) != "free":
+        print(f"[offer] 未成年か会員（判定不能を含む）なので hold: {user_id}")
         store.upsert_line_user(user_id, bot="hold")
         return
     if _offer_already_sent(user_id):
+        print(f"[offer] オファー済みなので hold: {user_id}")
         store.upsert_line_user(user_id, bot="hold")
         return
     fresh = store.recent_line_chats(user_id, limit=200)
     if not fresh or fresh[-1].get("role") != "user" or fresh[-1].get("text") != incoming:
+        print(f"[offer] 生成前の読み直しで最新発言が変わっとった: {user_id}")
         return
     history = _since_refollow(fresh, _refollow_ts(user.get("note")))
+    print(f"[offer] オファーを生成する: {user_id}")
     text = generate_offer(user, history, incoming)
     # Generation can take time. Respect owner holds and newly arrived messages.
     current = store.get_line_user(user_id)
     if not current or (current.get("bot") or "on") != "on":
+        print(f"[offer] 生成中に hold/off になったので送らん: {user_id}")
         return
     latest = store.recent_line_chats(user_id, limit=200)
     last = next((h.get("text") for h in reversed(latest) if h.get("role") == "user"), None)
     if (not latest or latest[-1].get("role") != "user"
             or last != incoming or _offer_already_sent(user_id)):
+        print(f"[offer] 生成後の読み直しで追い越し／オファー済み: {user_id}")
         return
     if snd(text):
+        print(f"[offer] オファーを送った: {user_id}")
         store.upsert_line_user(user_id, bot="hold")
         quality.record(user_id, "offer", product="compare")
         _send_offer_after(user_id, snd)
+    else:
+        print(f"[offer] オファーの送信に失敗した: {user_id}")
 
 
 # 購入サイン（＝買う瞬間。検知したら自動オファー→hold）
@@ -1338,6 +1351,9 @@ def reply_text(reply_token: str, text: str) -> bool:
     r = requests.post(f"{LINE_API}/message/reply", headers=_headers(),
                       data=json.dumps({"replyToken": reply_token, "messages": msgs}),
                       timeout=15)
+    # ★2026-09-20：LINEに弾かれても何も残さん作りやった。理由が分からんと直せん
+    if not r.ok:
+        print(f"[line_bot] reply がLINEに弾かれた: {getattr(r, 'status_code', '?')} {str(getattr(r, 'text', ''))[:200]}")
     return r.ok
 
 
@@ -1353,6 +1369,8 @@ def push_text(user_id: str, text: str) -> bool:
     #     客には一通しか届いてへんのに、履歴に同じ本文が二行入る。
     #     ★★ダッシュボードも会員相談も履歴を数えとるんで、そこがぜんぶ狂う。
     #   ★★★記録は「送信の一番外側」で一回だけ。ここは中身の送信だけに徹する。
+    if not r.ok:
+        print(f"[line_bot] push がLINEに弾かれた: {user_id} {getattr(r, 'status_code', '?')} {str(getattr(r, 'text', ''))[:200]}")
     return r.ok
 
 
@@ -2398,6 +2416,8 @@ def _auto_reply(user_id, user, incoming, reply_token="", **kwargs):
         if (not current or (current.get("bot") or "on") != "on"
                 or not recent or recent[-1].get("role") != "user"
                 or recent[-1].get("text") != incoming):
+            print(f"[line_bot] 返信前の読み直しで対象外（bot={(current or {}).get('bot')}・"
+                  f"最新={recent[-1].get('role') if recent else None}）: {user_id}")
             return
         return _auto_reply_locked(user_id, current, incoming, reply_token, **kwargs)
 
@@ -2466,6 +2486,8 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
         print(f"[line_bot] まだ早い（発言{_user_turns(consultation_hist)}回・本人からの依頼なし）"
               f"ので売らずに会話を続ける: {user_id}")
         sig = None
+    if sig in ("purchase", "purchase_soft"):
+        print(f"[line_bot] 購入サイン={sig}・オファー可={allow_offer}・無料上限={over_limit}: {user_id}")
     if sig in ("purchase", "purchase_soft") and allow_offer:
         if _is_minor(user):
             # 未成年に有料オファーは自動送付しない（未成年者契約の取消リスク＋倫理）。
