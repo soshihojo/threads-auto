@@ -236,8 +236,15 @@ def test_actual_requests_and_product_questions_remain_available(text):
 
 
 @pytest.mark.parametrize('count', [1, 3])
-@pytest.mark.parametrize('incoming', ['どうしたらいいですか', '視てほしいとは言っていません'])
+@pytest.mark.parametrize('incoming', ['視てほしいとは言っていません', '今はいいです'])
 def test_no_automatic_offer_after_questions(monkeypatch, count, incoming):
+    """はっきり断っとる人には、上限を越えてもオファーを出さん。
+
+    ★2026-09-20：ここは前「二択を出したあとは、誰にもオファーを出さん」いう
+      決まりやった。店主の判断で「二択のあと三通以内にオファーまで行く」に変えたんで、
+      この約束が守るんは【はっきり断っとる人】だけになった。
+      迷うとるだけの人（「どうしたらいいですか」）は、下のテストの通りオファーまで行く。
+    """
     h = [message('assistant', '通常の返事', '2020-03-01') for _ in range(20)]
     h += [message('assistant', b.ASK_DEEPER, '2020-03-01') for _ in range(count)]
     h += [message('user', incoming, '2020-03-01')]
@@ -310,3 +317,46 @@ def test_choosing_the_first_option_is_still_not_a_yes(incoming):
     """前者を【選んだ】返事は、今までどおりオファーに繋げん。"""
     history = [message('assistant', b.ASK_DEEPER, '2020-03-01T10:00:00')]
     assert b.detect_signal(incoming, history) != 'purchase'
+
+
+def test_offer_arrives_within_three_messages_of_the_choice(monkeypatch):
+    """★2026-09-20（店主の判断）：二択→普通の返信→オファー。三通以内で届く。
+
+    実害（まりなさん）：二択の答えを読み違えたあと、23往復してもオファーが出んかった。
+    二択を出したら、そこから三通以内に必ずオファーまで行く形にする。
+    """
+    history = [message('assistant', '通常の返事', '2020-03-01') for _ in range(20)]
+    history += [message('assistant', b.ASK_DEEPER, '2020-03-01'),
+                message('assistant', '二択のあとの普通の返事', '2020-03-01'),
+                message('user', 'どうしたらいいですか', '2020-03-01')]
+    state, routed = {'bot': 'on', 'note': ''}, []
+    monkeypatch.setattr(b.store, 'get_line_user', lambda *a: dict(state))
+    monkeypatch.setattr(b.store, 'recent_line_chats', lambda *a, **k: list(history))
+    monkeypatch.setattr(b.store, 'upsert_line_user', lambda uid, **k: state.update(k))
+    monkeypatch.setattr(b, '_handle_code', lambda *a: False)
+    monkeypatch.setattr(b, '_diag_count', lambda *a: 1)
+    monkeypatch.setattr(b, '_send', lambda uid, token, text: True)
+    monkeypatch.setattr(b, '_route_offer', lambda *a: routed.append('offer'))
+    monkeypatch.setattr(b, 'generate_ask_deeper', lambda *a: pytest.fail('二択は済んどる'))
+    monkeypatch.setattr(b, 'generate_nurture', lambda *a, **k: pytest.fail('オファーの番や'))
+    b._auto_reply('synthetic', state, 'どうしたらいいですか', live=False)
+    assert routed == ['offer']
+
+
+def test_minor_never_gets_the_offer_at_the_limit(monkeypatch):
+    """未成年は、上限を越えても hold で止める（ここは変えてへん）。"""
+    history = [message('assistant', '通常の返事', '2020-03-01') for _ in range(20)]
+    history += [message('assistant', b.ASK_DEEPER, '2020-03-01'),
+                message('assistant', '二択のあとの普通の返事', '2020-03-01'),
+                message('user', 'どうしたらいいですか', '2020-03-01')]
+    state = {'bot': 'on', 'note': '', 'me_birth': '2012-01-01'}
+    monkeypatch.setattr(b.store, 'get_line_user', lambda *a: dict(state))
+    monkeypatch.setattr(b.store, 'recent_line_chats', lambda *a, **k: list(history))
+    monkeypatch.setattr(b.store, 'upsert_line_user', lambda uid, **k: state.update(k))
+    monkeypatch.setattr(b, '_handle_code', lambda *a: False)
+    monkeypatch.setattr(b, '_diag_count', lambda *a: 1)
+    monkeypatch.setattr(b, '_send', lambda uid, token, text: True)
+    monkeypatch.setattr(b, '_route_offer', lambda *a: pytest.fail('未成年に売らん'))
+    monkeypatch.setattr(b, 'generate_nurture', lambda *a, **k: '返事')
+    b._auto_reply('synthetic', state, 'どうしたらいいですか', live=False)
+    assert state['bot'] == 'hold'

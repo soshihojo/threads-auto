@@ -180,12 +180,16 @@ def test_only_customer_intent_can_trigger_router(monkeypatch,flow,path):
     monkeypatch.setattr(bot,'_asked_in_own_words',lambda *a:True)
     monkeypatch.setattr(bot,'_asked_deeper',lambda *a:True)
     monkeypatch.setattr(bot,'_ask_deeper_count',lambda *a:bot.ASK_DEEPER_MAX)
+    monkeypatch.setattr(bot,'_replies_since_ask_deeper',lambda *a:bot.REPLIES_BEFORE_OFFER)
     monkeypatch.setattr(bot,'_money_trouble',lambda *a:False)
     monkeypatch.setattr(bot,'_route_offer',lambda *a:calls.append('route'))
     monkeypatch.setattr(bot,'generate_nurture',lambda *a,**k:'あとで案内する')
     monkeypatch.setattr(bot,'_PROMISE_LATER_RE',__import__('re').compile('あとで案内'))
     bot._auto_reply('test',{},'お願いします',live=False)
-    assert calls == (['route'] if path == 'purchase' else [])
+    # ★2026-09-20（店主の判断）：上限に達した人は、二択のあと三通以内にオファーへ行く。
+    #   前は 'limit' でも売りに行かん決まりやったが、二択の答えを一度読み違えただけで
+    #   オファーの道が閉じる（まりなさん・23往復）ので、店主が方針を変えた。
+    assert calls == (['route'] if path in ('purchase', 'limit') else [])
 
 
 @pytest.mark.parametrize('answer,key',[('後者です','shiomi'),('2つ目でお願いします','shiomi'),

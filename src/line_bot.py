@@ -590,6 +590,27 @@ def _ask_deeper_count(history: list[dict]) -> int:
                and any(m in str(h.get("text", "")) for m in _ASK_DEEPER_MARKS))
 
 
+# ★★★2026-09-20（店主の判断）：二択を出したら、【三通以内】にオファーまで行く。
+#   二択（一通目）→ 普通の返信（二通目）→ オファー（三通目）、が上限や。
+#   ★それまでは「二択を一回出したら、あとは延々と相談を続ける」作りで、
+#     まりなさんは23往復してもオファーに届かんかった。
+#   ★★止めるんは今までどおり、未成年・危ない言葉・はっきり断っとる人だけや。
+REPLIES_BEFORE_OFFER = int(env("LINE_REPLIES_BEFORE_OFFER") or "1")
+
+
+def _replies_since_ask_deeper(history: list[dict]) -> int:
+    """最後の二択より後に、椿が返した普通の返信の数（診断・オファーは数えん）。"""
+    last = None
+    for i, h in enumerate(history):
+        if h.get("role") == "assistant" and any(m in str(h.get("text", "")) for m in _ASK_DEEPER_MARKS):
+            last = i
+    if last is None:
+        return 0
+    return sum(1 for h in history[last + 1:]
+               if h.get("role") == "assistant" and len(str(h.get("text", ""))) <= _DIAG_LEN
+               and not _is_offer_text(str(h.get("text", ""))))
+
+
 def _money_trouble(history: list[dict]) -> bool:
     """本人が「お金がない」と言うたか。言うた人には売りにいかん（07番の鉄則）。"""
     return any(_MONEY_TROUBLE_RE.search(str(h.get("text", "")))
@@ -2556,11 +2577,18 @@ def _auto_reply_locked(user_id: str, user: dict, incoming: str, reply_token: str
         #   ★店主の方針は「未成年と危ない言葉の人以外は、オファーまで到達させる」や。
         #   ★★ただし「回数だけを理由に商品案内を送らん」いう約束（tests/test_offer_consent.py の
         #     test_no_automatic_offer_after_questions）とぶつかる。★店主の判断待ちで、今は据え置き。
-        if (not _asked_deeper(consultation_hist)
-                and not _offer_declined(incoming)
-                and not _offer_already_sent(user_id)):
-            snd(generate_ask_deeper(user, consultation_hist, incoming))
-            return
+        if not _offer_declined(incoming) and not _offer_already_sent(user_id):
+            if not _asked_deeper(consultation_hist):
+                snd(generate_ask_deeper(user, consultation_hist, incoming))
+                return
+            # ★★★2026-09-20（店主の判断）：二択のあとは三通以内にオファーまで行く。
+            #   ここが前は「二択を出したら、あとは何もせん」やった。せやから
+            #   二択の答えを一回読み違えただけで、オファーの道が丸ごと閉じとった。
+            since = _replies_since_ask_deeper(consultation_hist)
+            if since >= REPLIES_BEFORE_OFFER:
+                print(f"[line_bot] 二択のあと{since}通返した。オファーへ進む: {user_id}")
+                _route_offer(user_id, user, state_hist, incoming, snd)
+                return
 
     transcript = consultation_hist[-13:]  # 会話プロンプトには直近だけ渡す（最後の1件=今回のメッセージ）
     text = _retry(lambda: generate_nurture(user, transcript[:-1], incoming), "返信の生成")
