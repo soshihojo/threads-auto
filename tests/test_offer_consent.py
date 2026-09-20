@@ -291,3 +291,22 @@ def test_early_explicit_request_is_not_lost_to_old_keyword_gate(monkeypatch, inc
     monkeypatch.setattr(b, 'generate_nurture', lambda *a: pytest.fail('answer explicit product request'))
     b._auto_reply('synthetic', state, incoming, live=False)
     assert len(routes) == 1
+
+
+@pytest.mark.parametrize('incoming', ['勘で動きたくはない', '勘で動きたくない',
+                                     '自分で決めたくないです', '自分の勘は信用できひん'])
+def test_refusing_the_first_option_is_a_yes(incoming):
+    """★2026-09-20（まりなさん）：二択の前者を断る返事は「視てほしい」や。
+
+    「勘で動きたくはない」は、断り語（〜たくない）が入っとるだけで、
+    中身は後者を選んどる。ここを断り扱いにして10往復以上オファーが出んかった。
+    """
+    history = [message('assistant', b.ASK_DEEPER, '2020-03-01T10:00:00')]
+    assert b.detect_signal(incoming, history) == 'purchase'
+
+
+@pytest.mark.parametrize('incoming', ['自分で動きます', '勘で動いてみます'])
+def test_choosing_the_first_option_is_still_not_a_yes(incoming):
+    """前者を【選んだ】返事は、今までどおりオファーに繋げん。"""
+    history = [message('assistant', b.ASK_DEEPER, '2020-03-01T10:00:00')]
+    assert b.detect_signal(incoming, history) != 'purchase'
