@@ -278,10 +278,49 @@ def _check_name(name: str) -> str:
     print(f"🔤 呼び名に敬称が無いんで「{n}さん」にした（2026-09-13の決まり）")
     return f"{n}さん"
 
+def _check_births(me: str, him: str, line_user: str = "") -> None:
+    """生年月日が【誰のもんか】を、書き始める前に必ず突き合わせる。
+
+    ★★★2026-09-21：ウチ（作る側）が取り違えた。のんちゃん（松浦希望さん）の潮見を、
+      別の相談者【まりなさん】の生年月日で丸ごと組んでもうた。
+      宿の土台が二人とも違うから、彼の性質も、二人の縁も、本音も、暦も、全部ちがう盤面や。
+      納品したあと、本人から「彼の誕生日は9月27日やなくて2月1日」と指摘が来て発覚した。
+      ★入力ファイルにも同じ間違いを写しとったから、ファイルと引数を突き合わせても防げん。
+      ★★防げるんは【LINEの登録と突き合わせること】だけや。せやからここで止める。
+
+    --line-user を渡したら、その人の登録生年月日と一致せん限り、先へ進ません。
+    渡さんかった時は、その生年月日が誰のもんかを画面に出す（目で見て気づけるように）。
+    """
+    from . import store
+    if line_user:
+        hit = store.get_line_user(line_user)
+        if not hit:
+            cand = [u for u in store.list_line_users()
+                    if line_user in str(u.get("display_name", ""))]
+            if len(cand) != 1:
+                raise SystemExit(f"❌ LINEで『{line_user}』が{len(cand)}人見つかった。"
+                                 "user_id で指定してくれ")
+            hit = cand[0]
+        if (str(hit.get("me_birth", "")).strip() != me.strip()
+                or str(hit.get("him_birth", "")).strip() != him.strip()):
+            raise SystemExit(
+                f"❌ 生年月日が食い違うとる。書き始めん。\n"
+                f"   LINEの『{hit.get('display_name')}』→ 本人 {hit.get('me_birth')} ／ "
+                f"彼 {hit.get('him_birth')}\n"
+                f"   渡された値　　　　→ 本人 {me} ／ 彼 {him}")
+        print(f"✅ 生年月日は LINEの『{hit.get('display_name')}』と一致しとる")
+        return
+    other = store.find_line_user_by_births(me, him)
+    who = f"『{other.get('display_name')}』" if other else "（LINEに登録なし）"
+    print(f"🔎 この生年月日（本人 {me} ／ 彼 {him}）は {who} のもんや。"
+          "★ちがう人やったら、今すぐ止めること（--line-user で止められる）")
+
+
 def cmd_kantei(args: argparse.Namespace) -> None:
     """個別鑑定（有料）: 章立て約10,000字の鑑定文を生成し、和風デザインのPDFを出力。"""
     from . import kantei
     details = Path(args.details_file).read_text(encoding="utf-8")
+    _check_births(args.me, args.him, getattr(args, 'line_user', '') or '')
     name = _check_name(args.name)
     res = kantei.make_kantei(name, args.me, args.him, details)
     print(f"→ LINE公式アプリのチャットからPDFを添付して送付: {res['pdf']}")
@@ -307,6 +346,7 @@ def cmd_shiomi(args: argparse.Namespace) -> None:
     from . import kantei, shiomi
     details = Path(args.details_file).read_text(encoding="utf-8")
 
+    _check_births(args.me, args.him, getattr(args, 'line_user', '') or '')
     name = _check_name(args.name)
     res = kantei.make_kantei(name, args.me, args.him, details)
     cal = shiomi.make_shiomi(name, args.me, args.him, details)
@@ -560,12 +600,16 @@ def main() -> None:
     p_kan.add_argument("--me", required=True, help="購入者の生年月日 YYYY-MM-DD")
     p_kan.add_argument("--him", required=True, help="彼の生年月日 YYYY-MM-DD")
     p_kan.add_argument("--details-file", required=True, help="悩み詳細のテキストファイル")
+    p_kan.add_argument("--line-user", default="",
+                       help="LINEの表示名かuser_id。渡したら生年月日の一致を確かめて、食い違うたら止める")
     p_kan.set_defaults(func=cmd_kantei)
     p_shi = sub.add_parser("shiomi", help="潮見＝鑑定書＋九十日の暦を一回で作る")
     p_shi.add_argument("--name", required=True, help="購入者の呼び名（表紙に載る）")
     p_shi.add_argument("--me", required=True, help="購入者の生年月日 YYYY-MM-DD")
     p_shi.add_argument("--him", required=True, help="彼の生年月日 YYYY-MM-DD")
     p_shi.add_argument("--details-file", required=True, help="悩み詳細のテキストファイル")
+    p_shi.add_argument("--line-user", default="",
+                       help="LINEの表示名かuser_id。渡したら生年月日の一致を確かめて、食い違うたら止める")
     p_shi.set_defaults(func=cmd_shiomi)
     p_tsu = sub.add_parser("tsukiyomi")
     p_tsu.add_argument("--member", required=True, help="👥会員に登録済みのニックネーム（検索用）")
