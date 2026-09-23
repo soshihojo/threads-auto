@@ -118,7 +118,7 @@ def test_old_turns_do_not_force_immediate_offer_or_question(monkeypatch):
     monkeypatch.setattr(b, '_send', lambda uid, token, text: sent.append(text) or True)
     monkeypatch.setattr(b, '_route_offer', lambda *a: pytest.fail('old replies cannot trigger offer'))
     monkeypatch.setattr(b, 'generate_ask_deeper', lambda *a: pytest.fail('old replies cannot trigger question'))
-    monkeypatch.setattr(b, 'generate_nurture', lambda user, h, incoming: contexts.append(h) or '挨拶を送ったんやな。')
+    monkeypatch.setattr(b, 'generate_nurture', lambda user, h, incoming, **k: contexts.append(h) or '挨拶を送ったんやな。')
     b._auto_reply('synthetic', state, history[-1]['text'], live=False)
     assert sent == ['挨拶を送ったんやな。'] and state['bot'] == 'on'
     assert all('以前の相談' not in r['text'] for r in contexts[0])
@@ -360,3 +360,66 @@ def test_minor_never_gets_the_offer_at_the_limit(monkeypatch):
     monkeypatch.setattr(b, 'generate_nurture', lambda *a, **k: '返事')
     b._auto_reply('synthetic', state, 'どうしたらいいですか', live=False)
     assert state['bot'] == 'hold'
+
+
+@pytest.mark.parametrize('prior,should_assert', [(1, True), (4, True),
+                                                 (0, False), (2, False), (5, False)])
+def test_assert_slots_fire_on_the_2nd_5th_and_8th_reply(monkeypatch, prior, should_assert):
+    """★2026-09-23（店主の判断）：2通目・5通目・8通目は言い当ての回にする。
+
+    実測：彼への断定も質問も無い返信が全体の63%で、そこだけ相手の返信率が76%（他は96〜98%）。
+    受け止めて終わるだけの回を、言い当てに替える。位置は固定（あとで効果を数えるため）。
+    """
+    history = [message('assistant', '前の返事', '2020-03-01') for _ in range(prior)]
+    history += [message('user', 'そのあと連絡が来ました', '2020-03-01')]
+    state = {'bot': 'on', 'note': '', 'me_birth': '1990-01-01', 'him_birth': '1988-05-05'}
+    got = {}
+    monkeypatch.setattr(b.store, 'get_line_user', lambda *a: dict(state))
+    monkeypatch.setattr(b.store, 'recent_line_chats', lambda *a, **k: list(history))
+    monkeypatch.setattr(b.store, 'upsert_line_user', lambda uid, **k: state.update(k))
+    monkeypatch.setattr(b, '_handle_code', lambda *a: False)
+    monkeypatch.setattr(b, '_diag_count', lambda *a: 1)
+    monkeypatch.setattr(b, '_send', lambda uid, token, text: True)
+    monkeypatch.setattr(b, 'generate_nurture',
+                        lambda user, h, incoming, **k: got.update(k) or '返事や。')
+    b._auto_reply('synthetic', state, 'そのあと連絡が来ました', live=False)
+    assert bool(got.get('extra_system')) is should_assert
+
+
+def test_assert_slot_is_skipped_without_birth_dates(monkeypatch):
+    """生年月日が無い相手には言い当てをやらん（性質の断定ができん）。"""
+    history = [message('assistant', '前の返事', '2020-03-01')]
+    history += [message('user', 'そのあと連絡が来ました', '2020-03-01')]
+    state = {'bot': 'on', 'note': ''}
+    got = {}
+    monkeypatch.setattr(b.store, 'get_line_user', lambda *a: dict(state))
+    monkeypatch.setattr(b.store, 'recent_line_chats', lambda *a, **k: list(history))
+    monkeypatch.setattr(b.store, 'upsert_line_user', lambda uid, **k: state.update(k))
+    monkeypatch.setattr(b, '_handle_code', lambda *a: False)
+    monkeypatch.setattr(b, '_diag_count', lambda *a: 1)
+    monkeypatch.setattr(b, '_send', lambda uid, token, text: True)
+    monkeypatch.setattr(b, 'generate_nurture',
+                        lambda user, h, incoming, **k: got.update(k) or '返事や。')
+    b._auto_reply('synthetic', state, 'そのあと連絡が来ました', live=False)
+    assert not got.get('extra_system')
+
+
+def test_the_8th_slot_comes_after_the_two_choice(monkeypatch):
+    """8通目の言い当ては、二択を挟んだあとに来る（7通目で二択が先に出るため）。"""
+    history = [message('assistant', '前の返事', '2020-03-01') for _ in range(7)]
+    history += [message('assistant', b.ASK_DEEPER, '2020-03-01'),
+                message('user', 'まだ迷っています', '2020-03-01')]
+    state = {'bot': 'on', 'note': '', 'me_birth': '1990-01-01', 'him_birth': '1988-05-05'}
+    got = {}
+    monkeypatch.setattr(b.store, 'get_line_user', lambda *a: dict(state))
+    monkeypatch.setattr(b.store, 'recent_line_chats', lambda *a, **k: list(history))
+    monkeypatch.setattr(b.store, 'upsert_line_user', lambda uid, **k: state.update(k))
+    monkeypatch.setattr(b, '_handle_code', lambda *a: False)
+    monkeypatch.setattr(b, '_diag_count', lambda *a: 1)
+    monkeypatch.setattr(b, '_send', lambda uid, token, text: True)
+    monkeypatch.setattr(b, '_route_offer', lambda *a: None)
+    monkeypatch.setattr(b, 'generate_ask_deeper', lambda *a: pytest.fail('二択は済んどる'))
+    monkeypatch.setattr(b, 'generate_nurture',
+                        lambda user, h, incoming, **k: got.update(k) or '返事や。')
+    b._auto_reply('synthetic', state, 'まだ迷っています', live=False)
+    assert bool(got.get('extra_system')) is True
