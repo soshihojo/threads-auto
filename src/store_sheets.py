@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -83,7 +84,11 @@ def _now() -> str:
 #   「ボットを止めたのに止まらん」は事故に直結するので、寿命(TTL)を付ける。
 _CACHE_TTL_SEC = int(env("SHEETS_CACHE_TTL_SEC") or "30")
 _CACHE: dict[str, tuple[float, list]] = {}
-_RETRY_DELAYS = (0, 5, 12, 25, 45)  # 秒
+# ★2026-09-23：待ち方を伸ばした。429は【一分あたり】の上限やから、
+#   一分待てばたいてい戻る。前は合計87秒で諦めとって、そこで落ちとった。
+#   ★同時に走るジョブが同じ秒数で再試行すると、また揃って撃つことになる。
+#     せやから毎回ちょっとだけ散らす（ゆらぎを足す）。
+_RETRY_DELAYS = (0, 5, 12, 25, 45, 70, 100)  # 秒
 
 
 # 待って投げ直せば直る種類のエラー。
@@ -100,7 +105,7 @@ def _api(fn, *args, **kwargs):
     last = None
     for delay in _RETRY_DELAYS:
         if delay:
-            time.sleep(delay)
+            time.sleep(delay + random.uniform(0, 3))  # 同時に走るジョブと再試行が揃わんように散らす
         try:
             return fn(*args, **kwargs)
         except gspread.exceptions.APIError as e:
@@ -254,10 +259,31 @@ def _update_cells(name: str, row_idx: int, updates: dict) -> None:
     _CACHE.pop(name, None)  # 書き込みでキャッシュ無効化
 
 
+_INIT_DONE = False
+
+
 def init_db() -> None:
+    """キャッシュを捨てて、表が無かったら作る。
+
+    ★★★2026-09-23：ここが【13表ぶんの読み取り】を、ジョブが起動するたびに撃っとった。
+      _ws(name) は一表につき「シート一覧の取得」と「ヘッダ行の読み取り」で二回読む。
+      13表で26回や。Sheetsの読み取り上限は【一分60回・サービスアカウント共通】で、
+      LINEボット・予約投稿・コメント巡回・日報が、その枠を食い合うとる。
+      ★実害：threads-scheduler の replies (a) が、この一行目の init_db で429で落ちた。
+      ★★表が足りとるかどうかは、シート一覧を【一回】読んだら分かる。
+        足りん表だけ _ws で作る。普段は読み取り一回で済む。
+      ★★★一度確かめたら、その process では二度と確かめん（表は勝手に消えん）。
+    """
+    global _INIT_DONE
     _CACHE.clear()  # 描画ごとに最新化（Streamlitは先頭で毎回呼ぶ）
+    if _INIT_DONE:
+        return
+    meta = _api(_spreadsheet().fetch_sheet_metadata)
+    titles = {s.get("properties", {}).get("title") for s in meta.get("sheets", [])}
     for name in TABLES:
-        _ws(name)  # 無ければ作成
+        if name not in titles:
+            _ws(name)  # 無い表だけ作る（ヘッダもここで入る）
+    _INIT_DONE = True
 
 
 def append_ops_event(event: dict) -> bool:
