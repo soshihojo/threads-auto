@@ -312,29 +312,38 @@ footer { text-align:center; font-size:10.5px; letter-spacing:.35em; color:#6d625
        ②鑑定番号の箱をボタンの下に回した。頼む前に「番号を控えろ」いう宿題を見せとった
        ③次への一行を、その人に出た縁の名前で書き換えるようにした（JS側で差し込む）。
          前は誰に対しても同じ抽象文やった -->
-  <!-- ★2026-09-03：言い当ての一枚は、ここから外してLINEの一発目へ移した。
-       ★理由：結果を見た人の55%が、LINEのボタンに触れんと消えとった。
-         ページで「彼」の話まで出し切ると、そこで満足してまう。
-       ★★ほんでLINEの一発目も「Webで視た二人の縁の続きや」て彼の話から入る。ネタが二重やった。
-       ★★★ページは「あんた」と「二人の縁」で止める。彼の話はLINEにしか無い、いう形にする。 -->
+  <!-- ★★★2026-09-23：9/3に変えた三つを、ぜんぶ8月の形に戻した（店主の判断）。
+       戻した理由は、押される率やのうて【登録した人が買う率】が折れたからや。
+       ・7/30週から9/2週まで、追加された人の購入率は5週連続で7.3〜9.7%
+       ・9/3週から 3.3% → 3.8% → 2.9%。ページを変えた週から、きっちり三分の一になった
+       9/3の変更は狙いどおり「押す率」を53%→83%に上げた。せやけど押した人が
+       追加まで行く率が70%→33〜41%に落ちて、差し引きの追加率は変わらんかった。
+       ★増えたんは【軽う押す人】で、その分だけ登録した人の本気度が薄まった、と見る。
+       ★★せやから戻す：①言い当てをページに戻す ②釦に「LINE」を戻す ③番号を押す前に出す。
+       シェアの釦は外したままにする（押す前に外への出口を置かん、はそのままでええ）。 -->
+  <div class="iiate" id="iiatebox" style="display:none">
+    <div class="lbl">彼の生まれから、ひとつだけ</div>
+    <p class="ii" id="iitext"></p>
+    <p class="iichk">当たっとるかは、あんたが一番よう知っとるやろ。<br>
+      外れとる思うなら、それも値打ちのある情報や。</p>
+    <p class="iilim">ここまでは、生まれだけで視えるとこ。<br>
+      彼の<b>「今の心」</b>は、ここからでは視えん。</p>
+  </div>
+
   <p class="next" id="nextline"></p>
-  <a class="linebtn" id="lbtn" href="#">彼が“今”なに考えとるか、視てもらう</a>
-  <!-- ★2026-09-03：番号の箱は、押すまで出さん。押す前に見せると
-       「番号を控えなあかん」いう宿題が視界に入って、それが押さん理由になる。 -->
-  <!-- ★2026-09-09：押した後に【残りいくつか】を見せる。
-       実測：改修で「押す率」は46%→77%に上がったが、★押した人の56%が番号を送らんまま消える。
-       ★★押させることは足りとる。足りてへんのは「あと何をしたらええか」が見えてへんことや。
-       ★★★番号は押した瞬間に自動でコピーしとく。貼るだけにして、手間を一つ減らす。 -->
+  <a class="linebtn" id="lbtn" href="#">LINEで続きを視てもらう</a>
+  <p class="step" id="stept">上のボタン押したら、番号は入っとる。<b>送信だけしてな。</b><br>開かん時は、下の番号をコピーして送ってくれたらええで🌙</p>
+  <div class="codebox"><div class="lbl">あんたの鑑定番号</div><div class="code" id="code"></div>
+    <button type="button" class="copybtn" id="copyb">番号をコピー</button>
+    <div class="ttl">この番号は7日で切れる</div></div>
+  <!-- ★2026-09-09に足した「あと、ふたつだけ」は残す。番号を送らんまま消える人への案内や。
+       ★番号の箱は上に戻したんで、ここでは手順だけ出す。 -->
   <div id="afterbtn" style="display:none">
   <p class="rest">あと、ふたつだけ。</p>
   <ol class="steps">
     <li><b>友だち追加</b>する（もう開いとるはずや）</li>
-    <li>下の<b>番号を送る</b>だけ</li>
+    <li>上の<b>番号を送る</b>だけ</li>
   </ol>
-  <div class="codebox"><div class="lbl">あんたの鑑定番号</div><div class="code" id="code"></div>
-    <button type="button" class="copybtn" id="copyb">番号をコピー</button>
-    <div class="ttl">この番号は7日で切れる</div></div>
-  <p class="step" id="stept">開かんかったら、この番号を椿に送ってくれたらええで🌙</p>
   </div>
 
   <!-- ★2026-09-03：シェアの釦は丸ごと外した。押す前の画面に、外への出口を置かん。 -->
@@ -432,6 +441,11 @@ document.getElementById("f").addEventListener("submit", async (e)=>{
     document.getElementById("tcatch").textContent="——"+j.type.catch+"——";
     document.getElementById("tdesc").textContent=j.type.desc;
     document.getElementById("code").textContent=j.code;
+    // ★2026-09-23：言い当ての一枚を、ページに戻した（9/3に外したんを戻す）。
+    if(j.iiate){
+      document.getElementById("iitext").textContent=j.iiate;
+      document.getElementById("iiatebox").style.display="block";
+    }
     // その人に出た縁の名前を使て、次への一行をその場で作る。
     // 「あんたの結果の続き」やと分かる形にする（前は誰にでも同じ抽象文やった）
     document.getElementById("nextline").innerHTML=

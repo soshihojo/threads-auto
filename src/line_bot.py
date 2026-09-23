@@ -2157,10 +2157,11 @@ def _handle_code(user_id: str, incoming: str, snd) -> bool:
     if row:
         store.upsert_line_user(user_id, me_birth=row["me_birth"], him_birth=row["him_birth"])
         base = _diag_count(store.recent_line_chats(user_id, limit=12))  # 生成前の診断数
-        # ★2026-09-03：言い当ては診断ページから外して、ここで出す。
-        #   ページで先に見せると、押される前に引きを使い切る（結果を見た55%が押さん）。
-        from .iiate import iiate as _iiate
-        _hint = _iiate(row["him_birth"], row.get("status") or "") or ""
+        # ★★2026-09-23：言い当てはページに戻したんで、ここでは渡さん（店主の判断）。
+        #   ★9/3にページから外してここへ移したが、登録した人の購入率が
+        #     7〜10%から3%に落ちたんで、ページごと8月の形に戻した。
+        #   ★★同じ一点をページとLINEの両方で出すと、ネタが二重になる。ここは空にしとく。
+        _hint = ""
         res = _retry(lambda: generate_reading(
             row["me_birth"], row["him_birth"],
             row.get("status") or "（不明。性質と縁を中心に視る）",
