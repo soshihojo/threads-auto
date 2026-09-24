@@ -1982,6 +1982,23 @@ def handle_event(ev: dict) -> None:
     msg = ev.get("message", {})
     reply_token = ev.get("replyToken", "")
 
+    # ★★★2026-09-24：届いたテキストは【何よりも先に】記録する。
+    #   実害（陽子さん）：「鑑定番号6448」を送ってくれたのに、返事が出んかった。
+    #   ★記録が一通も残ってへんかった。番号も未使用のまま。
+    #   ★★原因はこの下の順番や。前は「相手の情報を読む → 画像か見る → 記録する」やった。
+    #     最初の読み取りで落ちたら（Sheetsの429など）、記録も返事も残らん。
+    #     ★★★記録が無いと、未返信スイープの網にも掛からん。相手がこっちから見えんようになる。
+    #   せやから、テキストは先に残す。あとで何が失敗しても、スイープが拾える。
+    #   （同じ落ち方を9/23の千咲さんでもしとる。発言の記録がゼロのまま止まっとった）
+    if msg.get("type") == "text":
+        _text = str(msg.get("text", "")).strip()
+        if _text:
+            try:
+                store.add_line_chat(user_id, "user", _text)
+                msg = {**msg, "_already_logged": True}
+            except Exception as e:
+                print(f"[line_bot] ★受信の記録に失敗した（処理は続ける）: {user_id} {e}")
+
     user = store.get_line_user(user_id)
     if not user:
         store.upsert_line_user(user_id, display_name=get_display_name(user_id))
@@ -2045,7 +2062,9 @@ def handle_event(ev: dict) -> None:
         return  # スタンプ等は無視（既読の代わりに次のテキストで拾う）
 
     incoming = msg.get("text", "").strip()
-    store.add_line_chat(user_id, "user", incoming)
+    # 上で先に記録済みならここでは書かん（画像から起こしたテキストは、ここで初めて記録する）
+    if not msg.get("_already_logged"):
+        store.add_line_chat(user_id, "user", incoming)
 
     # 生年月日が書かれていたら保存（1件目=本人、2件目=彼。空いてる枠に入れる）
     dates = extract_birthdates(incoming)

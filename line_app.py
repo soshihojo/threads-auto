@@ -124,5 +124,22 @@ async def webhook(request: Request, background_tasks: BackgroundTasks) -> str:
     # LINEには即200を返し、生成・返信はバックグラウンドで行う
     #（replyトークンは約1分有効。Claude生成は数十秒以内に収まる）
     for ev in data.get("events", []):
-        background_tasks.add_task(line_bot.handle_event, ev)
+        background_tasks.add_task(_handle_event_logged, ev)
     return "OK"
+
+
+def _handle_event_logged(ev: dict) -> None:
+    """handle_event を包んで、落ちた時に必ずログへ残す。
+
+    ★★★2026-09-24：ここが黙って落ちると、相手がこっちから見えんようになる。
+      実害（陽子さん）：「鑑定番号6448」が記録にも残らず、返事も出んかった。
+      例外はバックグラウンドの中で消えて、画面にも何も出てへんかった。
+      ★誰の、どの一言で落ちたかだけでも残す。残っとったら追える。
+    """
+    try:
+        line_bot.handle_event(ev)
+    except Exception as e:
+        who = (ev.get("source") or {}).get("userId", "?")
+        what = str((ev.get("message") or {}).get("text", ""))[:60]
+        print(f"[webhook] ★受信の処理が落ちた: {who} 種別={ev.get('type')} 本文={what!r} → {e}")
+        raise
