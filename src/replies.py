@@ -159,17 +159,20 @@ def _draft_reply(reply_text: str, username: str, is_lead: bool,
     #
     #   ★見方：【固定投稿へ誘導しとるのに、生年月日が無い】時だけ止める。
     #   ★★誘導せん回（5回に1回あってええ）は、そのまま通す。そこは触らん。
-    if is_lead and "固定投稿" in text and "生年月日" not in text:
-        print("[replies] 誘導しとるのに「生年月日」が無い。作り直す")
+    # ★2026-09-24：判定を「固定投稿と書いてあるか」から「誘導する回かどうか」に変えた。
+    #   URLは下で必ず付ける形にしたんで、本文に固定投稿の語はもう出てこん。
+    #   ★それでも【生年月日】が抜けたら、読む側は何を入れるんか分からんまま止まる。ここは残す。
+    if is_lead and "生年月日" not in text:
+        print("[replies] 誘導する回やのに「生年月日」が無い。作り直す")
         text = _clean_reply(complete(
-            system + "\n\n【厳重注意】固定投稿へ誘導するなら、"
-                     "★【生年月日】の一語を必ず入れること。"
+            system + "\n\n【厳重注意】★【生年月日】の一語を必ず入れること。"
                      "入れんかったら、読んだ人は何をしたらええか分からんで手が止まる。"
-                     "プロフィールの固定投稿のリンクから無料鑑定ページを開き、"
-                     "自分と彼の生年月日を入力すると、彼の性質や二人の相性を見られると短く伝える。"
+                     "下のリンクから無料鑑定のページを開いて、自分と彼の生年月日を入力すると、"
+                     "彼の性質や二人の相性を見られる、と短く伝える。"
+                     "★URLは書かんでええ（仕組みの側が末尾に付ける）。"
                      "生年月日をコメント欄やDMへ送るように案内しない。",
             user, model=REPLY_MODEL, max_tokens=200, temperature=0.9))
-        if "固定投稿" in text and "生年月日" not in text:
+        if "生年月日" not in text:
             print("[replies] 作り直しても入らんかった（そのまま送る）")
 
     # ★★★番号の取り違えを止める。★一度だけ作り直して、それでも直らんかったら空で返す。
@@ -187,7 +190,43 @@ def _draft_reply(reply_text: str, username: str, is_lead: bool,
         if _choice_mismatch(reply_text, text):
             print(f"[replies] 作り直しても取り違えが直らん。★この一件は送らん（次の巡回で拾い直す）")
             return ""
-    return strip_ai_leak(text)
+    text = strip_ai_leak(text)
+    if is_lead:
+        text = _append_diag_url(text, profile)
+    return text
+
+
+# ★★★2026-09-24（店主の判断）：誘導する回は、診断のURLをこっちで必ず付ける。
+#
+#   なんで変えるか。実測：
+#     9/12〜9/19　返信461件 → ページ表示691件（150%）→ 診断506件
+#     9/20〜9/27　返信421件 → ページ表示250件（ 59%）→ 診断173件
+#   ★返信の数はほぼ同じやのに、ページまで来る人が三分の一になった。
+#   ★★案内が消えたわけやない。9/20以降の下書き386件のうち384件（99%）に案内は入っとる。
+#   ★★★「プロフィール → 固定投稿 → リンク」の三段が、今のコメントの層には遠い。
+#     三択の投稿に変えてから、コメントが「①」「②」の一文字だけになった。
+#     もともと浅い関心の人に、三段の手間は越えられん。
+#   せやから、その場で開けるURLを置く。手間を三段から一段に減らす。
+#
+#   ★URLは生成に書かせん。こっちで足す。
+#     ★モデルに書かせたら、打ち間違い・途中で切れる・毎回ちゃう形になる。
+#     ★★ここは一字でも違うたら死ぬ場所や。機械で確実に付ける。
+#   ★★流入元が分かるように a=cr を付ける（cr＝comment reply）。
+#     診断ページが a を拾て web_diag.source に残すんで、
+#     固定投稿から来た人（source空）とコメント返信から来た人（cr）を後で分けて数えられる。
+_DIAG_SRC = "cr"
+
+
+def _append_diag_url(text: str, profile: dict) -> str:
+    """誘導する回の末尾に、診断ページのURLを足す。"""
+    base = str(profile.get("web_diag_url") or "").strip()
+    if not base or not text.strip():
+        return text
+    if "://" in text:          # もう本文にURLが入っとるなら足さん
+        return text
+    sep = "&" if "?" in base else "?"
+    url = f"{base}{sep}a={_DIAG_SRC}"
+    return f"{text.rstrip()}\n{url}"
 
 
 # ── バズ回の自己リプライ（2026-08-08・討論の合意施策⑥） ──

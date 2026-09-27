@@ -423,3 +423,24 @@ def test_the_8th_slot_comes_after_the_two_choice(monkeypatch):
                         lambda user, h, incoming, **k: got.update(k) or '返事や。')
     b._auto_reply('synthetic', state, 'まだ迷っています', live=False)
     assert bool(got.get('extra_system')) is True
+
+
+def test_lead_reply_carries_the_diagnosis_url(monkeypatch):
+    """★2026-09-24（店主の判断）：誘導する回は、診断のURLを必ず末尾に付ける。
+
+    実測：返信の数は変わらんのに、ページ表示が691件から250件に落ちた。
+    案内は99%入っとった。プロフィール→固定投稿→リンクの三段が越えられてへん。
+    """
+    from src import replies as rp
+    prof = {"web_diag_url": "https://example.test/shindan"}
+    out = rp._append_diag_url("彼の性質はこうや。下のリンクから生年月日を入れてみ。", prof)
+    assert out.endswith("https://example.test/shindan?a=cr")
+    assert out.count("http") == 1
+
+
+def test_diag_url_is_not_doubled_and_needs_config():
+    """本文にもうURLがある時は足さん。設定が無い時も足さん。"""
+    from src import replies as rp
+    already = "見てみ https://example.test/shindan?a=cr"
+    assert rp._append_diag_url(already, {"web_diag_url": "https://example.test/shindan"}) == already
+    assert rp._append_diag_url("案内の文", {}) == "案内の文"
