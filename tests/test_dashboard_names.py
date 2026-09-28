@@ -41,3 +41,42 @@ def test_no_undefined_names_in_the_dashboard(name):
     path = Path(__file__).resolve().parents[1] / name
     missing = _undefined_names(path)
     assert not missing, f"{name} に定義の無い名前がある: {missing}"
+
+
+# ★★★2026-09-28：一括送信が「4人に全部届いたあと」に画面だけ落ちた。
+#   _consult_board.clear() が AttributeError。キャッシュの指定（@st.cache_data）が
+#   関数の直上から離れて、あいだに差し込んだ別の関数に付いとった。
+#   ★送信は済んどるのに画面は赤字。店主からは【送れてへん】ように見えて、
+#     もう一回押したら同じ返信が二度届く。せやから、この形も機械で見る。
+def _clear_calls_on_functions(path: Path) -> dict[str, int]:
+    """`なんとか.clear()` のうち、同じファイルの関数を呼んどる物を返す。"""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    funcs = {n.name: n for n in ast.walk(tree)
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    found: dict[str, int] = {}
+    for n in ast.walk(tree):
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "clear" and isinstance(n.func.value, ast.Name)
+                and n.func.value.id in funcs):
+            found.setdefault(n.func.value.id, n.lineno)
+    return found
+
+
+def _is_cached(fn) -> bool:
+    for d in fn.decorator_list:
+        f = d.func if isinstance(d, ast.Call) else d
+        if isinstance(f, ast.Attribute) and f.attr in ("cache_data", "cache_resource"):
+            return True
+    return False
+
+
+@pytest.mark.parametrize("name", ["app.py", "src/operations_ui.py"])
+def test_clear_is_only_called_on_cached_functions(name):
+    path = Path(__file__).resolve().parents[1] / name
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    funcs = {n.name: n for n in ast.walk(tree)
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    bad = {fname: line for fname, line in _clear_calls_on_functions(path).items()
+           if not _is_cached(funcs[fname])}
+    assert not bad, (
+        f"{name}: キャッシュの指定が無い関数に .clear() を呼んどる（実行したら落ちる）: {bad}")

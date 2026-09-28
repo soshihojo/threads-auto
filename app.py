@@ -235,7 +235,6 @@ def _unmangle(text: str) -> str:
     return "".join(out)
 
 
-@st.cache_data(ttl=25, show_spinner=False)
 # ---------------- 返信の材料を組む（★一人ずつでも一括でも、ここを通す） ----------------
 #
 # ★★★2026-08-29 切り出し。もともと「この子専用の返信を作る」ボタンの中にべた書きしとった。
@@ -535,6 +534,11 @@ def _render_bulk_consult(waiting, board):
             st.rerun()
 
 
+# ★★★この指定は、必ず _consult_board の【直上】から離さんこと。
+#   2026-08-29に、ここと _consult_board のあいだに別の関数を差し込んで、
+#   指定だけが置き去りになった。そうなると _consult_board.clear() が無い物扱いになって、
+#   一括送信が【全部届いたあと】に画面だけ落ちる（送信は済んどるのに失敗に見える）。
+@st.cache_data(ttl=25, show_spinner=False)
 def _consult_board() -> tuple[str, list[dict], dict]:
     """会員ごとの「LINEの今」を、シートの読み込み3回だけでまとめて作る。
 
