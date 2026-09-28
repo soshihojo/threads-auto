@@ -380,6 +380,24 @@ def recent_sent_drafts(limit: int = 12) -> list[str]:
     rows.sort(key=lambda r: str(r.get("sent_at") or ""), reverse=True)
     return [str(r["draft_text"]) for r in rows[:limit]]
 
+# ★★★2026-09-28 新設：誰に何回返したかを数える。
+#   ★なんで要るか。先週のコメントの66%が、累計5回を超えとる常連から来とった。
+#     上位10人で全コメントの4割。★その人らは診断も済んどる（生年月日の組の再診断率48%）。
+#   ★★同じ人に何十回も返しとるあいだ、新しい人に回る枠が減る。
+#     ★せやから「もう◯回返した相手には返さん」という上限を作れるようにする。
+#   ★数えるのは【送った分だけ】。下書きで止まった分は数えん。
+def sent_reply_counts() -> dict[str, int]:
+    """Threadsのアカウント名（小文字）→ その人に送った返信の数。"""
+    out: dict[str, int] = {}
+    for r in _records("draft_replies"):
+        if str(r.get("status")) != "sent":
+            continue
+        u = str(r.get("username") or "").strip().lower()
+        if u:
+            out[u] = out.get(u, 0) + 1
+    return out
+
+
 def set_draft_status(reply_id: str, status: str, *, sent: bool = False) -> None:
     updates = {"status": status}
     if sent:

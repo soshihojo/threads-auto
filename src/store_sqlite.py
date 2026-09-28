@@ -225,6 +225,15 @@ def recent_sent_drafts(limit: int = 12) -> list[str]:
             "ORDER BY sent_at DESC LIMIT ?", (limit,)).fetchall()
     return [r[0] for r in rows]
 
+def sent_reply_counts() -> dict[str, int]:
+    """Threadsのアカウント名（小文字）→ その人に送った返信の数（sheets側と同じ役目）。"""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT LOWER(TRIM(username)) AS u, COUNT(*) FROM draft_replies "
+            "WHERE status='sent' AND TRIM(username)<>'' GROUP BY u").fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
 def set_draft_status(reply_id: str, status: str, *, sent: bool = False) -> None:
     with conn() as c:
         if sent:

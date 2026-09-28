@@ -280,6 +280,32 @@ def process_replies(client: ThreadsClient) -> dict:
     gap_sec = int(cfg.get("safety", {}).get("min_seconds_between_actions", 30))
     self_reply_threshold = int(cfg["replies"].get("self_reply_threshold", 30))
 
+    # ★★★2026-09-28 新設：同じ人に返す回数の上限。
+    #
+    #   なんで要るか。★9月の実数を数えたら、来るコメントが常連に寄っとった。
+    #     ・コメント者に占める新規の割合 … 8/03の週97% → 9/21の週46%
+    #     ・上位10人が占めるコメント     … 17% → 40%
+    #     ・累計5回超の常連が占める割合   … 9% → 66%
+    #     ★その人らは無料診断も済んどる（生年月日の組の再診断率が13%→48%）。
+    #   ★★同じ入り口を同じ人に何十回も出しとるあいだ、新しい人に回る枠が減る。
+    #     ★上位の人は8/3以降で27〜72回コメントしとる。そこへ全部返しとった。
+    #
+    #   ★ただし【鑑定を求める言葉】が入っとるコメントは上限の外に置く。
+    #     「視てほしい」「鑑定して」と書いてきた一件を機械的に捨てるんが、いちばん惜しい。
+    #     ★見るんは leads.asks_for_reading（言葉だけ）。match_keyword やない。
+    #       ★★あっちは番号（①②③）も手挙げとして返すんで、三択の回答が全部例外になって
+    #         上限が一件も効かんようになる。ここを取り違えんこと。
+    #   ★★0 にしたら今まで通り無制限に戻る。
+    max_per_user = int(cfg["replies"].get("max_per_username", 0) or 0)
+    sent_counts: dict[str, int] = {}
+    if max_per_user > 0:
+        try:
+            sent_counts = store.sent_reply_counts()
+        except Exception as e:
+            # ★数えられんかった時は【上限を効かせん】。返信が止まる方が痛い。
+            print(f"[replies] 返信回数を数えられんかった。上限は今回かけん: {e}")
+            max_per_user = 0
+
     # ★2026-08-14：ここは前まで「投稿を新しい順に見て、上限に達したら即return」やった。
     #   そのせいで、伸びとる最新投稿のコメントだけで毎回の枠を食い潰して、
     #   古い投稿に付いたコメントが永久に拾われんかった。
@@ -320,18 +346,32 @@ def process_replies(client: ThreadsClient) -> dict:
     seen_users: set[str] = set()
     queue: list[tuple[dict, str, str | None]] = []
     skipped_dup = 0
+    over_limit: list[str] = []
     for r, post_id, permalink in pending:
         u = (r.get("username") or "").strip().lower()
         if u and u in seen_users:
             skipped_dup += 1
+            continue
+        # ★上限に達した相手は返さん。ただし鑑定を求める言葉が入っとる回は返す。
+        #   ★既読の印はここでは付けん。下の queue の処理で付ける形やから、
+        #     印を付けずに外すと毎回の巡回で拾い直してまう。せやから印だけ付けて終わる。
+        if (max_per_user and u and sent_counts.get(u, 0) >= max_per_user
+                and leads.asks_for_reading(r.get("text", "") or "") is None):
+            store.mark_reply_seen(r.get("id"), post_id, r.get("username") or "",
+                                  r.get("text", "") or "", r.get("timestamp") or "")
+            over_limit.append(f"@{r.get('username')}({sent_counts.get(u, 0)}回)")
             continue
         if u:
             seen_users.add(u)
         queue.append((r, post_id, permalink))
         if len(queue) >= max_per_run:
             break
+    if over_limit:
+        stats["over_limit"] = len(over_limit)
+        print(f"[replies] 上限（{max_per_user}回）に達しとる相手を {len(over_limit)}件外した: "
+              + "、".join(over_limit[:8]) + ("…" if len(over_limit) > 8 else ""))
 
-    rest = len(pending) - len(queue) - skipped_dup
+    rest = len(pending) - len(queue) - skipped_dup - len(over_limit)
     if rest > 0 or skipped_dup:
         print(f"[replies] 未処理 {len(pending)}件 → 今回 {len(queue)}件返す"
               f"（同じ人の二通目以降 {skipped_dup}件は次の巡回、残り {max(0, rest)}件）")

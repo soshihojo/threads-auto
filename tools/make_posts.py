@@ -146,29 +146,72 @@ def check_dup(posts: list[str], skip: set[tuple[str, str]] | None = None) -> lis
     return warn
 
 
-def check(posts: list[str], account: str | None = None) -> list[str]:
+def check(posts: list[str], account: str | None = None,
+          device_min: float | None = None) -> list[str]:
     """出す前の検品。★ここで止まったら、中身を直してから出す。"""
     bad = []
     for i, p in enumerate(posts, 1):
-        n = len(p.strip())
         for k in JARGON + SHUKU:
             if k in p:
                 bad.append(f"{i}本目：宿曜語「{k}」が入っとる")
         for k in NG:
             if k in p:
                 bad.append(f"{i}本目：NG語「{k}」が入っとる")
-        if n > 140:
-            bad.append(f"{i}本目：{n}字。★100字以下がいちばん伸びる（実測 views中央319）")
+        # ★★2026-09-28：字数は【一枚ずつ】数える。
+        #   ★「===続き===」で割った投稿は、Threads上では別々の投稿として出る
+        #     （threads_client.publish_thread が自分への返信として順に出す）。
+        #   ★★せやから本文をまるごと数えたら、中身に関係なく三枚組は全部引っかかる。
+        #     ★実際ここで止まって、続き付きの20本が一本も通らんかった。
+        #   ★★★一枚あたりで見る。フィードに流れるのは一枚目やから、そこが要や。
+        parts = [x.strip() for x in re.split(r"\n?===続き===\n?", p) if x.strip()]
+        for j, part in enumerate(parts, 1):
+            n = len(part)
+            if n > 140:
+                where = f"{i}本目" if len(parts) == 1 else f"{i}本目の{j}枚目"
+                bad.append(f"{where}：{n}字。★100字以下がいちばん伸びる（実測 views中央319）")
     # ★★2026-08-31：「生まれ月」の要求率は【アカウントごと】に持たせた。
     #   ★椿は 0.6（実測で効いとる装置やから外さん）。
     #   ★★椿さんは 0.0（生まれ月は椿の主戦場。二本で同じ装置を回したら切り口が枯れる）。
     from src.config import account_conf
-    need = float(account_conf(account).get("device_min", 0.6))
+    need = (float(device_min) if device_min is not None
+            else float(account_conf(account).get("device_min", 0.6)))
     rate = sum(1 for p in posts if DEVICE.search(p)) / max(1, len(posts))
     if need > 0 and rate < need:
         bad.append(f"★「生まれ月」の率が {rate*100:.0f}%。{need*100:.0f}%以上にする"
                    "（あり=中央292／なし=中央160。伸びた上位12本のうち10本がこれ）")
     return bad
+
+
+# ★★★2026-09-28 新設：置く時刻を「時の一覧」で決める。
+#   ★なんで要るか。等間隔に並べると、実測で数字の出てへん時間にも均等に落ちる。
+#     ★90分おきで20本組んだら、6本が 3時・9時・13時・16時・19時 に入った。
+#     ★★19時の中央viewsは80、7時は595。七倍ちがう所に三割入れたら、
+#       新しい型が効いたのか、時間帯で沈んだのかが分からんようになる。
+#   ★★一日に置ける数は一覧の長さで決まる（8時なら8本/日）。
+#     ★20〜24本/日の上限（8/20の事故）より少ない所で回す形や。
+DEAD_HOURS = (19, 3, 16, 9, 13)     # 中央views 80〜194。ここは捨てる
+def _slot_times(start: datetime, n: int, hours_csv: str, every: int) -> list[datetime]:
+    """n本ぶんの予約時刻を返す。hours_csv が空なら、今まで通り every 分おき。"""
+    if not str(hours_csv).strip():
+        return [start + timedelta(minutes=every * i) for i in range(n)]
+    hours = sorted({int(x) for x in re.split(r"[,\s]+", hours_csv.strip()) if x != ""})
+    if not hours or not all(0 <= h <= 23 for h in hours):
+        raise SystemExit(f"❌ --hours が読めん: {hours_csv!r}（例 1,2,7,11,15,20,22,23）")
+    dead = [h for h in hours if h in DEAD_HOURS]
+    if dead:
+        print(f"　 ⚠ --hours に数字の出てへん時間が入っとる: {dead}（中央views 80〜194）")
+    out: list[datetime] = []
+    day = start.date()
+    while len(out) < n:
+        for h in hours:
+            t = datetime(day.year, day.month, day.day, h, 0)
+            if t < start:               # ★開始より前の枠は飛ばす（今日の残りから埋める）
+                continue
+            out.append(t)
+            if len(out) >= n:
+                break
+        day += timedelta(days=1)
+    return out
 
 
 def main() -> int:
@@ -179,6 +222,22 @@ def main() -> int:
     ap.add_argument("--out", default="", help="控えの置き場（既定 note_out/投稿◯本_MMDD.tsv）")
     ap.add_argument("--account", default="",
                     help="どのThreadsアカウントに流すか（空欄＝一本目）。二本目なら b")
+    # ★★2026-09-28：この一回だけ「生まれ月」の縛りを外す口。
+    #   ★config.yaml の device_min は椿の実測で決まった値やから、触らん。
+    #   ★★試しの回（生まれ月ゼロで組む回）だけ、ここで 0 を渡す。
+    #     どの回で外したかが、打った手として残るようにしてある。
+    ap.add_argument("--device-min", type=float, default=None,
+                    help="「生まれ月」の最低率を、この回だけ上書きする（0で縛りを外す）")
+    # ★★★2026-09-28 新設：置く時間を【時刻の一覧】で指定できるようにした。
+    #   ★今までは --every で等間隔に並べるだけやった。90分おきやと、20本のうち6本が
+    #     実測で数字の出てへん時間（3時・9時・13時・16時・19時）に落ちる。
+    #   ★★中央viewsの実測（03_winning_elements.md）：
+    #       寄せる … 7時595／22時458／2時411／15時404／23時403／20時399／1時345／11時319
+    #       捨てる … 19時80／3時169／16時177／9時179／13時194
+    #     ★7時と19時で七倍ちがう。新しい型を試す回に、捨てる時間へ三割入れたら測れん。
+    #   ★★★--hours 1,2,7,11,15,20,22,23 のように渡したら、その時にだけ置く。
+    ap.add_argument("--hours", default="",
+                    help="置く時刻を時で指定（例 1,2,7,11,15,20,22,23）。--every より優先")
     ap.add_argument("--replace", default="",
                     help="差し替え。'1-10' のように、持ち回る既存の id を指定する。"
                          "★id と時刻はそのまま使い、その行は重複チェックの対象から外す")
@@ -192,7 +251,9 @@ def main() -> int:
     acc = a.account or None
     table = ss.sched_table(acc)
 
-    bad = check(posts, acc)
+    bad = check(posts, acc, device_min=a.device_min)
+    if a.device_min is not None:
+        print(f"　 ★この回だけ「生まれ月」の縛りを {a.device_min:.0%} に下げて組む")
     if bad:
         print("❌ 検品で止まった。直してからもう一回：")
         for b in bad:
@@ -230,15 +291,18 @@ def main() -> int:
         rows_at = [by_id[i].get("scheduled_at") for i in keep_ids]
         for i, p in zip(keep_ids, posts):
             w.writerow([i, p, by_id[i].get("scheduled_at"), "scheduled", "", "", "", "", a.account])
-        start = datetime.strptime(str(rows_at[0])[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S")
+        def _pd(s):
+            return datetime.strptime(str(s)[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S")
+        start, last = _pd(rows_at[0]), _pd(rows_at[-1])
         first = int(keep_ids[0])
     else:
         start = (datetime.strptime(a.start, "%Y-%m-%d %H:%M") if a.start
                  else (_last_scheduled(acc) or datetime.now()) + timedelta(minutes=a.every))
         first = _next_id(acc)
-        for i, p in enumerate(posts):
-            tt = start + timedelta(minutes=a.every * i)
+        times = _slot_times(start, len(posts), a.hours, a.every)
+        for i, (p, tt) in enumerate(zip(posts, times)):
             w.writerow([first + i, p, tt.strftime("%Y-%m-%d %H:%M:%S"), "scheduled", "", "", "", "", a.account])
+        start, last = times[0], times[-1]
     tsv = out.getvalue()
 
     # ★検算：全行9列か。行数が合うか
@@ -251,9 +315,11 @@ def main() -> int:
     dst.write_text(tsv, encoding="utf-8")
 
     ns = [len(p) for p in posts]
-    end = start + timedelta(minutes=a.every * (len(posts) - 1))
+    end = last
+    days = max(1, (end.date() - start.date()).days + 1)
+    how = f"{a.hours} 時に置く" if a.hours else f"{a.every}分おき"
     print(f"✅ {len(posts)}本　id {first}〜{first+len(posts)-1}")
-    print(f"　 {start:%m/%d %H:%M} 〜 {end:%m/%d %H:%M}（{a.every}分おき・約{len(posts)/((end-start).days+1):.0f}本/日）")
+    print(f"　 {start:%m/%d %H:%M} 〜 {end:%m/%d %H:%M}（{how}・約{len(posts)/days:.0f}本/日）")
     print(f"　 字数 中央{statistics.median(ns):.0f}（{min(ns)}〜{max(ns)}）／"
           f"生まれ月 {100*sum(1 for p in posts if DEVICE.search(p))//len(posts)}%")
     print(f"　 控え: {dst}")

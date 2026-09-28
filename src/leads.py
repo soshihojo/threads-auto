@@ -54,6 +54,22 @@ def match_choice(text: str) -> str | None:
     return n if n in "123456789" else None
 
 
+# ★★★2026-09-28 新設：「言葉で鑑定を求めとるか」だけを見る。
+#   ★なんで match_keyword と分けるか。あれは番号（①②③）も生まれ月も手挙げとして返す。
+#     ★三択の回答は毎回「①」やから、match_keyword で見たら【全部が手挙げ】になる。
+#   ★★返信の回数上限の例外に使うのは、こっちや。
+#     「視てほしい」「鑑定して」と書いてきた一件だけを、上限の外に出す。
+def asks_for_reading(text: str) -> str | None:
+    """本文に lead_keywords の言葉が入っとればそれを返す。番号・生まれ月は見ん。"""
+    if not text:
+        return None
+    lowered = text.lower()
+    for kw in (active_profile().get("lead_keywords") or []):
+        if kw.lower() in lowered:
+            return kw
+    return None
+
+
 def match_keyword(text: str) -> str | None:
     """本文にlead_keywordsのいずれかが含まれれば、そのキーワードを返す。
     生まれ月投稿への回答コメント（「2月」等の短文）も手挙げ扱い（lead_month_comments）。"""
