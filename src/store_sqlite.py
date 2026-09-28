@@ -1,6 +1,7 @@
 """ローカル永続化（SQLite）。投稿ログ・処理済み返信・返信下書き・リードを管理。"""
 from __future__ import annotations
 
+import re
 import sqlite3
 from contextlib import contextmanager
 
@@ -362,14 +363,47 @@ def set_member_line_user(member_id, line_user_id: str) -> bool:
         return c.execute("UPDATE members SET line_user_id=? WHERE id=?", (line_user_id, member_id)).rowcount > 0
 
 
-def list_members() -> list[sqlite3.Row]:
+# ★2026-09-28：退会の印。sheets 側と同じ約束（note の先頭に【退会 日付】）。
+MEMBER_WITHDRAWN_MARK = "【退会】"
+_WITHDRAWN_RE = re.compile(r"^【退会[^】]*】\s*")
+
+
+def member_is_withdrawn(m) -> bool:
+    try:
+        note = str((m or {})["note"] or "")
+    except Exception:
+        note = ""
+    return bool(_WITHDRAWN_RE.match(note))
+
+
+def list_members(include_withdrawn: bool = False) -> list[sqlite3.Row]:
     with conn() as c:
-        return c.execute("SELECT * FROM members ORDER BY nickname").fetchall()
+        rows = c.execute("SELECT * FROM members ORDER BY nickname").fetchall()
+    if include_withdrawn:
+        return rows
+    return [r for r in rows if not member_is_withdrawn(r)]
+
+
+def set_member_withdrawn(member_id, withdrawn: bool = True) -> bool:
+    from datetime import datetime
+    with conn() as c:
+        row = c.execute("SELECT note FROM members WHERE id=?", (member_id,)).fetchone()
+        if row is None:
+            return False
+        body = _WITHDRAWN_RE.sub("", str(row["note"] or "")).strip()
+        note = (f"【退会 {datetime.now().strftime('%Y-%m-%d')}】"
+                + (f" {body}" if body else "")) if withdrawn else body
+        return c.execute("UPDATE members SET note=? WHERE id=?", (note, member_id)).rowcount > 0
 
 
 def delete_member(member_id: int) -> None:
     with conn() as c:
         c.execute("DELETE FROM members WHERE id=?", (member_id,))
+
+
+def delete_readings_for_member(member_id) -> int:
+    with conn() as c:
+        return c.execute("DELETE FROM readings WHERE member_id=?", (member_id,)).rowcount
 
 
 # ---- readings（鑑定の控え） ----

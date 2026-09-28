@@ -615,8 +615,47 @@ def set_member_line_user(member_id, line_user_id: str) -> bool:
     return True
 
 
-def list_members() -> list[dict]:
-    return sorted(_records("members"), key=lambda r: str(r.get("nickname", "")))
+# ★★★2026-09-28 新設：退会（解約）の印。note の先頭に置く。
+#
+#   なんで行を消さんのか。会員をやめた人の【控え】は残さなあかんからや。
+#   ★行を消したら、その人の個別鑑定書PDFと鑑定の控えが readings に残るだけで、
+#     どの会員のもんか辿れんようになる（member_id の行き先が消えるから）。
+#   ★★戻ってきた時に、また鑑定書を貼り直してもらうことになる。それは筋が悪い。
+#   ★★★せやから、印を付けて【会員の一覧から外す】形にする。
+#     list_members が既定で外すんで、会員判定（line_bot._member_status）も
+#     会員相談の画面も、そのまま「会員やない人」として扱うようになる。
+#   完全に消したい時だけ delete_member を使う（控えも一緒に消す）。
+MEMBER_WITHDRAWN_MARK = "【退会】"
+_WITHDRAWN_RE = re.compile(r"^【退会[^】]*】\s*")
+
+
+def member_is_withdrawn(m: dict) -> bool:
+    return bool(_WITHDRAWN_RE.match(str((m or {}).get("note") or "")))
+
+
+def list_members(include_withdrawn: bool = False) -> list[dict]:
+    rows = _records("members")
+    if not include_withdrawn:
+        rows = [r for r in rows if not member_is_withdrawn(r)]
+    return sorted(rows, key=lambda r: str(r.get("nickname", "")))
+
+
+def set_member_withdrawn(member_id, withdrawn: bool = True) -> bool:
+    """退会の印を付ける／外す。控えはそのまま残る。"""
+    idx = _find_row("members", "id", member_id)
+    if not idx:
+        return False
+    cur = next((r for r in _records("members") if str(r.get("id")) == str(member_id)), None)
+    note = str((cur or {}).get("note") or "")
+    body = _WITHDRAWN_RE.sub("", note).strip()
+    if withdrawn:
+        stamp = f"【退会 {datetime.now(JST).strftime('%Y-%m-%d')}】"
+        note = f"{stamp}{(' ' + body) if body else ''}"
+    else:
+        note = body
+    _update_cells("members", idx, {"note": note})
+    _CACHE.pop("members", None)
+    return True
 
 
 def delete_member(member_id) -> None:
@@ -624,6 +663,19 @@ def delete_member(member_id) -> None:
     if idx:
         _api(_ws("members").delete_rows, idx)
         _CACHE.pop("members", None)
+
+
+def delete_readings_for_member(member_id) -> int:
+    """その会員の控えを全部消す（完全削除の時だけ使う）。消した件数を返す。
+
+    ★下の行から消す。上から消すと、残りの行番号がずれて別の行を消してまう。
+    """
+    idxs = sorted(_find_rows("readings", "member_id", member_id), reverse=True)
+    for i in idxs:
+        _api(_ws("readings").delete_rows, i)
+    if idxs:
+        _CACHE.pop("readings", None)
+    return len(idxs)
 
 
 # ---- readings（鑑定の控え） ----

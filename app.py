@@ -1002,9 +1002,20 @@ if view == VIEW_MEMBERS:
             with st.container(border=True):
                 top = st.columns([4, 1])
                 top[0].markdown(f"**{m['nickname']}**　あなた:{m['me_birth']} ／ 彼:{m['him_birth']}")
-                if top[1].button("削除", key=f"mem_del_{m['id']}"):
-                    store.delete_member(m["id"])
-                    st.rerun()
+                # ★★★2026-09-28：一押しで消える作りをやめた（店主の要望で作り直し）。
+                #   ★前は「削除」を押した瞬間に行が消えとった。確認も無い。
+                #   ★★ほんで消えるんは【会員の登録だけ】で、鑑定の控えと個別鑑定書PDFは
+                #     readings に残る。member_id の行き先が無くなるんで、もう辿れん。
+                #     戻ってきた時に、また鑑定書を貼り直してもらうことになる。
+                #   ★★★せやから既定は【退会】にする。控えは残して、会員の一覧から外すだけ。
+                #     会員判定（自動返信の抑止）は list_members が既定で外すんで、そのまま外れる。
+                if top[1].button("退会にする", key=f"mem_out_{m['id']}"):
+                    _fn = _backend_attr("set_member_withdrawn")
+                    if _fn and _fn(m["id"], True):
+                        st.success(f"「{m['nickname']}」を退会にしました（控えは残しています）")
+                        st.rerun()
+                    else:
+                        st.error("退会にできませんでした")
                 if m["note"]:
                     st.caption(f"メモ: {m['note']}")
                 hist = store.list_readings(m["id"])
@@ -1075,3 +1086,54 @@ if view == VIEW_MEMBERS:
                             if h["worry"]:
                                 st.caption(f"悩み: {h['worry']}")
                             st.text(h["reading"])
+
+    # ---------------- 退会した会員（戻す・完全に削除する） ----------------
+    # ★2026-09-28 新設。退会は取り消せる。完全削除だけは取り消せんので、二段で確かめる。
+    _gone = []
+    try:
+        _lm = _backend_attr("list_members")
+        _isw = _backend_attr("member_is_withdrawn")
+        if _lm and _isw:
+            _gone = [dict(x) for x in _lm(include_withdrawn=True) if _isw(x)]
+    except Exception as e:
+        st.caption(f"退会した会員の読み込みに失敗（{e}）")
+    if _gone:
+        with st.expander(f"🗂 退会した会員（{len(_gone)}名）", expanded=False):
+            st.caption("退会にすると会員の一覧から外れて、公式LINEでも会員扱いをしません。"
+                       "控えは残っているので、戻せば元どおりです。")
+            for g in _gone:
+                with st.container(border=True):
+                    cs = st.columns([4, 1, 1])
+                    _hist = store.list_readings(g["id"])
+                    _n_k = sum(1 for h in _hist if h["month"] == "個別鑑定書")
+                    cs[0].markdown(f"**{g['nickname']}**　{g.get('note') or ''}")
+                    cs[0].caption(f"控え {len(_hist)}件"
+                                  + ("・個別鑑定書あり" if _n_k else "・個別鑑定書なし"))
+                    if cs[1].button("会員に戻す", key=f"mem_back_{g['id']}"):
+                        _fn = _backend_attr("set_member_withdrawn")
+                        if _fn and _fn(g["id"], False):
+                            st.success(f"「{g['nickname']}」を会員に戻しました")
+                            st.rerun()
+                        else:
+                            st.error("戻せませんでした")
+                    _ck = f"mem_purge_ok_{g['id']}"
+                    if cs[2].button("完全に削除", key=f"mem_purge_{g['id']}"):
+                        st.session_state[_ck] = True
+                    if st.session_state.get(_ck):
+                        st.error(f"「{g['nickname']}」の登録と、控え {len(_hist)}件"
+                                 + ("（個別鑑定書を含む）" if _n_k else "")
+                                 + "を消します。これは取り消せません。")
+                        b = st.columns([1, 1, 3])
+                        if b[0].button("消す", key=f"mem_purge_yes_{g['id']}", type="primary"):
+                            try:
+                                _dr = _backend_attr("delete_readings_for_member")
+                                n = _dr(g["id"]) if _dr else 0
+                                store.delete_member(g["id"])
+                                st.session_state.pop(_ck, None)
+                                st.success(f"「{g['nickname']}」を削除しました（控え {n}件も削除）")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"削除に失敗しました（{e}）")
+                        if b[1].button("やめる", key=f"mem_purge_no_{g['id']}"):
+                            st.session_state.pop(_ck, None)
+                            st.rerun()
