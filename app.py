@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 import re
 import time
-from datetime import datetime
+from datetime import date, datetime
 
 import streamlit as st
 
@@ -158,6 +158,30 @@ _BURST_GAP_H = 6
 # ★2026-08-23：時間で切れん連投のための上限。件数と字数の両方で止める
 _BURST_MAX_N = 12
 _BURST_MAX_CHARS = 2500
+
+
+def _jp_birthday(label: str, key: str, default_year: int):
+    """年/月/日の日本語セレクトで生年月日を選ばせ 'YYYY-MM-DD' を返す。無効な日付ならNone。
+
+    ★★★2026-09-28：これが app.py から消えとった。
+      2026-08-21に無料診断の画面を外した時（896a758）、その中で使うとったこの関数まで
+      一緒に消してもうた。★会員の登録フォームも同じ関数を呼んどったんで、
+      それ以来【👥会員の画面を開くだけで NameError】になっとった。
+      ★★会員の登録も、退会の操作も、画面ごと落ちるんで一切でけへん状態やった。
+      ★★★消す時は、その関数を他所が使うてへんか見る。ここは戻すだけで直る。
+    """
+    st.markdown(f"**{label}**")
+    years = list(range(date.today().year, 1954, -1))
+    cy, cm, cd = st.columns(3)
+    y = cy.selectbox("年", years, index=years.index(default_year) if default_year in years else 0,
+                     key=f"{key}_y", format_func=lambda v: f"{v}年")
+    m = cm.selectbox("月", list(range(1, 13)), key=f"{key}_m", format_func=lambda v: f"{v}月")
+    d = cd.selectbox("日", list(range(1, 32)), key=f"{key}_d", format_func=lambda v: f"{v}日")
+    try:
+        return date(y, m, d).strftime("%Y-%m-%d")
+    except ValueError:
+        st.warning(f"「{label}」の{y}年{m}月{d}日は存在しません。日を選び直してください。")
+        return None
 
 
 def _backend_attr(name: str):
@@ -1074,8 +1098,14 @@ if view == VIEW_MEMBERS:
                                 #   ちょうど15,000字＝【末尾が落ちとる】。鑑定書の後ろは
                                 #   第七章（やったらあかんこと）と第八章や。★いちばん効く処方が消える。
                                 store.add_reading(m["id"], "個別鑑定書", "（納品済み個別鑑定PDFの全文）", text)
-                                st.success(f"鑑定書を登録しました（{len(text)}字"
-                                           + (f"・宛名「{_to} 様へ」" if _to else "") + "）")
+                                # ★★2026-09-28：ここで宛名（_to）を出しとったが、
+                                #   その宛名を取り出す処理は 2026-08-21（896a758）に
+                                #   無料診断の画面ごと消えとった。★変数だけが残って NameError。
+                                #   ★★上の add_reading は通っとるんで、【登録は済んどるのに
+                                #     「登録に失敗しました」と出る】状態やった。
+                                #     見た店主がもう一回押したら、同じ鑑定書が二重に入る。
+                                #   宛名の照合は下の「他の会員の控えと同じ中身か」で足りとる。表示だけ落とす。
+                                st.success(f"鑑定書を登録しました（{len(text)}字）")
                                 st.rerun()
                     except Exception as e:
                         st.error(f"登録に失敗しました（{e}）")
