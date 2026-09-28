@@ -13,7 +13,7 @@ from .config import active_profile, load_config
 from .diagnosis import AI_LEAK_RE, JARGON, strip_ai_leak, strip_jargon
 from .kantei import strip_markdown
 from .config import env as _env
-from .llm import complete
+from .llm import complete, usage_line
 from .threads_client import ThreadsClient
 
 # コメント返信の生成モデル。
@@ -441,4 +441,6 @@ def process_replies(client: ThreadsClient) -> dict:
                 except Exception as e2:
                     print(f"[replies] 既読の解除にも失敗（この一件は手で見る）: {e2}")
 
+    # ★この回で使ったトークンとキャッシュの当たり具合を一行残す（費用を後から追える）
+    print(usage_line())
     return stats

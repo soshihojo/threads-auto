@@ -77,6 +77,50 @@ def complete(system: str, user: str, *, model: str | None = None, max_tokens: in
     return _create(kwargs, cache=cache and len(system) >= _CACHE_MIN_CHARS, require_complete=require_complete)
 
 
+# ★★★2026-09-28 新設：キャッシュが当たっとるかをログに出す。
+#   ★今までは「効いとる前提」で組んどっただけで、当たっとるかは一度も見てへんかった。
+#     ★指示文を一字直したらそこで書き直しになるし、TTLを跨いだら当たらん。
+#       どっちも黙って起きるんで、数字が出てへんと気づけん。
+#   ★★目安（LINE会話の実際の呼び出し間隔から）：5分キャッシュで75%、1時間で94%。
+#     ★これを下回り続けとったら、指示文がどこかで変わっとる。
+_USAGE = {"read": 0, "write": 0, "fresh": 0, "out": 0, "calls": 0}
+
+
+def _log_usage(msg, model: str) -> None:
+    u = getattr(msg, "usage", None)
+    if u is None:
+        return
+    read = int(getattr(u, "cache_read_input_tokens", 0) or 0)
+    write = int(getattr(u, "cache_creation_input_tokens", 0) or 0)
+    fresh = int(getattr(u, "input_tokens", 0) or 0)
+    out = int(getattr(u, "output_tokens", 0) or 0)
+    _USAGE["read"] += read
+    _USAGE["write"] += write
+    _USAGE["fresh"] += fresh
+    _USAGE["out"] += out
+    _USAGE["calls"] += 1
+    mark = "当たり" if read else ("書き込み" if write else "使ってへん")
+    print(f"[llm] {model} 入力{read + write + fresh}（キャッシュ{mark}"
+          f" 読み{read}/書き{write}/新規{fresh}）出力{out}")
+
+
+def usage_totals() -> dict:
+    """この処理で使ったトークンの合計。仕事の終わりに一行出す用。"""
+    u = dict(_USAGE)
+    total_in = u["read"] + u["write"] + u["fresh"]
+    u["hit_rate"] = (u["read"] / total_in) if total_in else 0.0
+    return u
+
+
+def usage_line() -> str:
+    u = usage_totals()
+    if not u["calls"]:
+        return "[llm] 生成は呼ばんかった"
+    return (f"[llm] 合計 {u['calls']}回　入力{u['read'] + u['write'] + u['fresh']}"
+            f"（読み{u['read']}/書き{u['write']}/新規{u['fresh']}）出力{u['out']}"
+            f"　キャッシュが効いた割合 {u['hit_rate']*100:.0f}%")
+
+
 class IncompleteGeneration(RuntimeError):
     """Do not save a partial response over an existing artifact."""
 
@@ -127,6 +171,7 @@ def _create(kwargs: dict, *, cache: bool, require_complete: bool = False) -> str
                                      "cache_control": {"type": "ephemeral", "ttl": _CACHE_TTL}}]
                 try:
                     msg = client().messages.create(**cached)
+                    _log_usage(msg, str(kwargs.get("model") or ""))
                     return _response_text(msg, require_complete)
                 except Exception as e:
                     if not _is_cache_rejection(e):
@@ -134,6 +179,7 @@ def _create(kwargs: dict, *, cache: bool, require_complete: bool = False) -> str
                     _cache_supported = False
                     print(f"[llm] プロンプトキャッシュが使えんかったので無効化した（生成は続行）: {e}")
             msg = client().messages.create(**kwargs)
+            _log_usage(msg, str(kwargs.get("model") or ""))
             return _response_text(msg, require_complete)
         except Exception as e:
             if not _is_transient(e):
