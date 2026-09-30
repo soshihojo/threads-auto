@@ -80,3 +80,36 @@ def test_clear_is_only_called_on_cached_functions(name):
            if not _is_cached(funcs[fname])}
     assert not bad, (
         f"{name}: キャッシュの指定が無い関数に .clear() を呼んどる（実行したら落ちる）: {bad}")
+
+
+# ★★2026-09-30：「よその男」が「よ彼」に化けた。綾さんの鑑定書に二箇所出た。
+#   雑な男呼びを直すガードが、「よその男」の中の「その男」だけを「彼」に替えて、
+#   頭の「よ」が残る。読んだ人には意味の取れん語が並ぶ。
+#   ★「よその男」は彼を雑に呼んどるんやのうて【他人の男】の意味やから、
+#     「彼」に替えたらそもそも意味が壊れる。「よその人」にする。
+def test_other_mans_wording_is_not_mangled():
+    from src.diagnosis import soften_rude
+    assert soften_rude("よその男が滅多にやらんことや") == "よその人が滅多にやらんことや"
+    assert "よ彼" not in soften_rude("よその男の話")
+    # 今まで通り直るもんは、そのまま直る
+    assert soften_rude("あの男は冷たい") == "彼は冷たい"
+    assert soften_rude("そんな男やめとき") == "そんな人やめとき"
+    # 別の意味の語は触らん
+    assert soften_rude("よその男性の話") == "よその男性の話"
+    assert soften_rude("その男前な顔") == "その男前な顔"
+
+
+# ★★★2026-09-30：「そりゃあいつか離れるでしょ」——彼が言うた言葉の引用や。
+#   これは「そりゃあ」＋「いつか」やのに、機械が「あいつ」と見て
+#   「そりゃ彼か離れるでしょ」に変えるとこやった。★彼の言葉の捏造になる。
+#   雑な言葉が一個漏れるより、引用を壊す方がよっぽど悪い。迷ったら替えん。
+def test_rude_pronoun_guard_does_not_break_quotes():
+    from src.diagnosis import soften_rude
+    for keep in ("そりゃあいつか離れるでしょ", "まあいつかやるわ",
+                 "じゃあいつ会うん", "どこいつも同じや"):
+        assert soften_rude(keep) == keep, keep
+    assert soften_rude("あいつは冷たい") == "彼は冷たい"
+    assert soften_rude("あいつから連絡きた") == "彼から連絡きた"
+    assert soften_rude("こいつが好きなんや") == "彼が好きなんや"
+    assert soften_rude("そいつに任せとき") == "その人に任せとき"
+    assert soften_rude("あいつ、来るってよ") == "彼、来るってよ"
