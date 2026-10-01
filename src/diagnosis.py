@@ -175,6 +175,27 @@ def name_mentions_re(base: str) -> "re.Pattern":
         re.M)
 
 
+# ★★★2026-10-01：カギカッコの中は触らん。
+#   ★中身は、彼や本人が実際に言うた言葉の引用や。そこは原文どおりが正しい。
+#   ★★実害になりかけた（チカさんの回）：彼の言葉の引用
+#     「距離近く過ごせるのもチカが初めて」が【「チカさんが初めて」】に書き換わった。
+#     ★彼はそんな言い方してへん。★★引用を直したら、それはもう彼の言葉やない。
+#   （見張る側の check_draft は、前からカギカッコを外して数えとった。
+#     ★直す側だけが外してへんかった。そこを揃える）
+_QUOTED_RE = re.compile(r"「[^」]*」")
+
+
+def _outside_quotes(text: str, fn) -> str:
+    """カギカッコの外だけに fn を当てる。"""
+    out, last = [], 0
+    for m in _QUOTED_RE.finditer(text):
+        out.append(fn(text[last:m.start()]))
+        out.append(m.group(0))
+        last = m.end()
+    out.append(fn(text[last:]))
+    return "".join(out)
+
+
 def add_honorific(text: str, name: str) -> str:
     """本文に出た呼び捨てを、指定された呼び名の形に揃える。
 
@@ -193,12 +214,12 @@ def add_honorific(text: str, name: str) -> str:
             base = name[: -len(suf)]
             if not base:
                 return text
-            return name_mentions_re(base).sub(name, text)
+            return _outside_quotes(text, lambda t: name_mentions_re(base).sub(name, t))
     # ★敬称の指定が無い呼び名（「まや」「ちー」）にも さん を足す（2026-09-13）。
     #   既に「まやさん」になっとる所は二重に足さんよう、後読みで弾く。
     if not name:
         return text
-    return name_mentions_re(name).sub(f"{name}さん", text)
+    return _outside_quotes(text, lambda t: name_mentions_re(name).sub(f"{name}さん", t))
 
 
 def soften_rude(text: str) -> str:

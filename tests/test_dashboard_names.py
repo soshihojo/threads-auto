@@ -177,3 +177,15 @@ def test_honorific_is_not_inserted_inside_other_words():
     assert add_honorific("またみきに縁がある", "みきさん") == "またみきさんに縁がある"
     # 既に付いとるもんに重ねん
     assert add_honorific("りささんのために", "りささん") == "りささんのために"
+
+
+# ★★★2026-10-01：カギカッコの中を書き換えたら、彼の言葉の捏造になる。
+#   チカさんの回で出かかった。彼の言葉の引用
+#   「距離近く過ごせるのもチカが初めて」が「チカさんが初めて」に変わるとこやった。
+def test_honorific_leaves_quoted_words_alone():
+    from src.diagnosis import add_honorific
+    t = ("彼はこう言うた。「セックスしたいと思えるのはチカだけ」"
+         "「距離近く過ごせるのもチカが初めて」。チカは、その言葉を握っとる。")
+    r = add_honorific(t, "チカさん")
+    assert "「距離近く過ごせるのもチカが初めて」" in r   # 引用はそのまま
+    assert "。チカさんは、その言葉を握っとる。" in r      # 外は直る
