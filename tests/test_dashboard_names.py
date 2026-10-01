@@ -156,3 +156,24 @@ def test_bare_name_check_ignores_names_inside_other_words():
     assert bare("あんたのこと、ちかって呼ぶで。")   # 読点のあとも捕まえる
     assert bare("ちか専用の鑑定書や。")            # 漢字が続く形も捕まえる
     assert bare("ちかさんのために書いた。") == []   # さん付きは当然つかまらん
+
+
+# ★★★2026-10-01：名前の置換が【語の中】で起きて、納品済みの紙を壊した。
+#   りささんの個別鑑定書。呼び名が「りささん」やったんで、本文の「はっきりさせたい」が
+#   「はっきりささんせたい」に化けた。六箇所。相談者はもう読んどる。
+#   ★機械が書いた形跡としては、これ以上のもんはない。
+def test_honorific_is_not_inserted_inside_other_words():
+    from src.diagnosis import add_honorific
+    for keep, name in (("白黒はっきりさせたい性分や", "りささん"),
+                       ("ゆっくりさせてやり", "りささん"),
+                       ("ありさまを見てみ", "りささん"),
+                       ("割り算は苦手や", "りささん"),
+                       ("積み木は崩れる", "みきさん"),
+                       ("編み機は古い", "あみきさん")):
+        assert add_honorific(keep, name) == keep, keep
+    # 呼び捨ては今まで通り直す
+    assert add_honorific("りさという人", "りささん") == "りささんという人"
+    assert add_honorific("ウチが視た克子は強い", "克子さん") == "ウチが視た克子さんは強い"
+    assert add_honorific("またみきに縁がある", "みきさん") == "またみきさんに縁がある"
+    # 既に付いとるもんに重ねん
+    assert add_honorific("りささんのために", "りささん") == "りささんのために"

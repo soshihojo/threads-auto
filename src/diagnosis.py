@@ -143,6 +143,38 @@ def with_honorific(name: str) -> str:
     return n if n.endswith(("さん", "ちゃん", "くん", "様", "君", "さま")) else f"{n}さん"
 
 
+# ★★★2026-10-01：名前の置換を【語の中】でやってもうた。これがいちばん重い事故や。
+#
+#   実害（りささんの個別鑑定書・納品済み）：呼び名が「りささん」やったんで、
+#   本文の「はっきりさせたい」が【「はっきりささんせたい」】に化けた。六箇所。
+#   ★「はっき・りさ・せたい」の中の「りさ」を名前と見て、さんを挟み込んどる。
+#   ★★相談者はもう読んどる。★★★機械が書いた形跡としては、これ以上のもんはない。
+#
+#   ★せやから、名前は【語の切れ目にある時だけ】触る。
+#     前は、文の頭・改行・読点・括弧・助詞のあと。
+#     後ろは、助詞か句読点か漢字。
+#   ★★「はっきりさせたい」は前が「き」やから触らん。
+#     「あんたとりさは」は前が「と」やから触る。
+#   ★★★取りこぼし（語の中にある呼び捨て）は許す。壊す方がよっぽど高うつく。
+#   ★前の一字は、区切りと助詞のほかに「た る ら ど か」も許す。
+#     「ウチが視た克子さん」「過ごせる真代さん」「せやから瑞稀さん」を拾うためや。
+#     ★壊れる仕掛けを止めとるんは、主に【後ろの一字】の方や（「はっきりさ＋せたい」は
+#       「せ」で弾かれる）。せやから前側はこれくらい広げても壊れん。
+_NAME_BEFORE = r"(?:(?<=^)|(?<=[\s、。！？（）「」【】・はがのにへともやでたるらどか]))"
+_NAME_AFTER = r"(?=[はがのにへともやでさかって、。！？\s]|[\u4E00-\u9FFF]|$)"
+
+
+def name_mentions_re(base: str) -> "re.Pattern":
+    """本文の中で【その人の名前として読める】出方だけを拾う正規表現。
+
+    add_honorific（直す側）と tools/check_draft.py（見張る側）で同じものを使う。
+    別々に書いたら、必ずどっちかがずれる。
+    """
+    return re.compile(
+        _NAME_BEFORE + re.escape(base) + _NAME_AFTER + r"(?!さん|ちゃん|くん|様|君)",
+        re.M)
+
+
 def add_honorific(text: str, name: str) -> str:
     """本文に出た呼び捨てを、指定された呼び名の形に揃える。
 
@@ -161,12 +193,12 @@ def add_honorific(text: str, name: str) -> str:
             base = name[: -len(suf)]
             if not base:
                 return text
-            return re.sub(rf"{re.escape(base)}(?!さん|ちゃん|くん|様|君)", name, text)
+            return name_mentions_re(base).sub(name, text)
     # ★敬称の指定が無い呼び名（「まや」「ちー」）にも さん を足す（2026-09-13）。
     #   既に「まやさん」になっとる所は二重に足さんよう、後読みで弾く。
     if not name:
         return text
-    return re.sub(rf"{re.escape(name)}(?!さん|ちゃん|くん|様|君)", f"{name}さん", text)
+    return name_mentions_re(name).sub(f"{name}さん", text)
 
 
 def soften_rude(text: str) -> str:

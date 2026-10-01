@@ -18,7 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.diagnosis import soften_rude, strip_ai_leak, strip_jargon  # noqa: E402
+from src.diagnosis import (name_mentions_re, soften_rude, strip_ai_leak,  # noqa: E402
+                           strip_jargon)
 from src.line_bot import _split_bubbles  # noqa: E402
 
 # 顧客向けの文面に出たらあかんもん
@@ -110,14 +111,9 @@ def check(text: str, name: str = "", allow_plain: bool = False) -> list[str]:
             #   ★実害：ちかさんのヒアリングで「声をかけたんはどっちからや」の
             #     【どっ・ちか・らや】を呼び捨ての「ちか」と見て警告が出た。
             #   ★★嘘の警告が続くと、ほんまの警告まで流して見るようになる。そっちが怖い。
-            #   ★★★名前の前が【区切り】で、後ろが【助詞か句読点】の時だけ数える。
-            #     　（文の頭・改行・読点・括弧のあと／は が の に へ と も や で 、。！？ 等の前）
-            bare = re.findall(
-                rf"(?:(?<=^)|(?<=[\s、。！？（）「」【】・\n]))"
-                rf"{re.escape(base)}"
-                rf"(?=[はがのにへともやでさかって、。！？\s]|[一-鿿]|$)"
-                rf"(?!さん|ちゃん|くん|様|君)",
-                _outside, re.M)
+            #   ★★★判定は src/diagnosis.py の name_mentions_re に一本化した。
+            #     直す側（add_honorific）と同じ物を使う。別々に書いたら必ずずれる。
+            bare = name_mentions_re(base).findall(_outside)
             if bare:
                 bad.append(
                     f"★呼び名が呼び捨てになっとる箇所が {len(bare)}件。"
