@@ -134,3 +134,25 @@ def test_past_timing_in_a_prescription_is_caught():
     assert check_past_timing(
         [{"title": "いつ", "body": "十月の半ばまでに一通送る。十二月の半ばから年明けあたりに会う話を出す。"}],
         "2026-10-01") == []
+
+
+# ★★2026-10-01：呼び捨ての検査が、別の語の一部に当たっとった。
+#   ちかさんのヒアリングで「声をかけたんはどっちからや」の【どっ・ちか・らや】を
+#   呼び捨ての「ちか」と見て警告を出した。★嘘の警告が続くと、ほんまの警告も流して見る。
+def test_bare_name_check_ignores_names_inside_other_words():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "cd", Path(__file__).resolve().parents[1] / "tools" / "check_draft.py")
+    cd = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cd)
+
+    def bare(text):
+        return [b for b in cd.check(text, name="ちかさん") if "呼び捨て" in b]
+
+    assert bare("声をかけたんはどっちからや。") == []
+    assert bare("どっちが誘うんや。") == []
+    assert bare("ちかは今、止まっとる。")          # 頭の呼び捨ては捕まえる
+    assert bare("あんたのこと、ちかって呼ぶで。")   # 読点のあとも捕まえる
+    assert bare("ちか専用の鑑定書や。")            # 漢字が続く形も捕まえる
+    assert bare("ちかさんのために書いた。") == []   # さん付きは当然つかまらん
