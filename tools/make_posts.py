@@ -201,6 +201,13 @@ def _slot_times(start: datetime, n: int, hours_csv: str, every: int) -> list[dat
     if dead:
         print(f"　 ⚠ --hours に数字の出てへん時間が入っとる: {dead}（中央views 80〜194）")
     out: list[datetime] = []
+    # ★2026-10-01：開始時刻が枠の上に乗ってへん時は、その時刻を一本目にする。
+    #   ★「今から10分後に出したい」が通らんかった。--start 13:12 を渡しても、
+    #     13時の枠は過ぎとるから飛ばされて、一本目が15時になっとった。
+    #   ★★--start は【ここから始める】いう指定や。そこは素直に一本目にする。
+    #     二本目から、指定の時刻の枠に乗せていく。
+    if start.minute or start.hour not in hours:
+        out.append(start)
     day = start.date()
     while len(out) < n:
         for h in hours:
@@ -238,6 +245,13 @@ def main() -> int:
     #   ★★★--hours 1,2,7,11,15,20,22,23 のように渡したら、その時にだけ置く。
     ap.add_argument("--hours", default="",
                     help="置く時刻を時で指定（例 1,2,7,11,15,20,22,23）。--every より優先")
+    # ★★2026-10-01 新設：貼ったあとで【時刻だけ】差し替える口。
+    #   ★店主が50本を貼った直後に「今から10分後に始めたい」となった。
+    #     ★本文も id も合うとるんやから、動かすんは scheduled_at の一列だけでええ。
+    #   ★★本文を貼り直させたらあかん。複数行の本文を貼り直すんが、いちばん崩れる。
+    #   ★せやから --replace と一緒に渡したら、時刻を組み直して【D列だけ】出す。
+    ap.add_argument("--retime", action="store_true",
+                    help="--replace の id の【時刻だけ】組み直す（本文は貼り直さん）")
     ap.add_argument("--replace", default="",
                     help="差し替え。'1-10' のように、持ち回る既存の id を指定する。"
                          "★id と時刻はそのまま使い、その行は重複チェックの対象から外す")
@@ -270,7 +284,9 @@ def main() -> int:
         if len(keep_ids) != len(posts):
             print(f"❌ 差し替えの id が {len(keep_ids)}件、本文が {len(posts)}本。数が合わん")
             return 1
-    dup = check_dup(posts, {(table, i) for i in keep_ids})
+    dup = [] if a.retime else check_dup(posts, {(table, i) for i in keep_ids})
+    if a.retime:
+        print("　 ★時刻だけの差し替えや。本文は変えてへんから、重複チェックは通さん")
     if dup:
         print("❌ 切り口が被っとる。直してからもう一回：")
         for d in dup:
@@ -288,9 +304,14 @@ def main() -> int:
         if missing:
             print(f"❌ シート {table} に id {missing} が無い")
             return 1
-        rows_at = [by_id[i].get("scheduled_at") for i in keep_ids]
-        for i, p in zip(keep_ids, posts):
-            w.writerow([i, p, by_id[i].get("scheduled_at"), "scheduled", "", "", "", "", a.account])
+        if a.retime:
+            base = (datetime.strptime(a.start, "%Y-%m-%d %H:%M") if a.start else datetime.now())
+            rows_at = [t.strftime("%Y-%m-%d %H:%M:%S")
+                       for t in _slot_times(base, len(keep_ids), a.hours, a.every)]
+        else:
+            rows_at = [by_id[i].get("scheduled_at") for i in keep_ids]
+        for i, p, at in zip(keep_ids, posts, rows_at):
+            w.writerow([i, p, at, "scheduled", "", "", "", "", a.account])
         def _pd(s):
             return datetime.strptime(str(s)[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S")
         start, last = _pd(rows_at[0]), _pd(rows_at[-1])
@@ -330,6 +351,14 @@ def main() -> int:
         print(f"　 ★貼り始め: B{ss.FIRST_DATA_ROW + [str(r.get('id')) for r in ss._records(table)].index(keep_ids[0])}")
     else:
         print(f"　 ★貼り始め: B{len(ss._records(table))+ss.FIRST_DATA_ROW}")
+    if keep_ids and a.retime:
+        head = ss.FIRST_DATA_ROW + [str(r.get("id")) for r in ss._records(table)].index(keep_ids[0])
+        col = ss._col(2)   # scheduled_at は3列目（id / text / scheduled_at）
+        print(f"\n★時刻だけ差し替える。貼るんは【{col}{head}】から、この{len(rows_at)}行だけや。")
+        print("　（本文は触らんでええ。この列を上から貼るだけ）")
+        print("\n" + "─" * 60 + "\n")
+        print("\n".join(rows_at))
+        return 0
     print("\n" + "─" * 60 + "\n")
     print(tsv, end="")
     return 0

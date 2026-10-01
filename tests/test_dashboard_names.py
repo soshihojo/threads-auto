@@ -113,3 +113,24 @@ def test_rude_pronoun_guard_does_not_break_quotes():
     assert soften_rude("こいつが好きなんや") == "彼が好きなんや"
     assert soften_rude("そいつに任せとき") == "その人に任せとき"
     assert soften_rude("あいつ、来るってよ") == "彼、来るってよ"
+
+
+# ★★★2026-10-01：処方箋の時期が、もう過ぎとった。
+#   りささんの鑑定書。今日が10月1日やのに、一手目が「お盆が明けてから八月の終わりまで」、
+#   会う話の目安が「九月の終わりから十月あたり」。★どっちも過ぎとる。
+#   内部の材料には今日の日付を渡してあったのに、それだけでは守られんかった。
+def test_past_timing_in_a_prescription_is_caught():
+    from src.kantei import check_past_timing
+    bad = [{"title": "いつ動くか",
+            "body": "時期は、お盆が明けてから、八月の終わりまでの間に一通送る。"
+                    "目安は、九月の終わりから十月あたりに会う話を出す。"}]
+    found = check_past_timing(bad, "2026-10-01")
+    assert len(found) == 2 and "8月" in found[0] and "9月" in found[1]
+    # 過去の出来事（年が付いとる）は、警告にせん
+    assert check_past_timing(
+        [{"title": "縁", "body": "2024年8月に会いに来た。2015年1月に連絡が止まった。"}],
+        "2026-10-01") == []
+    # これからの時期は、年をまたいでも通す
+    assert check_past_timing(
+        [{"title": "いつ", "body": "十月の半ばまでに一通送る。十二月の半ばから年明けあたりに会う話を出す。"}],
+        "2026-10-01") == []

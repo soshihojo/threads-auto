@@ -1014,6 +1014,53 @@ def _assert_clean(chapters: list[dict]) -> None:
         )
 
 
+# ★★★2026-10-01 新設：処方箋の時期が【もう過ぎとる】のを機械で捕まえる。
+#
+#   実害（りささんの回）：今日が10月1日やのに、一手目の時期が
+#   「お盆が明けてから、八月の終わりまでの間」。会う話を出す目安も「九月の終わりから十月あたり」。
+#   ★どっちも過ぎとる。読んだ人は「今10月やのに八月に送れ言われても」となる。
+#   ★★内部の材料には「今日の日付」を渡してあった。★渡すだけでは守られん。
+#     この一ヶ月で何回も証明された話や。せやから機械で見る。
+#
+#   ★見るんは【これからの動きを指しとる文】だけや。
+#     「2024年8月に会いに来た」みたいな過去の出来事は、年が付いとるか、
+#     動きの語（送る・投げる・動く・誘う等）が無いかで外れる。
+_FUTURE_WORDS = ("送", "投げ", "動く", "動き", "誘", "出す", "置く", "連絡", "一手",
+                 "切り出", "会う話", "待つ", "まで", "目安")
+_MONTH_RE = re.compile(r"(?<!年)(?:([1-9]|1[0-2])|([一二三四五六七八九]|十[一二]?))月")
+# ★名前は _KANJI_NUM と分ける。あっちは章番号用の【並び】で、ここは月の【読み替え】や。
+#   ★★一回ここを _KANJI_NUM で書いて、章番号の方を上書きして鑑定書の生成を丸ごと壊した。
+_KANJI_TO_MONTH = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7,
+                   "八": 8, "九": 9, "十": 10, "十一": 11, "十二": 12}
+_SEASON_MONTH = {"お盆": 8, "年末": 12, "年明け": 1, "年始": 1}
+
+
+def check_past_timing(chapters: list[dict], today: str) -> list[str]:
+    """これからの動きに、もう過ぎた月を書いてへんか見る。戻り値は警告の一覧。"""
+    t = datetime.strptime(today, "%Y-%m-%d")
+    out: list[str] = []
+    for c in chapters:
+        for sent in re.split(r"(?<=[。\n])", str(c.get("body") or "")):
+            if not any(w in sent for w in _FUTURE_WORDS):
+                continue
+            if re.search(r"\d{4}年", sent):      # 年が書いてあるんは過去の出来事や
+                continue
+            months = set()
+            for m in _MONTH_RE.finditer(sent):
+                months.add(int(m.group(1)) if m.group(1) else _KANJI_TO_MONTH.get(m.group(2), 0))
+            for k, mon in _SEASON_MONTH.items():
+                if k in sent:
+                    months.add(mon)
+            # ★今月より前の月を指しとったら、過ぎとる疑い。
+            #   ★★年をまたぐ先（1月〜3月を10月に書く等）は、まだ来とらんので外す。
+            for mon in sorted(months):
+                if 1 <= mon < t.month and (t.month - mon) <= 6:
+                    out.append(f"{c.get('title') or c.get('key')}：「{mon}月」は過ぎとる"
+                               f"（今日は{t.month}月）→ {sent.strip()[:60]}")
+                    break
+    return out
+
+
 def make_kantei(name: str, me_birth: str, him_birth: str, details: str,
                 today: str | None = None) -> dict:
     """鑑定書を生成してPDFまで出力。{html, pdf, chars} を返す。"""
@@ -1023,6 +1070,12 @@ def make_kantei(name: str, me_birth: str, him_birth: str, details: str,
     chapters = generate_chapters(name, me_birth, him_birth, details, today=today)
     total = sum(len(c["body"]) for c in chapters)
     _assert_clean(chapters)
+    # ★処方箋の時期が過ぎとらんか。止めはせんが、必ず画面に出す（見落としを防ぐ）
+    _late = check_past_timing(chapters, today)
+    if _late:
+        print(f"⚠ 時期の点検 {len(_late)}件：もう過ぎた月を指しとる。直してから送ること")
+        for x in _late:
+            print(f"   ・{x}")
     from .reading_summary import generate as generate_summary
     print("📝 本文から要点ページを作成中…")
     try:

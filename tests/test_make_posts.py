@@ -66,3 +66,17 @@ def test_slots_fall_back_to_the_old_even_spacing():
 def test_bad_hours_string_stops_instead_of_guessing():
     with pytest.raises(SystemExit):
         _slot_times(datetime(2026, 9, 29, 11, 0), 2, "25,99", 90)
+
+
+def test_an_off_grid_start_becomes_the_first_slot():
+    """「今から10分後に出したい」が通る形か。--start をそのまま一本目にする。"""
+    start = datetime(2026, 10, 1, 13, 12)
+    ts = _slot_times(start, 4, "1,2,7,11,15,20,22,23", 90)
+    assert ts[0] == start
+    assert [t.strftime("%m/%d %H:%M") for t in ts[1:]] == ["10/01 15:00", "10/01 20:00", "10/01 22:00"]
+
+
+def test_a_start_that_sits_on_a_slot_is_not_doubled():
+    start = datetime(2026, 10, 1, 15, 0)
+    ts = _slot_times(start, 3, "1,2,7,11,15,20,22,23", 90)
+    assert [t.strftime("%m/%d %H:%M") for t in ts] == ["10/01 15:00", "10/01 20:00", "10/01 22:00"]
