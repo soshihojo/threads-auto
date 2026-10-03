@@ -27,6 +27,32 @@ _CHOICE_RE = re.compile(
 _MARU = "①②③④⑤⑥⑦⑧⑨"
 
 
+# ★★★2026-10-04 新設：星座のコメントも手挙げとして拾う。
+#
+#   なんで要るか。★新規の人に届く装置として、生まれ月はもう枯れとる（飽和）。
+#   ★★星座は、うちで一本も使うてへん（1,366本のうちゼロ）。読者の側は馴染みがある。
+#   ★★★ほんで、ここが肝心や——手挙げと判定されへんコメントには、
+#     返信に【診断のURLが付かん】（replies.py の is_lead の時だけ付ける作り）。
+#     ★星座で募って、返信にURLが付かんかったら、コメントは増えても診断は増えん。
+#     ★★投稿の型を変える前に、受け皿の方を直しとかなあかん。
+#
+#   ★短文だけに限る。「座」が書いてある時だけ拾う（「魚」「蟹」の一字で誤爆せんため）。
+_ZODIAC_RE = re.compile(
+    r"^[^\n]{0,8}?(牡羊|おひつじ|オヒツジ|ひつじ|牡牛|おうし|オウシ|双子|ふたご|フタゴ|"
+    r"蟹|かに|カニ|獅子|しし|シシ|乙女|おとめ|オトメ|天秤|てんびん|テンビン|"
+    r"蠍|さそり|サソリ|射手|いて|イテ|山羊|やぎ|ヤギ|水瓶|みずがめ|ミズガメ|魚|うお|ウオ)\s*座"
+    r"[^\n]{0,12}$")
+
+
+def match_zodiac(text: str) -> str | None:
+    """星座のコメントなら、その星座（「乙女座」等）を返す。短文だけ見る。"""
+    t = (text or "").strip()
+    if not t or "\n" in t:
+        return None
+    m = _ZODIAC_RE.match(t)
+    return f"{m.group(1)}座" if m else None
+
+
 def match_choice(text: str) -> str | None:
     """番号で選ばせるCTAへの回答なら、選ばれた番号（"1"〜"9"）を返す。
 
@@ -87,4 +113,8 @@ def match_keyword(text: str) -> str | None:
         n = match_choice(text)
         if n:
             return f"願い{n}"
+    if profile.get("lead_zodiac_comments"):
+        z = match_zodiac(text)
+        if z:
+            return z
     return None

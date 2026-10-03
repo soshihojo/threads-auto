@@ -189,3 +189,21 @@ def test_honorific_leaves_quoted_words_alone():
     r = add_honorific(t, "チカさん")
     assert "「距離近く過ごせるのもチカが初めて」" in r   # 引用はそのまま
     assert "。チカさんは、その言葉を握っとる。" in r      # 外は直る
+
+
+# ★★★2026-10-04：星座のコメントを手挙げとして拾う。
+#   ★返信に診断のURLが付くんは is_lead の時だけや（replies.py）。
+#     星座で募っても、ここで拾えてへんかったらコメントだけ増えて診断は増えん。
+#   ★★投稿の型を変える前に、受け皿を直しとかなあかん、という話や。
+def test_zodiac_comments_are_treated_as_leads():
+    from src import leads
+    for t, want in (("乙女座", "乙女座"), ("私は牡羊座です", "牡羊座"),
+                    ("おとめ座🌙", "おとめ座"), ("彼は天秤座", "天秤座"),
+                    ("水瓶座やで", "水瓶座")):
+        assert leads.match_keyword(t) == want, t
+    # 一字だけ・長文は拾わん（誤爆を避ける）
+    for t in ("魚", "蟹", "3年待っとる", "座ってるだけ"):
+        assert leads.match_keyword(t) != t
+    # 今まで通りのものは壊れてへん
+    assert leads.match_keyword("9月生まれ") == "生まれ月"
+    assert leads.match_keyword("①") == "願い1"
