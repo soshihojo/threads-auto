@@ -339,25 +339,46 @@ def main() -> int:
     end = last
     days = max(1, (end.date() - start.date()).days + 1)
     how = f"{a.hours} 時に置く" if a.hours else f"{a.every}分おき"
-    print(f"✅ {len(posts)}本　id {first}〜{first+len(posts)-1}")
+    ids_label = (f"id {min(int(i) for i in keep_ids)}〜{max(int(i) for i in keep_ids)}"
+                 if keep_ids else f"id {first}〜{first+len(posts)-1}")
+    print(f"✅ {len(posts)}本　{ids_label}")
     print(f"　 {start:%m/%d %H:%M} 〜 {end:%m/%d %H:%M}（{how}・約{len(posts)/days:.0f}本/日）")
     print(f"　 字数 中央{statistics.median(ns):.0f}（{min(ns)}〜{max(ns)}）／"
           f"生まれ月 {100*sum(1 for p in posts if DEVICE.search(p))//len(posts)}%")
     print(f"　 控え: {dst}")
     label = "椿（tsubaki_honne）" if table == "scheduled_posts" else "椿さん（tsubakisan_honne）"
     print(f"　 ★貼り先のシート: 【{table}】　{label}")
-    if keep_ids:
+    if keep_ids and a.retime:
+        # ★時刻だけの差し替えや。貼る場所は下で【D列】として出す。
+        #   ★ここで「貼り始め: B◯◯」を出したら、本文の列と取り違える。出さん。
+        pass
+    elif keep_ids:
         print(f"　 ★★差し替え：id {keep_ids[0]}〜{keep_ids[-1]} の行に【上書き】する")
         print(f"　 ★貼り始め: B{ss.FIRST_DATA_ROW + [str(r.get('id')) for r in ss._records(table)].index(keep_ids[0])}")
     else:
         print(f"　 ★貼り始め: B{len(ss._records(table))+ss.FIRST_DATA_ROW}")
     if keep_ids and a.retime:
-        head = ss.FIRST_DATA_ROW + [str(r.get("id")) for r in ss._records(table)].index(keep_ids[0])
+        # ★★★2026-10-04：貼る列は【シートの行順】で出す。
+        #   ★--replace に id を好きな順で渡せる（出す順番を入れ替えるため）。
+        #     ★★けど貼る列をその順で出したら、行とずれて全部おかしくなる。
+        #   ★せやから、時刻は【渡した順】に割り当てて、出力は【行順】に並べ直す。
+        #   ★★行が飛んどったら（間に別のidが挟まっとったら）、そこで止める。
+        #     一列で貼れんのに貼らせたら、関係ない行を壊す。
+        sheet_ids = [str(r.get("id")) for r in ss._records(table)]
+        by_row = sorted(((sheet_ids.index(i), i, at) for i, at in zip(keep_ids, rows_at)),
+                        key=lambda x: x[0])
+        rows_idx = [x[0] for x in by_row]
+        if rows_idx != list(range(rows_idx[0], rows_idx[0] + len(rows_idx))):
+            print("❌ 指定した id がシート上で連続してへん。一列で貼れんので止める")
+            return 1
+        head = ss.FIRST_DATA_ROW + rows_idx[0]
         col = ss._col(2)   # scheduled_at は3列目（id / text / scheduled_at）
-        print(f"\n★時刻だけ差し替える。貼るんは【{col}{head}】から、この{len(rows_at)}行だけや。")
+        print(f"\n★時刻だけ差し替える。貼るんは【{col}{head}】から、この{len(by_row)}行だけや。")
         print("　（本文は触らんでええ。この列を上から貼るだけ）")
+        print("　★出す順番と、貼る順番はちがう。下は【シートの行順】に並べ直してある")
+        print("　出る順番：" + " → ".join(f"id{i}({at[5:16]})" for i, at in zip(keep_ids, rows_at)))
         print("\n" + "─" * 60 + "\n")
-        print("\n".join(rows_at))
+        print("\n".join(at for _, _, at in by_row))
         return 0
     print("\n" + "─" * 60 + "\n")
     print(tsv, end="")
