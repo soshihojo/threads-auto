@@ -18,8 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.diagnosis import (name_mentions_re, soften_rude, strip_ai_leak,  # noqa: E402
-                           strip_jargon)
+from src.diagnosis import (find_time_assumptions, name_mentions_re,  # noqa: E402
+                           soften_rude, strip_ai_leak, strip_jargon)
 from src.line_bot import _split_bubbles  # noqa: E402
 
 # 顧客向けの文面に出たらあかんもん
@@ -209,6 +209,11 @@ def _check_time_greeting(text: str):
     head = "\n".join(text.splitlines()[:6])          # 挨拶は頭にしか出えへん
     head = re.sub(r"「[^」]*」", "", head)             # 相手の言葉の引用は見逃す
     hit = [w for w in _TIME_GREETINGS if w in head]
+    # ★★2026-10-04：挨拶だけやのうて、読む人の「今」を決めつけた言葉も止める。
+    #   実害（ａｉｒｉさん）：18時58分の相談に深夜2時44分に返信を作って、
+    #   「こんな時間まで起きとるんは」「深夜やから」「今夜はちゃんと休みや」と書いた。
+    #   ★前の作りは頭の六行しか見てへんかったし、語も挨拶だけやった。どっちも素通りする。
+    hit += [w for w in find_time_assumptions(text) if w not in hit]
     if hit:
         return [f"★時間帯の挨拶が入っとる（{'/'.join(hit)}）。"
                 f"書く時刻と送る時刻はちがうんやから、time-of-day に寄りかからんこと。"

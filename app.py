@@ -340,6 +340,24 @@ def _build_consult_context(cb, cmem, chist, incoming, _lmsgs, _refs, _span_h):
     return hist_str, warns
 
 
+# ★★★2026-10-04：相談が【いつ届いたか】を、生成に必ず渡す。
+#   ★前は、相談が3時間以上にまたがる時だけ各行の頭に時刻を入れとった。
+#     ★★一通だけ・短いまとまりの時は、時刻がどこにも入らんかった。
+#   ★実害（ａｉｒｉさん）：18時58分の一言に、深夜2時44分に返信を作った。
+#     生成は「今さっき届いた」と読んで「こんな時間まで起きとるんは」「深夜やから」と書いた。
+#     ★★会員から「私がラインしたのは、19時ですよ？」と返ってきた。
+#   ★★★またがっとるかどうかに関係なく、いちばん新しい一通の届いた日時を渡す。
+def _received_at(rows_ts) -> str:
+    """相談のいちばん新しい一通が届いた日時を「10月3日 18時58分」の形で返す。"""
+    if not rows_ts:
+        return ""
+    try:
+        t = datetime.fromisoformat(str(rows_ts[-1][0]))
+    except Exception:
+        return ""
+    return f"{t.month}月{t.day}日 {t.hour}時{t.minute:02d}分"
+
+
 # ---------------- 一括モードの部品（★下書きを作る／送る） ----------------
 def _draft_one(cb) -> dict:
     """一人ぶんの下書きを作る。★一人ずつの画面と、まったく同じ材料を通す。"""
@@ -367,7 +385,7 @@ def _draft_one(cb) -> dict:
 
     hist_str, warns = _build_consult_context(cb, cmem, chist, incoming, _lmsgs, _refs, _span_h)
     res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str,
-                                     kantei=kantei_text)
+                                     kantei=kantei_text, received_at=_received_at(_rows_ts))
     # ★控えに保存するんも、一人ずつの時と同じ作法にする（同じ相談文なら上書き）
     reading_id = None
     try:
@@ -894,7 +912,8 @@ if view == VIEW_CONSULT:
                         st.warning(_w)
                     with st.spinner("椿が視てます…"):
                         res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str,
-                                                         kantei=kantei_text)
+                                                         kantei=kantei_text,
+                                                         received_at=_received_at(_rows_ts))
                     # 相談と返信を自動で控えに保存（次回の返信生成が「前回までのやりとり」として参照する）。
                     # 同じ相談文で作り直した場合は前の控えを上書き＝重複させない
                     reading_id = None

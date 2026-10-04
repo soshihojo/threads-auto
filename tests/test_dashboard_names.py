@@ -207,3 +207,33 @@ def test_zodiac_comments_are_treated_as_leads():
     # 今まで通りのものは壊れてへん
     assert leads.match_keyword("9月生まれ") == "生まれ月"
     assert leads.match_keyword("①") == "願い1"
+
+
+# ★★★2026-10-04：会員返信で、相談が【いつ届いたか】を渡してへんかった。
+#   ａｉｒｉさんが18時58分に送った一言に、店主が深夜2時44分に返信を作った。
+#   プロンプトには「今の日時」だけが入っとって、相談の届いた時刻が無い。
+#   生成は「今さっき届いた」と読んで「こんな時間まで起きとるんは」「深夜やから」と書いた。
+#   ★会員から「私がラインしたのは、19時ですよ？ 先生たまにおかしいです」と返ってきた。
+def test_time_of_day_assumptions_are_caught():
+    from src.diagnosis import find_time_assumptions
+    bad = find_time_assumptions("こんな時間まで起きとるんは。深夜やから、今夜はちゃんと休みや")
+    assert {"こんな時間", "深夜", "今夜"} <= set(bad)
+    # 引用（会員が言うた言葉）は見逃す
+    assert find_time_assumptions("会員が「おはよう」と送ってきたんやな") == []
+    # 普通の返信は素通し
+    assert find_time_assumptions("その一言に落ち着きが乗っとるのが分かるわ") == []
+
+
+def test_received_time_is_passed_to_the_member_reply():
+    """app.py が、相談のいちばん新しい一通の届いた日時を渡しとるか。"""
+    import ast
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[1] / "app.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    calls = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and n.func.attr == "generate_consult"]
+    assert calls, "generate_consult の呼び出しが見つからん"
+    for c in calls:
+        kw = {k.arg for k in c.keywords}
+        assert "received_at" in kw, "届いた日時を渡してへん呼び出しがある"
