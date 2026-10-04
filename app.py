@@ -455,7 +455,14 @@ def _render_bulk_consult(waiting, board):
             try:
                 st.session_state[_key][str(cb["id"])] = _draft_one(cb)
             except Exception as e:
-                st.session_state[_key][str(cb["id"])] = {"error": str(e)}
+                # ★★2026-10-04：理由も一緒に残す。前は str(e) だけを畳んだ行の中に隠しとって、
+                #   画面には「作れんかった人が4人おる」しか出んかった。
+                #   ★何回押したらええんか、こっちが悪いんか、向こうが混んどるんか、
+                #     店主が判断でけへん。★★理由は畳まんと、上に出す。
+                import traceback as _tb
+                print(f"[bulk] {cb['nickname']} の下書きで落ちた:\n{_tb.format_exc()}")
+                st.session_state[_key][str(cb["id"])] = {
+                    "error": f"{type(e).__name__}: {e}"[:300]}
             _t.sleep(0.2)          # 立て続けに投げすぎん
         _bar.progress(1.0, text="できたで")
         st.rerun()
@@ -471,7 +478,11 @@ def _render_bulk_consult(waiting, board):
     _ok = [cb for cb in waiting if not (res.get(str(cb["id"])) or {}).get("error")]
     _ng = [cb for cb in waiting if (res.get(str(cb["id"])) or {}).get("error")]
     if _ng:
-        st.error(f"作れんかった人が {len(_ng)}人おる：" + "、".join(x["nickname"] for x in _ng))
+        _why = (res.get(str(_ng[0]["id"])) or {}).get("error", "")
+        st.error(f"作れんかった人が {len(_ng)}人おる：" + "、".join(x["nickname"] for x in _ng)
+                 + (f"\n\n理由（{_ng[0]['nickname']}）：{_why}" if _why else ""))
+        if any(w in _why for w in ("429", "Overloaded", "529", "RateLimit", "Timeout", "quota")):
+            st.info("これは混んどるだけや。少し待って、もう一回『ぜんぶ下書きする』を押したら通ることが多い。")
 
     st.divider()
     _send_ids = []
