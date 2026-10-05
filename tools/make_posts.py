@@ -252,6 +252,11 @@ def main() -> int:
     #   ★せやから --replace と一緒に渡したら、時刻を組み直して【D列だけ】出す。
     ap.add_argument("--retime", action="store_true",
                     help="--replace の id の【時刻だけ】組み直す（本文は貼り直さん）")
+    # ★2026-10-05：本文も時刻も両方替える時の口。
+    #   ★伸びん型の投稿を、新しい本文で上書きする時に使う。
+    #     ★★--retime だけやと時刻の列しか出んので、本文を替えられん。
+    ap.add_argument("--full", action="store_true",
+                    help="--retime と一緒に使う。時刻の列やのうて、9列ぜんぶ出す（本文も差し替える時）")
     ap.add_argument("--replace", default="",
                     help="差し替え。'1-10' のように、持ち回る既存の id を指定する。"
                          "★id と時刻はそのまま使い、その行は重複チェックの対象から外す")
@@ -284,8 +289,11 @@ def main() -> int:
         if len(keep_ids) != len(posts):
             print(f"❌ 差し替えの id が {len(keep_ids)}件、本文が {len(posts)}本。数が合わん")
             return 1
-    dup = [] if a.retime else check_dup(posts, {(table, i) for i in keep_ids})
-    if a.retime:
+    # ★★2026-10-05：--full は【本文も替える】。せやから重複チェックは通さなあかん。
+    #   ★ここを retime 一本で飛ばしとって、本文を替える時まで素通りしかけた。
+    _skip_dup = a.retime and not a.full
+    dup = [] if _skip_dup else check_dup(posts, {(table, i) for i in keep_ids})
+    if _skip_dup:
         print("　 ★時刻だけの差し替えや。本文は変えてへんから、重複チェックは通さん")
     if dup:
         print("❌ 切り口が被っとる。直してからもう一回：")
@@ -357,6 +365,12 @@ def main() -> int:
         print(f"　 ★貼り始め: B{ss.FIRST_DATA_ROW + [str(r.get('id')) for r in ss._records(table)].index(keep_ids[0])}")
     else:
         print(f"　 ★貼り始め: B{len(ss._records(table))+ss.FIRST_DATA_ROW}")
+    if keep_ids and a.retime and a.full:
+        head = ss.FIRST_DATA_ROW + [str(r.get("id")) for r in ss._records(table)].index(keep_ids[0])
+        print(f"\n★本文も時刻も差し替える。貼るんは【B{head}】から、この{len(posts)}行や。")
+        print("\n" + "─" * 60 + "\n")
+        print(tsv, end="")
+        return 0
     if keep_ids and a.retime:
         # ★★★2026-10-04：貼る列は【シートの行順】で出す。
         #   ★--replace に id を好きな順で渡せる（出す順番を入れ替えるため）。
