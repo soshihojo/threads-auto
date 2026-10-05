@@ -1047,6 +1047,13 @@ def check_past_timing(chapters: list[dict], today: str) -> list[str]:
                 continue
             months = set()
             for m in _MONTH_RE.finditer(sent):
+                # ★★2026-10-05：「九月二十日」みたいに【日にち付き】は、過ぎた出来事の話や。
+                #   ★のりこさんの回で三件とも誤検出した（「九月二十日に長文を送って、返事を待っとる」）。
+                #   ★★嘘の警告が続いたら、本物の警告まで流して見るようになる。
+                #   ★★★処方箋の時期は「八月の終わりまで」「十月あたり」みたいに【幅】で書く。
+                #     日にちが付いとる月は、ここでは見ん。
+                if re.match(r"[0-9０-９一二三四五六七八九十]{1,3}日", sent[m.end():]):
+                    continue
                 months.add(int(m.group(1)) if m.group(1) else _KANJI_TO_MONTH.get(m.group(2), 0))
             for k, mon in _SEASON_MONTH.items():
                 if k in sent:
