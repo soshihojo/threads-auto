@@ -643,7 +643,7 @@ members:
       koyomi: false      # 暦は付かん。ここが上の層との差や
     # 上の層。相談し放題＋暦つき（名前は未決）
     koyomi:
-      label: "潮暦（名前は仮）"
+      label: "椿の潮暦"
       price: 19800
       consult_limit: 0
       weekly: true

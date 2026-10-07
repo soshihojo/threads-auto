@@ -32,7 +32,10 @@ def test_dashboard_has_only_the_two_views_in_use(tmp_path, monkeypatch):
     from src import store_sqlite
     monkeypatch.setattr(store_sqlite, "DB_PATH", tmp_path / "app.db")
     monkeypatch.setenv("APP_PASSWORD", "")
-    app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=15)
+    # ★タイムアウトを60秒に。この画面はシートを何回も読むんで、15秒やと落ちる。
+    #   ★実際に「AppTest script run timed out after 15(s)」で、時々こけとった。
+    #     ★★中身の不具合やのうて、本番のシートの応答待ちや。待つ時間を伸ばすんが正しい。
+    app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=60)
     app.run()
     assert not app.exception
     assert app.radio[0].options == ["💬 会員相談", "👥 会員"]
