@@ -1,9 +1,9 @@
-"""潮見（29,800円→9,800円）と潮見・構え（16,800円）——90日の暦を売る商品。
+"""潮見（29,800円→9,800円）と潮見・構え（16,800円）——三十日の暦を売る商品。
 
 ★2026-08-13 新設。
 
 3,980円の鑑定書は「彼が分かる」商品や。処方箋の章に「いつ・何を」は書いてあるが、
-90日を一望する暦は無い。相談の大半が「別れて待つ」「音信不通」——時間の悩みやのに、
+ひと月を一望する暦は無い。相談の大半が「別れて待つ」「音信不通」——時間の悩みやのに、
 待ち時間そのものには形が与えられてへん。そこを埋めるのが潮見や。
 
 【この商品の生命線】
@@ -13,7 +13,7 @@
 同じ情報を売っとるのに、片方だけが崩れる。せやから src/lint.py の予言文法検査を
 strict で通すまで、この商品は一枚も出さん。
 
-  潮見   29,800円→9,800円 … 鑑定書＋九十日の暦＋解説
+  潮見   29,800円→9,800円 … 鑑定書＋三十日の暦＋解説
   構え    16,800円 … 潮見＋視直しの札2枚＋受けの型3〜5枚＋お守り札
 """
 from __future__ import annotations
@@ -24,6 +24,44 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+
+# ★★★2026-10-07：潮見の暦を【三十日 → 三十日】に変えた（店主の判断）。
+#   ★なんで縮めたか。月額（潮暦）が毎月引き直す商品になるんで、
+#     三十日ぶん出しても三分の二が翌月に上書きされる。単発の潮見と月額の線も引きにくい。
+#   ★★縮めた分は【密度】で返す。
+#     ・前の形（九十日）では、日付が入る日が11〜15日。九十日の約15%やった
+#     ・三十日では、動いてええ日8〜10＋手を出さん日4〜6＝12〜16日（30日の約半分）
+#     ★日付の付いた指示が【二日に一回】ある暦になる。値段は据え置きや。
+#   ★★★この二つは必ず一緒に直す。片方だけ直したら、文と絵がずれる。
+SPAN_DAYS = 30          # 新しく売る潮見の既定（暦が見る日数）
+
+# ★★★2026-10-07：期間は【引数で差し替えられる】ようにしてある。既定が30日いうだけや。
+#   ★なんで要るか。改定より前に潮見を買うた人には、九十日で約束してある。
+#     ★★買うた時の約束は、こっちの都合で縮めたらあかん。
+#     ★★★その人らのヒアリングが返ってきたら `--span 90` で組む。
+#   ★ファイル名も見出しも、期間に合わせて勝手に変わる（九十日の暦／三十日の暦）。
+#     ここを手で直す運用にしたら、必ずどっかで食い違う。
+_SPAN_LABEL = {30: "三十日", 45: "四十五日", 60: "六十日", 90: "九十日"}
+
+
+def span_label(days: int = SPAN_DAYS) -> str:
+    """期間の呼び名。表紙・ファイル名・文面で同じものを使う。"""
+    return _SPAN_LABEL.get(int(days), f"{int(days)}日")
+
+
+def week_rows(days: int = SPAN_DAYS) -> int:
+    """週の行数。端数の週も1行として数える（30日なら5行、90日なら13行）。"""
+    return -(-int(days) // 7)
+
+
+def _week_hint(days: int) -> str:
+    """週の欄の書き方の指示。端数が出る時だけ、その断りを足す。"""
+    n, rest = week_rows(days), int(days) % 7
+    if not rest:
+        return f"（{n}行。"
+    return (f"（{n}行。\n"
+            f"　★1行目から{n - 1}行目は7日ずつ。{n}行目は残りの{rest}日だけになる。それでええ。\n"
+            f"　　{n}行目の一言は、次の暦へ渡す繋ぎとして書く。")
 from pathlib import Path
 
 from . import lint
@@ -38,12 +76,12 @@ from .llm import complete
 #   潮見（9,800円）を買うた人   → 月詠み 5,980円  ←★こっち
 #   ★感想が返ってくるんは納品の何日もあとや。その頃には、何を買うた人か忘れとる。
 #     LINEのやりとりを遡っても、オーダー番号しか残ってへんから商品は分からん。
-#   ★★せやから【kantei_out に九十日の暦があるか】が、いちばん確実な見分け方になる。
+#   ★★せやから【kantei_out に三十日の暦があるか】が、いちばん確実な見分け方になる。
 #     暦がある＝潮見の人＝5,980円。★ここを間違えて安い方を送ったら、あとから値上げは言えん。
 URL_TSUKIYOMI_SHIOMI = "https://buy.stripe.com/dRmdR88gCghlbf682e53O09"
 TSUKIYOMI_SHIOMI_PRICE = "月5,980円"
 
-SHIOMI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。個別鑑定書に添える「九十日の暦（潮見表）」を組む。
+SHIOMI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。個別鑑定書に添える「三十日の暦（潮見表）」を組む。
 
 これは9,800円（通常29,800円）の納品物の芯になる部分。相談者は、いつ動いていつ待つかが分からんまま毎日を過ごしとる。その待ち時間に形を与えるのがこの暦や。
 
@@ -65,23 +103,24 @@ SHIOMI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つば�
 - 自分がAIであることを匂わせる一切を書かない。名乗るのは「椿」だけ
 - 指定された形式を厳密に守って出力する"""
 
-_FMT = """次の形式で、余計な前置きも後書きも付けずに出力してください。
+_FMT_TMPL = """次の形式で、余計な前置きも後書きも付けずに出力してください。
 
 === 週 ===
-（13行。1行ずつ「週番号|開始日|終了日|潮の名前|一言」を半角の縦棒で区切る。
+{week_hint}1行ずつ「週番号|開始日|終了日|潮の名前|一言」を半角の縦棒で区切る。
 　潮の名前は「静」「仕込み」「動」「凪」「守り」から選ぶ。
 　一言は30〜45字。
-　★★★主語の「あんたは」を毎行つけないこと。十三行ぜんぶ同じ言葉で始まったら読みにくい。
+　★★★主語の「あんたは」を毎行つけないこと。全部の行が同じ言葉で始まったら読みにくい。
 　　主語を省いて、いきなり動詞から書く。相談者がやることだけを書けば、それで主語は伝わる。
 　　○「こっちからは何も送らん。手が届かん場所におるんが守りになる週や」
 　　×「あんたは今週、こっちから何も送らん。手が届かん場所におるんが守りになる」
 　★ただし主語を省いてええんは【相談者の行動】だけや。
 　　「連絡が来る週」「返事が来る」のような到来の書き方は、主語を省いても予言になる。一語も書かない）
 1|{d0}|{d6}|静|（一言）
-…13行目まで
+…{week_n}行目まで
 
 === 動いてええ日 ===
 （8〜10行。「日付|その日にやること」。日付は{start}から{end}の範囲内。
+　★{span_name}のうち8〜10日や。
 　★★★ここがこの暦でいちばん使われるとこや。読んだ人がその場で手を動かせるように書く。
 　　「答えを求めん一通を置く」だけでは、何を書いたらええか分からんまま終わる。
 　　★送る日には、送る文の見本を「」で必ず添える。相談者の事情に合う、短い一文にする。
@@ -94,7 +133,7 @@ _FMT = """次の形式で、余計な前置きも後書きも付けずに出力�
 2026-08-22|（やること。送る日なら見本の文も「」で入れる）
 
 === 手を出さん日 ===
-（3〜5行。「日付|なぜその日は動かんのか」。相談者の事情・記念日・彼の予定から選ぶ。
+（4〜6行。「日付|なぜその日は動かんのか」。相談者の事情・記念日・彼の予定から選ぶ。
 　★なぜ動かんのかの理由を書く。「動かん」だけで終わらせん。
 　★主語の「あんたは」は付けん。一行は35〜60字）
 
@@ -147,19 +186,29 @@ def _parse(raw: str) -> Shiomi:
     return Shiomi(weeks, pairs("動いてええ日"), pairs("手を出さん日"), block("解説"))
 
 
+def _fmt_for(today: str, end: date, span: int) -> str:
+    d0 = datetime.strptime(today, "%Y-%m-%d").date()
+    return _FMT_TMPL.format(
+        d0=today, d6=(d0 + timedelta(days=6)).isoformat(),
+        start=today, end=end.isoformat(),
+        week_hint=_week_hint(span), week_n=week_rows(span), span_name=span_label(span))
+
+
 def generate_shiomi(name: str, me_birth: str, him_birth: str, details: str,
-                    today: str | None = None) -> Shiomi:
-    """九十日の暦を生成する。予言文法の検査を通らんかったら一度だけ書き直させる。"""
+                    today: str | None = None, span: int = SPAN_DAYS) -> Shiomi:
+    """暦を生成する。予言文法の検査を通らんかったら一度だけ書き直させる。
+
+    span は暦が見る日数。既定は三十日。★改定前に潮見を買うた人には90を渡す。
+    """
     today = today or datetime.now().strftime("%Y-%m-%d")
     d0 = datetime.strptime(today, "%Y-%m-%d").date()
-    end = d0 + timedelta(days=89)
-    fmt = _FMT.format(d0=today, d6=(d0 + timedelta(days=6)).isoformat(),
-                      start=today, end=end.isoformat())
+    end = d0 + timedelta(days=span - 1)
+    fmt = _fmt_for(today, end, span)
     user = (
         f"=== 内部参考（本文には翻訳して出す。用語・数字は出さない） ===\n"
         f"{_internal_brief(name, me_birth, him_birth, today)}\n\n"
         f"=== 相談者から届いた詳細（全文） ===\n{details}\n\n"
-        f"=== 暦が見る期間 ===\n{today} から {end} までの90日\n\n{fmt}"
+        f"=== 暦が見る期間 ===\n{today} から {end} までの{span}日\n\n{fmt}"
     )
     for attempt in (1, 2):
         raw = _clean(complete(SHIOMI_SYSTEM, user, max_tokens=4000, temperature=0.7).strip())
@@ -167,12 +216,22 @@ def generate_shiomi(name: str, me_birth: str, him_birth: str, details: str,
         body = "\n".join(w[4] for w in s.weeks) + "\n" + "\n".join(g[1] for g in s.go) \
             + "\n" + "\n".join(t[1] for t in s.stay) + "\n" + s.note
         bad = lint.check_prophecy(body, strict=True)
-        if not bad:
+        # ★週の行数と期間も一緒に見る。どっちかが外れたら作り直させる
+        wk = check_weeks(s, today, span)
+        if not bad and not wk:
             return s
-        print(f"  ⚠ 予言文法が{len(bad)}件（{attempt}回目）: {bad[0].text[:40]}")
+        if bad:
+            print(f"  ⚠ 予言文法が{len(bad)}件（{attempt}回目）: {bad[0].text[:40]}")
+        if wk:
+            print(f"  ⚠ 週の組み方が{len(wk)}件（{attempt}回目）: {wk[0][:50]}")
         if attempt == 1:
-            user += ("\n\n【書き直しの指示】前回の出力に、彼を主語にした未来の記述が混ざっとった。"
-                     "例：" + bad[0].text[:50] + "。すべての行の主語を相談者にして書き直すこと。")
+            if bad:
+                user += ("\n\n【書き直しの指示】前回の出力に、彼を主語にした未来の記述が混ざっとった。"
+                         "例：" + bad[0].text[:50] + "。すべての行の主語を相談者にして書き直すこと。")
+            if wk:
+                user += ("\n\n【書き直しの指示】週の欄の組み方が違う。"
+                         + "。".join(wk[:3])
+                         + f"。週は{week_rows(span)}行で組むこと。")
     return s
 
 
@@ -182,9 +241,9 @@ _SHIO_COLOR = {"動": "#b3364b", "仕込み": "#c98a3c", "守り": "#5b7c8d",
                "静": "#8a8f7a", "凪": "#9a9a9a"}
 
 
-def build_calendar_html(name: str, s: Shiomi, today: str) -> str:
+def build_calendar_html(name: str, s: Shiomi, today: str, span: int = SPAN_DAYS) -> str:
     d0 = datetime.strptime(today, "%Y-%m-%d").date()
-    end = d0 + timedelta(days=89)
+    end = d0 + timedelta(days=span - 1)
     # ★2026-08-13：ここで「09-05」を lstrip("0") しとったせいで "9/05" になり、
     #   マス目側の "9/5" と一致せんかった。1桁の日だけ暦に色が付かん事故や
     #   （生成は正しいのに、絵にだけ出えへん。刷ってから気づく類のやつ）。
@@ -238,7 +297,7 @@ def build_calendar_html(name: str, s: Shiomi, today: str) -> str:
                    for p in s.note.split("\n") if p.strip())
 
     return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
-<title>九十日の暦 {_html.escape(name)}</title><style>
+<title>三十日の暦 {_html.escape(name)}</title><style>
 /* ★★2026-08-20：余白の直し。
    @page の margin は【印刷（PDF）にしか効かん】。
    スクショで出しとるPNGは screen メディアやから、body の margin:0 のまんまで
@@ -288,7 +347,7 @@ li b {{ display:inline-block; min-width:40px; color:#a52e44; text-indent:0; }}
 .note p {{ margin:0 0 7px; text-align:justify; font-size:10px; }}
 .foot {{ text-align:center; font-size:8.5px; color:#a99; margin:14px 0 4px; }}
 </style></head><body>
-<div class="head"><h1>九十日の暦</h1>
+<div class="head"><h1>三十日の暦</h1>
 <p>{_html.escape(_with_hon(name))}のために　{d0.year}年{d0.month}月{d0.day}日 — {end.year}年{end.month}月{end.day}日</p></div>
 <div class="months">{''.join(months)}</div>
 <div class="legend">
@@ -305,7 +364,34 @@ li b {{ display:inline-block; min-width:40px; color:#a52e44; text-indent:0; }}
 </body></html>"""
 
 
-def check_daylists(s: "Shiomi", today: str, horizon: int = 89) -> list[str]:
+def check_weeks(s: "Shiomi", today: str, span: int = SPAN_DAYS) -> list[str]:
+    """週の行が、暦の期間に収まっとるか見る。
+
+    ★★★2026-10-07 新設。九十日（13行）から三十日（5行）に縮めた時の用心や。
+      ★プロンプトを5行に直しても、生成の側が前の形（13行）に引っ張られることがある。
+        ★★そうなると、6行目から先は【暦の外の週】や。
+          絵のマス目は三十日ぶんしか無いんで、紙には出んのに表には出る。
+          ★刷ってから気づく類やから、ここで止める。
+    """
+    d0 = datetime.strptime(today, "%Y-%m-%d").date()
+    end = d0 + timedelta(days=span - 1)
+    out: list[str] = []
+    if len(s.weeks) != week_rows(span):
+        out.append(f"週の行が{len(s.weeks)}行ある（{week_rows(span)}行で組むこと）")
+    for w in s.weeks:
+        for label, raw in (("開始日", w[1]), ("終了日", w[2])):
+            try:
+                d = datetime.strptime(str(raw).strip(), "%Y-%m-%d").date()
+            except ValueError:
+                out.append(f"{w[0]}週目の{label}が日付の形になっとらん: {raw!r}")
+                continue
+            if not (d0 <= d <= end):
+                out.append(f"{w[0]}週目の{label}が{span_label(span)}の外や: {d.isoformat()}")
+    return out
+
+
+def check_daylists(s: "Shiomi", today: str, horizon: int | None = None,
+                   span: int = SPAN_DAYS) -> list[str]:
     """動いてええ日／手を出さん日の突き合わせ。
 
     ★2026-08-20 新設。生成に「同じ日を両方に入れるな」と書いても、実際に入ってきた。
@@ -317,7 +403,7 @@ def check_daylists(s: "Shiomi", today: str, horizon: int = 89) -> list[str]:
       刷ってから気づく類やから、ここで止める。
     """
     d0 = datetime.strptime(today, "%Y-%m-%d").date()
-    end = d0 + timedelta(days=horizon)
+    end = d0 + timedelta(days=span - 1 if horizon is None else horizon)
     out: list[str] = []
 
     def parse(v: str) -> date | None:
@@ -337,7 +423,7 @@ def check_daylists(s: "Shiomi", today: str, horizon: int = 89) -> list[str]:
                 out.append(f"{label}の日付が一日ぶんの形になっとらん（絵に出えへん）: {raw!r}")
                 continue
             if not (d0 <= d <= end):
-                out.append(f"{label}の日付が九十日の外や: {d.isoformat()}")
+                out.append(f"{label}の日付が{span_label(span)}の外や: {d.isoformat()}")
                 continue
             if d in seen and seen[d] != label:
                 out.append(f"{d.isoformat()} が「動いてええ日」と「手を出さん日」の両方に入っとる")
@@ -409,7 +495,7 @@ def record_shiomi_buyer(name: str, today: str) -> None:
 #     一通にまとめたら長すぎて、後半（＝暦の説明）から確実に読み飛ばされるからや。
 
 CAL_NOTE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。
-九十日の暦（潮見表）を納品するときに、LINEで送る案内文の【見どころ】の部分だけを書く。
+三十日の暦（潮見表）を納品するときに、LINEで送る案内文の【見どころ】の部分だけを書く。
 
 声と文体:
 - 一人称「ウチ」、相手は「あんた」。関西弁。毒舌7：愛3の姉御肌
@@ -421,7 +507,7 @@ CAL_NOTE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つ�
 
 選ぶ基準:
 - 一つ目は、いちばん近い山場か、本人の事情で特別な意味を持つ日
-- 二つ目は、この九十日で初めてこっちから動く日（暦の「動」の週にある日）
+- 二つ目は、この三十日で初めてこっちから動く日（暦の「動」の週にある日）
 - 三つ目は、いちばん先にある着地点の日
 それぞれ、なんでその日なのかを、その人の事情に触れて書く。
 
@@ -439,12 +525,12 @@ CAL_NOTE_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つ�
 #   「彼から連絡が来る週」と書いてもうたら、否定文脈（＝一行も書いてへん）やのに
 #   lint.check_prophecy が拾う。lint は文脈を見んし、見んでええ。ここは商品の生命線やから
 #   検査は厳しいままにしといて、こっちの言い回しの方を避ける。
-_CAL_NOTE_HEAD = """ほんで、九十日の暦の方や。ここは読み方があるから、先に言うとく。
+_CAL_NOTE_HEAD = """ほんで、三十日の暦の方や。ここは読み方があるから、先に言うとく。
 
 まず、この紙は「待て」と言う紙やない。待つ時間に、形をつける紙や。
 
 線が無いまま毎日を過ごすと、通知を開いては確かめて、そのたびに削れる。
-それを九十日続けたら、向こうがどうこう言う前に、あんたの方が保たん。
+それを三十日続けたら、向こうがどうこう言う前に、あんたの方が保たん。
 せやから、先に線を引いとく。今日は動く日か、手を止める日か。
 それが決まってたら、画面を見ても意味が変わる。
 
@@ -472,8 +558,9 @@ _CAL_NOTE_TAIL = """この暦は、今日から手元に置いといたらええ
 今日が動く日か、手を止める日か——迷た時は、それだけ見てくれたらええからな🌙"""
 
 
-def generate_calendar_note(name: str, s: "Shiomi", details: str) -> str:
-    """九十日の暦に添える納品文。★鑑定書の納品文とは別便で送るための一通。"""
+def generate_calendar_note(name: str, s: "Shiomi", details: str,
+                           span: int = SPAN_DAYS) -> str:
+    """暦に添える納品文。★鑑定書の納品文とは別便で送るための一通。"""
     weeks = "\n".join(f"{w[1]}〜{w[2]} [{w[3]}] {w[4]}" for w in s.weeks)
     go = "\n".join(f"{g[0]} {g[1]}" for g in s.go)
     stay = "\n".join(f"{t[0]} {t[1]}" for t in s.stay)
@@ -484,8 +571,9 @@ def generate_calendar_note(name: str, s: "Shiomi", details: str) -> str:
         f"=== 手を出さん日 ===\n{stay}\n\n"
         "この暦の見どころを三つ、書いてください。"
     )
+    _sys = CAL_NOTE_SYSTEM.replace("三十日", span_label(span))
     for attempt in (1, 2):
-        raw = complete(CAL_NOTE_SYSTEM, user, max_tokens=1200, temperature=0.8).strip()
+        raw = complete(_sys, user, max_tokens=1200, temperature=0.8).strip()
         mid = add_honorific(soften_rude(strip_jargon(strip_markdown(
             strip_ai_leak(strip_instruction_leak(raw))))), name).strip()
         bad = lint.check_prophecy(mid, strict=True)
@@ -496,32 +584,38 @@ def generate_calendar_note(name: str, s: "Shiomi", details: str) -> str:
             user += ("\n\n【書き直しの指示】前回の出力に、彼を主語にした未来の記述が混ざっとった。"
                      "例：" + bad[0].text[:50] + "。すべての行の主語を相談者にして書き直すこと。")
     # ★DELIVERY_CLOSING（月詠みの線引き）は付けん。一通目に入っとる。上のコメント参照
-    return f"{_CAL_NOTE_HEAD}\n{mid}\n\n{_CAL_NOTE_TAIL}"
+    head = _CAL_NOTE_HEAD.replace("三十日", span_label(span))
+    return f"{head}\n{mid}\n\n{_CAL_NOTE_TAIL}"
 
 
 def make_shiomi(name: str, me_birth: str, him_birth: str, details: str,
-                today: str | None = None) -> dict:
-    """九十日の暦を生成してPDFとPNGを出す。鑑定書とセットで潮見（29,800円→9,800円）になる。"""
+                today: str | None = None, span: int = SPAN_DAYS) -> dict:
+    """暦を生成してPDFとPNGを出す。鑑定書とセットで潮見（29,800円→9,800円）になる。
+
+    span は暦が見る日数。★既定は三十日。改定前に買うた人には90を渡す。
+    """
     today = today or datetime.now().strftime("%Y-%m-%d")
     OUT_DIR.mkdir(exist_ok=True)
-    print("🌊 九十日の暦を組んどる…")
-    s = generate_shiomi(name, me_birth, him_birth, details, today)
+    label = span_label(span)
+    print(f"🌊 {label}の暦を組んどる…")
+    s = generate_shiomi(name, me_birth, him_birth, details, today, span=span)
     print(f"  ✓ {len(s.weeks)}週 / 動いてええ日{len(s.go)} / 手を出さん日{len(s.stay)} "
           f"/ 解説{len(s.note)}字")
 
     body = "\n".join(w[4] for w in s.weeks) + "\n" + s.note
     problems = lint.check_prophecy(body, strict=True)
     problems += lint.check_dates("\n".join(f"{g[0]} {g[1]}" for g in s.go + s.stay),
-                                 today=today, horizon_days=95, scope="all")
-    problems += check_daylists(s, today)
+                                 today=today, horizon_days=span + 5, scope="all")
+    problems += check_daylists(s, today, span=span)
+    problems += check_weeks(s, today, span)
     print("  ✅ 自動検査 問題なし" if not problems else f"  ⚠ 自動検査 {len(problems)}件")
     for p in problems:
         print(f"   ・{p}")
 
-    stem = f"九十日の暦_{name}"
+    stem = f"{label}の暦_{name}"
     html_path = OUT_DIR / f"{stem}.html"
     pdf_path = OUT_DIR / f"{stem}.pdf"
-    html_path.write_text(build_calendar_html(name, s, today), encoding="utf-8")
+    html_path.write_text(build_calendar_html(name, s, today, span), encoding="utf-8")
     subprocess.run([CHROME, "--headless", "--disable-gpu", "--no-pdf-header-footer",
                     f"--print-to-pdf={pdf_path}", html_path.resolve().as_uri()],
                    check=True, capture_output=True, timeout=120)
@@ -530,13 +624,13 @@ def make_shiomi(name: str, me_birth: str, him_birth: str, details: str,
                     f"--screenshot={png_path}", html_path.resolve().as_uri()],
                    check=True, capture_output=True, timeout=120)
     for p in (pdf_path, png_path):
-        shutil.copy2(p, Path.home() / "Downloads" / f"九十日の暦_{_with_hon(name)}{p.suffix}")
+        shutil.copy2(p, Path.home() / "Downloads" / f"{label}の暦_{_with_hon(name)}{p.suffix}")
     print(f"  📜 {pdf_path}\n  🖼 {png_path}")
 
     # ★暦の納品文は、鑑定書の納品文とは別便や。ここで必ず出す（2026-08-20ルール化）。
     #   「あとで書く」にしたら、暦がおまけの画像として流れる。二回それをやった。
     print("✍️ 暦の納品文を生成中…")
-    cal_note = generate_calendar_note(name, s, details)
+    cal_note = generate_calendar_note(name, s, details, span=span)
     note_path = OUT_DIR / f"納品文_{name}_暦.txt"
     note_path.write_text(cal_note, encoding="utf-8")
     print(f"  💬 暦の納品文: {note_path}")

@@ -134,6 +134,9 @@ def init_db() -> None:
             pass
         if "line_user_id" not in {r[1] for r in c.execute("PRAGMA table_info(members)")}:
             c.execute("ALTER TABLE members ADD COLUMN line_user_id TEXT DEFAULT ''")
+        # ★2026-10-07：月詠みの層。空欄＝据え置きの「し放題」。
+        if "plan" not in {r[1] for r in c.execute("PRAGMA table_info(members)")}:
+            c.execute("ALTER TABLE members ADD COLUMN plan TEXT DEFAULT ''")
 
 
 def append_ops_event(event: dict) -> bool:
@@ -370,6 +373,23 @@ def add_member(nickname: str, me_birth: str, him_birth: str, note: str = "", lin
 def set_member_line_user(member_id, line_user_id: str) -> bool:
     with conn() as c:
         return c.execute("UPDATE members SET line_user_id=? WHERE id=?", (line_user_id, member_id)).rowcount > 0
+
+
+def set_member_plan(member_id, plan: str) -> bool:
+    """会員の層（月詠みのプラン）を書き換える。空欄＝し放題（据え置き）。"""
+    with conn() as c:
+        return c.execute("UPDATE members SET plan=? WHERE id=?",
+                         (str(plan or "").strip(), member_id)).rowcount > 0
+
+
+def consult_counts(ym: str) -> dict[str, int]:
+    """その年月（"2026-10"）に、会員ごとに何通の相談へ返したかを数える。"""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT member_id, COUNT(*) n FROM readings "
+            "WHERE month='相談' AND created_at LIKE ? GROUP BY member_id",
+            (f"{ym}%",)).fetchall()
+    return {str(r["member_id"]): int(r["n"]) for r in rows}
 
 
 # ★2026-09-28：退会の印。sheets 側と同じ約束（note の先頭に【退会 日付】）。

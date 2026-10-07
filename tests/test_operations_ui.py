@@ -22,15 +22,22 @@ def test_owner_can_create_complete_and_reopen_task(tmp_path, monkeypatch):
     assert "対応待ち：0件" in "\n".join(w.value for w in app.markdown)
 
 
-def test_full_dashboard_has_operations_view(tmp_path, monkeypatch):
+def test_dashboard_has_only_the_two_views_in_use(tmp_path, monkeypatch):
+    """★2026-10-07：「📋 対応と売上」の画面は外した（店主が使うてへん）。
+
+    ★消したんは画面だけ。src/operations.py は残っとる。
+      会員相談の画面が、手で返した記録（reply.ack）を読むのに使うからや。
+      ★★一緒に消したら、手で返した分が「未返信」に化けて二重に返す。
+    """
     from src import store_sqlite
     monkeypatch.setattr(store_sqlite, "DB_PATH", tmp_path / "app.db")
     monkeypatch.setenv("APP_PASSWORD", "")
     app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=15)
-    app.session_state["view"] = "📋 対応と売上"
     app.run()
     assert not app.exception
-    assert "📋 対応と売上" in app.radio[0].options
+    assert app.radio[0].options == ["💬 会員相談", "👥 会員"]
+    # ★operations の読み取りは残っとること（会員相談がこれを使う）
+    from src.operations import acknowledgements, events, unacknowledged  # noqa: F401
 
 
 def test_empty_ledger_is_not_presented_as_zero_sales(tmp_path, monkeypatch):

@@ -28,7 +28,7 @@ try:
 except Exception:
     pass
 
-from src import diagnosis, store
+from src import diagnosis, membership, store
 from src.config import active_profile, env
 from src.schedule import now_jst
 
@@ -147,7 +147,12 @@ st.caption(f"プロファイル: {profile['name']}　|　返信モード: 下書
 #   どっちも運用で使わんようになったんで、置いといても画面が重いだけや。
 #   ★消したんは画面だけ。コメント巡回も無料診断そのものも、裏では今までどおり動いとる
 #     （poll.yml と line_app.py の側）。ここで消えたんは「人が見る窓」だけやからな。
-VIEW_CONSULT, VIEW_MEMBERS, VIEW_OPERATIONS = VIEWS = ["💬 会員相談", "👥 会員", "📋 対応と売上"]
+# ★2026-10-07：「📋 対応と売上」の画面を外した（店主が使うてへんので）。
+#   ★消したんは【画面】だけや。src/operations.py は残す。
+#     会員相談の画面が、手で返した記録（reply.ack）を読むのに使うとる。
+#     ★★ここを一緒に消したら、手で返した分が「未返信」に化けて二重に返すことになる。
+#   ★売上を見たい時は tools/uriage.py が残っとる。
+VIEW_CONSULT, VIEW_MEMBERS = VIEWS = ["💬 会員相談", "👥 会員"]
 view = st.radio("画面", VIEWS, horizontal=True, key="view", label_visibility="collapsed")
 st.divider()
 
@@ -386,6 +391,14 @@ def _draft_one(cb) -> dict:
     hist_str, warns = _build_consult_context(cb, cmem, chist, incoming, _lmsgs, _refs, _span_h)
     res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str,
                                      kantei=kantei_text, received_at=_received_at(_rows_ts))
+    # ★★★2026-10-07：これで今月の枠を使い切るなら、終わりやと伝える一行を足す。
+    #   ★黙って止めたらあかん。「無視された」になる。
+    #   ★★実測で10通目が届くんは【月の中央値12日目】や。4割強が月の前半で窓が閉まる。
+    #     そこで何も言わんかったら、残り三週間を「見捨てられた」で過ごすことになる。
+    _notice = membership.limit_notice(cb.get("quota") or {"limit": 0})
+    if _notice:
+        res["reply"] = res["reply"].rstrip() + "\n\n" + _notice
+        warns.append("今月の相談枠を使い切る回や。終わりを伝える一行を末尾に足してある。")
     # ★控えに保存するんも、一人ずつの時と同じ作法にする（同じ相談文なら上書き）
     reading_id = None
     try:
@@ -424,6 +437,156 @@ def _send_one(cb, text: str, reading_id=None) -> tuple[bool, str]:
         return True, f"{cb['nickname']}さんに送信しました"
     except Exception as e:
         return False, str(e)
+
+
+# ---------------- 週の一手（こっちから毎週届ける一通） ----------------
+#
+# ★2026-10-07 新設。月詠みの柱や。
+#   ★作るんは GitHub Actions（毎週月曜の朝）＝ python -m src.main weekly
+#   ★★ここでやるんは【読んで、直して、送る】だけ。生成はここではやらん。
+#     （画面で一人ずつ生成しとったら、十数秒×人数で待たされる）
+# ★★★送ったかどうかは、LINEの記録と突き合わせて見る。
+#   readings に「送った印」の列を足してへんので、本文の頭が
+#   椿の発言として残っとるかで判定する。二通送る事故を防ぐための判定や。
+def _weekly_sent(cb, body: str) -> bool:
+    head = re.sub(r"\s+", "", str(body or ""))[:40]
+    if not head:
+        return False
+    for r in (cb.get("chats") or []):
+        if str(r.get("role")) != "assistant":
+            continue
+        if head and head in re.sub(r"\s+", "", str(r.get("text") or "")):
+            return True
+    return False
+
+
+def _render_weekly(board):
+    from src import weekly as wk
+    mon = wk.last_monday()
+    label = wk.month_label(mon)
+    st.caption(f"{label}　この週ぶんの下書きです。"
+               "作るんは毎週月曜の朝のジョブ（weekly-ichite）。ここでは読んで直して送るだけや。")
+
+    targets = [b for b in board
+               if membership.plan_info(b["plan"])["weekly"]]
+    if not targets:
+        st.info("週の一手が付く層の会員がおらん。👥会員の画面で層を付けてな。"
+                "（plan が空欄の人は据え置きの『し放題』で、週の一手は出さん）")
+        return
+
+    rows = []
+    for cb in targets:
+        hist = store.list_readings(cb["id"], limit=60)
+        got = next((h for h in hist if str(h.get("month")) == label), None)
+        rows.append((cb, got))
+
+    _none = [cb["nickname"] for cb, got in rows if not got]
+    if _none:
+        st.warning("まだ下書きが無い会員：" + "、".join(_none)
+                   + "\n\n端末から `python -m src.main weekly` を走らせるか、"
+                     "GitHubの weekly-ichite を手で動かしてな。")
+
+    for cb, got in rows:
+        if not got:
+            continue
+        body = str(got.get("reading") or "")
+        sent = _weekly_sent(cb, body)
+        with st.container(border=True):
+            st.markdown(f"**{cb['nickname']}**　{'✅ 送信済み' if sent else '🔴 未送信'}"
+                        f"　{len(body)}字　{membership.status_line(cb['quota'])}")
+            txt = st.text_area("週の一手", value=body, height=320,
+                               key=f"wk_txt_{cb['id']}", label_visibility="collapsed")
+            c1, c2 = st.columns([1, 3])
+            if sent:
+                c2.caption("もう送ってある。送り直したい時は、文面を直してからボタンを押してな。")
+            if c1.button("📮 送る", key=f"wk_send_{cb['id']}",
+                         type="primary" if not sent else "secondary",
+                         disabled=not cb["uid"]):
+                ok, msg = _send_one(cb, txt, got.get("id"))
+                (st.success if ok else st.error)(msg)
+                if ok:
+                    st.rerun()
+            if not cb["uid"]:
+                st.caption("LINEが紐付いてへんので送れん。👥会員の画面で紐付けてな。")
+
+
+# ---------------- 月額の状況（層ごとに、何が済んで何が残っとるか） ----------------
+#
+# ★★★2026-10-07 新設。層を二つに分けた時点で、画面にこれが要る。
+#   ★層ごとに届けるもんが違う。頭で覚えて運用したら、必ずどっかで取り違える。
+#     ・月詠み（5,980）… 週の一手4本／月　＋　相談10通まで
+#     ・潮暦　（19,800）… 週の一手4本／月　＋　相談し放題　＋　毎月、三十日の暦を引き直す
+#   ★★いちばん落ちやすいんが【暦の引き直し】や。
+#     週の一手は月曜のジョブが作るから画面に出る。相談は向こうから来るから気づく。
+#     ★暦は、誰も催促してこん。★★せやのに、上の層の値段の三分の二はここにある。
+#     ★★★気づかんまま一ヶ月飛んだら、それは商品を届けてへんのと同じや。だからここで出す。
+def _render_member_status(board):
+    from src import weekly as wk
+    ym = membership.this_month()
+    wk_label = wk.month_label()
+    st.caption(f"{ym} の状況　／　週の一手は {wk_label} ぶんを見とる")
+
+    # 席数の埋まり具合（し放題を売る層は、席を切らんと設計が壊れる）
+    for key, info in ((k, membership.plan_info(k)) for k in membership.plans()):
+        if not info["seats"]:
+            continue
+        n = sum(1 for b in board if b["plan"] == key)
+        st.metric(f"{info['label']}　{n}／{info['seats']}席",
+                  f"{n * info['price']:,}円／月",
+                  delta=("満席や" if n >= info["seats"] else f"あと{info['seats'] - n}席"),
+                  delta_color="inverse" if n >= info["seats"] else "normal")
+
+    rows = []
+    for cb in board:
+        info = membership.plan_info(cb["plan"])
+        hist = store.list_readings(cb["id"], limit=60)
+        # 週の一手：今週ぶんの控えがあるか／それを送ったか
+        w_row = next((h for h in hist if str(h.get("month")) == wk_label), None)
+        if not info["weekly"]:
+            w = "—"
+        elif not w_row:
+            w = "✍️ 未作成"
+        elif _weekly_sent(cb, str(w_row.get("reading") or "")):
+            w = "✅ 送信済"
+        else:
+            w = "📮 未送信"
+        # 暦：今月ぶんを引き直したか
+        if not info["koyomi"]:
+            k = "—"
+        else:
+            k_row = next((h for h in hist
+                          if str(h.get("month") or "").endswith("の暦")
+                          and str(h.get("created_at") or "").startswith(ym)), None)
+            k = "✅ 引き直し済" if k_row else "🗓 今月まだ"
+        rows.append({
+            "会員": cb["nickname"],
+            "層": info["label"],
+            "週の一手": w,
+            "今月の暦": k,
+            "相談": membership.status_line(cb["quota"]).split("・", 1)[-1],
+            "LINE": "○" if cb["uid"] else "✗未リンク",
+        })
+    if not rows:
+        st.info("会員がおらん。")
+        return
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    _todo_w = [r["会員"] for r in rows if r["週の一手"] == "✍️ 未作成"]
+    _todo_s = [r["会員"] for r in rows if r["週の一手"] == "📮 未送信"]
+    _todo_k = [r["会員"] for r in rows if r["今月の暦"] == "🗓 今月まだ"]
+    if _todo_w:
+        st.warning("今週ぶんの週の一手が、まだ作られてへん：" + "、".join(_todo_w)
+                   + "\n\n`python -m src.main weekly` を走らせるか、"
+                     "GitHubの weekly-ichite を手で動かしてな。")
+    if _todo_s:
+        st.info("作ってあるけど、まだ送ってへん：" + "、".join(_todo_s)
+                + "　→ 上の「🗓 週の一手を読んで送る」から送れる。")
+    if _todo_k:
+        st.error("🗓 今月の暦を、まだ引き直してへん会員がおる：" + "、".join(_todo_k)
+                 + "\n\nこれは上の層の中身の柱や。誰も催促してこんので、ここで出しとる。"
+                   "`python -m src.main shiomi` で、その人ぶんを組み直してな。")
+    if not (_todo_w or _todo_s or _todo_k):
+        st.success("今月やることは、ぜんぶ済んどる。ようやっとる。")
 
 
 # ---------------- 未返信ぶんを、まとめて下書きする ----------------
@@ -617,6 +780,15 @@ def _consult_board() -> tuple[str, list[dict], dict]:
     for r in store.all_line_chats(days=45):
         chats_by_uid.setdefault(str(r.get("user_id") or ""), []).append(r)
 
+    # ★2026-10-07：月詠みの層と、今月の相談の通数。
+    #   ★ここで一回だけ数える。会員ごとに数えたら人数ぶんシートを読むことになる。
+    #   ★★数えられんかっても画面は動かす（通数が出んだけ）。ここで落としたらあかん。
+    try:
+        _used = store.consult_counts(membership.this_month())
+    except Exception as e:
+        print(f"[consult] 通数を数えられんかった（画面は続ける）: {e}")
+        _used = {}
+
     # ★★★2026-08-26：会員に line_user_id が入っとったら、そっちを先に使う。
     #   生年月日2つの一致だけで繋いどった頃は、会員が「新しい人を視てほしい」いうて
     #   別の人の生年月日を送った瞬間に line_users.him_birth が上書きされて、紐付けが切れとった。
@@ -677,6 +849,9 @@ def _consult_board() -> tuple[str, list[dict], dict]:
         waiting = [str(r.get("text") or "") for r in wrows]
         board.append({
             "id": str(m["id"]), "nickname": str(m["nickname"]),
+            # ★2026-10-07：層（plan が空欄なら据え置きの「し放題」）と、今月の相談の残り。
+            "plan": membership.plan_of(m),
+            "quota": membership.consult_status(m, _used.get(str(m["id"]), 0)),
             # ★2026-08-23：会員メモも持ってくる。呼び名の指定がここに入っとる
             #   （例：「必ず『なつみさん』。呼び捨て禁止」）。生成に渡さんかったら、
             #   ★実際に「なんで呼び捨てですか」と言われた事故が、また起きる。
@@ -743,14 +918,36 @@ if view == VIEW_CONSULT:
                         unsafe_allow_html=True)
         st.caption("🔴は受信ログ上の未対応候補です。公式LINEで手動返信した時は「対応済みにする」で記録してください。"
                    "記録した受信だけを対象にするため、その後の新着相談は残ります。")
-        _labels = [f"{'🔴' if b['waiting'] else '✅'} {b['nickname']}"
-                   f"{'' if b['uid'] else '（LINE未リンク）'}　{b['last_ts']}" for b in _board]
+        # ★2026-10-07：層ごとに印を分ける。
+        #   🔴 返信が要る　🟡 今月の枠を使い切っとる（上の層を薦める合図）　✅ 返した
+        def _mark(b):
+            if not b["waiting"]:
+                return "✅"
+            return "🟡" if b["quota"]["blocked"] else "🔴"
+        _labels = [f"{_mark(b)} {b['nickname']}"
+                   f"{'' if b['uid'] else '（LINE未リンク）'}　{b['last_ts']}"
+                   f"　{membership.status_line(b['quota'])}" for b in _board]
         # ★★★2026-08-29：未返信の人が溜まった時のための一括モード。
         #   ★生成は一人ずつと【まったく同じ材料】を通す（_build_consult_context）。
         #     別のコードで書いたら、事故対策が片方だけに乗る。それは前にやらかしとる。
         #   ★★送信は必ず【下書きを見てから】や。作った端から飛ぶ形にはせん。
         #     一人ずつ送るんも、まとめて送るんも、どっちも下書きを読んだ後にする。
-        _waiting = [b for b in _board if b["waiting"] and b["uid"]]
+        # ★★★2026-10-07：今月の枠を使い切った会員は、まとめて下書きする対象から外す。
+        #   ★外すだけや。店主が手で返すんは止めん（急な話は別腹やからな）。
+        #   ★★ここで「返さんでええ」にせんのが大事や。枠切れは【昇格の合図】として出す。
+        _waiting = [b for b in _board if b["waiting"] and b["uid"] and not b["quota"]["blocked"]]
+        _over = [b for b in _board if b["waiting"] and b["uid"] and b["quota"]["blocked"]]
+        if _over:
+            st.warning(
+                "🟡 今月の相談枠を使い切った会員が "
+                f"{len(_over)}人おる：{'、'.join(b['nickname'] for b in _over)}\n\n"
+                "まとめて下書きする対象からは外してある。"
+                "枠の切れた人は、上の層（暦つき）を薦める合図や。"
+                "手で返したい時は、下の一覧からその人を選んだらええ。")
+        _up = [b for b in _board if b["quota"]["upsell"]]
+        if _up:
+            st.info("あと少しで枠が切れる会員：" + "、".join(
+                f"{b['nickname']}（残り{b['quota']['remaining']}通）" for b in _up))
         _bulk = st.toggle(
             f"📚 未返信をまとめて下書きする（{len(_waiting)}人）",
             key="con_bulk", value=False,
@@ -758,6 +955,18 @@ if view == VIEW_CONSULT:
                  "一人ずつでも、まとめてでもできます。")
         if _bulk:
             _render_bulk_consult(_waiting, _board)
+            st.stop()
+
+        # ★2026-10-07：層ごとに、何が済んで何が残っとるかの一覧
+        if st.toggle("📊 月額の状況（層ごとの進み具合）", key="con_status", value=False,
+                     help="層ごとに、週の一手・今月の暦・相談の残りがどうなっとるかを一覧で出します。"):
+            _render_member_status(_board)
+            st.stop()
+
+        # ★2026-10-07：週の一手。月曜の朝に作られた下書きを、ここで読んで送る
+        if st.toggle("🗓 週の一手を読んで送る", key="con_weekly", value=False,
+                     help="毎週月曜の朝に作られた『週の一手』を、一人ずつ読んで直して送ります。"):
+            _render_weekly(_board)
             st.stop()
 
         cpick = st.selectbox("会員を選ぶ", _labels, key="con_pick", label_visibility="collapsed")
@@ -925,6 +1134,13 @@ if view == VIEW_CONSULT:
                         res = diagnosis.generate_consult(cmem["me_birth"], cmem["him_birth"], incoming, hist_str,
                                                          kantei=kantei_text,
                                                          received_at=_received_at(_rows_ts))
+                    # ★★★2026-10-07：これで今月の枠を使い切るなら、終わりを伝える一行を足す。
+                    #   ★一括の _draft_one と同じ作法にする。片方だけに乗ったら、
+                    #     どっちで作ったかで会員への伝わり方が変わる。それは前にやらかしとる型や。
+                    _notice = membership.limit_notice(cb.get("quota") or {"limit": 0})
+                    if _notice:
+                        res["reply"] = res["reply"].rstrip() + "\n\n" + _notice
+                        st.warning("今月の相談枠を使い切る回や。終わりを伝える一行を末尾に足してある。")
                     # 相談と返信を自動で控えに保存（次回の返信生成が「前回までのやりとり」として参照する）。
                     # 同じ相談文で作り直した場合は前の控えを上書き＝重複させない
                     reading_id = None
@@ -1014,10 +1230,6 @@ if view == VIEW_CONSULT:
 
 
 # ---------------- 会員リスト ----------------
-if view == VIEW_OPERATIONS:
-    from src.operations_ui import render
-    render()
-
 if view == VIEW_MEMBERS:
     st.caption("サブスク会員を登録（二人の生年月日を保存）。💬会員相談の画面で選ぶだけで返信を生成できます。")
     with st.expander("➕ 会員を登録する", expanded=False):
@@ -1025,6 +1237,25 @@ if view == VIEW_MEMBERS:
         reg_me = _jp_birthday("会員（あなた）の生年月日", "mem_me", 1995)
         reg_him = _jp_birthday("彼の生年月日", "mem_him", 1993)
         memo = st.text_input("メモ（任意・状況など）", key="mem_note")
+        # ★★★2026-10-07：入会の時に層を選ばせる。
+        #   ★ここで選ばんかったら plan が空欄＝【据え置きのし放題】になる。
+        #     新しく入った人が、ひとりだけ無制限の相談を持つことになる。
+        #   ★★せやから既定を config の default_plan（月詠み）にして、選ばせる形にする。
+        _pkeys = list(membership.plans().keys())
+        _pdef = membership.default_plan()
+        reg_plan = st.selectbox(
+            "層", _pkeys, index=_pkeys.index(_pdef) if _pdef in _pkeys else 0,
+            format_func=lambda k: (
+                f"{membership.plan_info(k)['label']}"
+                + (f"・{membership.plan_info(k)['price']:,}円" if membership.plan_info(k)['price'] else "")
+                + (f"・相談月{membership.plan_info(k)['consult_limit']}通"
+                   if membership.plan_info(k)['consult_limit'] else "・相談し放題")),
+            key="mem_plan_new",
+            help="新しく入った人は、据え置きの『し放題』を選んだらあかん。"
+                 "据え置きは、2026年10月6日までに入っとった人のためのもんや。")
+        if reg_plan == membership.GRANDFATHERED:
+            st.warning("『し放題（据え置き）』は、改定前から入っとる人のための層や。"
+                       "新しく入った人をここに入れると、相談が無制限になる。ほんまにそれでええか確かめてな。")
         if st.button("登録する", type="primary", key="mem_add"):
             if not nick:
                 st.error("ニックネームを入れてください。")
@@ -1043,7 +1274,17 @@ if view == VIEW_MEMBERS:
                                          line_user_id=str(_u.get("user_id")) if _u else "")
                     except TypeError:
                         store.add_member(nick, reg_me, reg_him, memo)
-                    st.success(f"「{nick}」を登録しました")
+                    # ★層は add_member の引数に無いんで、入れた後に付ける
+                    try:
+                        _new = next((m for m in store.list_members()
+                                     if str(m["nickname"]) == nick), None)
+                        _fn = _backend_attr("set_member_plan")
+                        if _new and _fn:
+                            _fn(_new["id"], reg_plan)
+                    except Exception as e:
+                        st.warning(f"登録はできたが、層を付けられんかった（{e}）。"
+                                   "下の一覧から手で付けてな。")
+                    st.success(f"「{nick}」を{membership.plan_info(reg_plan)['label']}で登録しました")
                     st.rerun()
                 except Exception as e:
                     st.error(f"登録に失敗しました（{e}）")
@@ -1052,6 +1293,12 @@ if view == VIEW_MEMBERS:
     except Exception as e:
         st.warning(f"会員リストの読み込みに失敗（{e}）")
         members = []
+    # ★2026-10-07：今月の相談の通数（会員ごと）。ここで一回だけ読む
+    try:
+        _used_mem = store.consult_counts(membership.this_month())
+    except Exception as e:
+        print(f"[members] 通数を数えられんかった（画面は続ける）: {e}")
+        _used_mem = {}
     if not members:
         st.info("まだ会員がいません。上の「会員を登録する」から追加してください。")
     else:
@@ -1074,6 +1321,31 @@ if view == VIEW_MEMBERS:
                         st.rerun()
                     else:
                         st.error("退会にできませんでした")
+                # ★★★2026-10-07：層（月詠みのプラン）を、ここで切り替える。
+                #   ★plan が空欄の人は【し放題（据え置き）】や。既存の会員の中身は縮めん。
+                #   ★★切り替えるのは、本人に話を通してからや。黙って下げたらあかん。
+                _cur = membership.plan_of(m)
+                _keys = list(membership.plans().keys())
+                _pl = st.columns([3, 2])
+                _sel = _pl[0].selectbox(
+                    "層", _keys, index=_keys.index(_cur) if _cur in _keys else 0,
+                    format_func=lambda k: (
+                        f"{membership.plan_info(k)['label']}"
+                        + (f"・{membership.plan_info(k)['price']:,}円" if membership.plan_info(k)['price'] else "")
+                        + (f"・相談月{membership.plan_info(k)['consult_limit']}通"
+                           if membership.plan_info(k)['consult_limit'] else "・相談し放題")),
+                    key=f"mem_plan_{m['id']}")
+                if _sel != _cur:
+                    if _pl[1].button("この層に変える", key=f"mem_plan_go_{m['id']}"):
+                        _fn = _backend_attr("set_member_plan")
+                        if _fn and _fn(m["id"], _sel):
+                            st.success(f"「{m['nickname']}」を"
+                                       f"{membership.plan_info(_sel)['label']}に変えました")
+                            st.rerun()
+                        else:
+                            st.error("層を変えられませんでした")
+                else:
+                    _pl[1].caption(f"今月 {_used_mem.get(str(m['id']), 0)}通")
                 if m["note"]:
                     st.caption(f"メモ: {m['note']}")
                 hist = store.list_readings(m["id"])

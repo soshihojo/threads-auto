@@ -58,7 +58,10 @@ TABLES = {
     #   ★★シートごと分けたら、貼る場所を間違えん限り混ざりようがない。
     #   （account 列は残す。どっちのシートの行か、行だけ見ても分かるようにするため）
     "scheduled_posts_b": ["id", "text", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at", "account"],
-    "members": ["id", "nickname", "me_birth", "him_birth", "note", "created_at", "line_user_id"],
+    # ★2026-10-07：末尾に plan を足した（月詠みの層。空欄＝据え置きの「し放題」）。
+    #   ★末尾に足す限り既存の行は "" になるだけで壊れん（_records は位置で読む）。
+    #   ★★空欄を「し放題」に寄せるんは意図や。今おる会員の中身を縮めたらあかん。
+    "members": ["id", "nickname", "me_birth", "him_birth", "note", "created_at", "line_user_id", "plan"],
     "readings": ["id", "member_id", "month", "worry", "reading", "created_at"],
     "line_users": ["user_id", "display_name", "me_birth", "him_birth", "bot", "note", "created_at", "updated_at"],
     "line_chats": ["id", "user_id", "role", "text", "created_at"],
@@ -156,6 +159,19 @@ def _ws(name: str):
         ws = _api(sh.worksheet, name)
     except gspread.WorksheetNotFound:
         ws = _api(sh.add_worksheet, title=name, rows=1000, cols=FIRST_COL + len(headers))
+    # ★★★2026-10-07：列を後から足した時、シートの幅が足りんと 400 で落ちる。
+    #   実害：members に plan を足したら「Range (members!I2) exceeds grid limits.
+    #   Max rows: 987, max columns: 8」で、CLIもダッシュボードも丸ごと動かんようになった。
+    #   ★ヘッダを書く前に、要る幅まで広げる。表ごとに一回で済む話や。
+    #   ★★広げられんかっても落とさん（権限やクォータで失敗しても、
+    #     既存の列しか使わん処理は動く）。
+    _need = FIRST_COL - 1 + len(headers)
+    try:
+        if int(getattr(ws, "col_count", 0) or 0) < _need:
+            _api(ws.add_cols, _need - int(ws.col_count))
+            print(f"[sheets] {name} の列を {_need} まで広げた")
+    except Exception as e:
+        print(f"[sheets] {name} の列を広げられんかった（続行）: {e}")
     # ヘッダ行（2行目・B列〜）が空なら入れる
     hdr_rng = f"{_col(0)}{HEADER_ROW}:{_col(len(headers) - 1)}{HEADER_ROW}"
     existing = _api(ws.get, hdr_rng)
@@ -674,6 +690,38 @@ def set_member_withdrawn(member_id, withdrawn: bool = True) -> bool:
     _update_cells("members", idx, {"note": note})
     _CACHE.pop("members", None)
     return True
+
+
+def set_member_plan(member_id, plan: str) -> bool:
+    """会員の層（月詠みのプラン）を書き換える。
+
+    ★空欄は「し放題（据え置き）」や。既存の会員の中身を縮めんための既定値や。
+    """
+    idx = _find_row("members", "id", member_id)
+    if not idx:
+        return False
+    _update_cells("members", idx, {"plan": str(plan or "").strip()})
+    _CACHE.pop("members", None)
+    return True
+
+
+def consult_counts(ym: str) -> dict[str, int]:
+    """その年月（"2026-10"）に、会員ごとに何通の相談へ返したかを数える。
+
+    数えるんは readings の month=="相談" の行や。
+    ★その行は【下書きを作った時】に積まれる（app.py）。送ってへん下書きも入る。
+      作り直した分は update_reading で上書きされるんで、二重には数えん。
+    """
+    out: dict[str, int] = {}
+    for r in _records("readings"):
+        if str(r.get("month")) != "相談":
+            continue
+        if not str(r.get("created_at") or "").startswith(str(ym)):
+            continue
+        mid = str(r.get("member_id") or "").strip()
+        if mid:
+            out[mid] = out.get(mid, 0) + 1
+    return out
 
 
 def delete_member(member_id) -> None:

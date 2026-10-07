@@ -1,0 +1,56 @@
+name: weekly-ichite
+# 「週の一手」を、月詠みの会員ぶんまとめて下書きする。
+#
+# ★★★作るだけで、送らん。
+#   送るんは店主がダッシュボード（💬会員相談）で読んで直した後や。
+#   全件目視は死守する（funnel/business_model_v3.md）。自動生成をそのまま流したら
+#   質が落ちて、解約に直結する。週の一手は【毎週届く】もんやから、
+#   一回の手抜きが毎週の手抜きに見える。
+#
+# ★なんで月曜の朝に走らせるか
+#   店主が昼か夕方に読んで直して、夜に送る段取りにするため。
+#   ★朝に走らせて夜に送るんやから、生成の側に「今が何時か」を書かせたらあかん。
+#     src/weekly.py の検品が、時間帯を決めつけた言葉を機械で止めとる。
+#
+# ★★cron の不発に備える
+#   GitHub Actions の schedule は間引かれる（実際 poll.yml が7時間半発火せんかった）。
+#   ★同じ週ぶんが控えにあったら作り直さん作りにしてある（weekly.already_done）。
+#     せやから【火曜にもう一回】走らせても二重に作らん。月曜が飛んでも翌日に埋まる。
+on:
+  schedule:
+    - cron: "0 23 * * 0"    # UTC日曜23:00 ＝ JST月曜 8:00
+    - cron: "0 23 * * 1"    # UTC月曜23:00 ＝ JST火曜 8:00（月曜が不発やった時の保険）
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "その週の日付（YYYY-MM-DD。空なら今日）"
+        required: false
+        default: ""
+      force:
+        description: "同じ週ぶんが控えにあっても作り直す（true/false）"
+        required: false
+        default: "false"
+
+# ★重ねん。二回走ったら同じ会員に二通積む
+concurrency:
+  group: weekly-ichite
+  cancel-in-progress: false
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    env:
+      STORE_BACKEND: sheets
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_KEY: ${{ secrets.GOOGLE_SHEET_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - name: draft weekly ichite (does NOT send)
+        run: |
+          python -m src.main weekly \
+            ${{ github.event.inputs.date && format('--date {0}', github.event.inputs.date) || '' }} \
+            ${{ github.event.inputs.force == 'true' && '--force' || '' }}

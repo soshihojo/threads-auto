@@ -337,7 +337,12 @@ def cmd_kantei(args: argparse.Namespace) -> None:
 
 
 def cmd_shiomi(args: argparse.Namespace) -> None:
-    """潮見（29,800円→9,800円）: 個別鑑定書＋九十日の暦を、まとめて一回で作る。
+    """潮見（29,800円→9,800円）: 個別鑑定書＋暦を、まとめて一回で作る。
+
+    ★★★2026-10-07：暦の既定を【九十日 → 三十日】に変えた。
+      ★改定より前に潮見を買うた人には、九十日で約束してある。
+        その人らのヒアリングが返ってきたら `--span 90` を付けて組むこと。
+        ★★買うた時の約束を、こっちの都合で縮めたらあかん。
 
     ★2026-08-20 新設。それまでは kantei を叩いてから shiomi を python -c で直接呼んどった。
       二段構えやと、暦を作り忘れる／暦の納品文が抜ける、いう事故が起きる。実際に起きた。
@@ -349,12 +354,16 @@ def cmd_shiomi(args: argparse.Namespace) -> None:
     _check_births(args.me, args.him, getattr(args, 'line_user', '') or '')
     name = _check_name(args.name)
     res = kantei.make_kantei(name, args.me, args.him, details)
-    cal = shiomi.make_shiomi(name, args.me, args.him, details)
+    _span = int(getattr(args, "span", 0) or shiomi.SPAN_DAYS)
+    if _span != shiomi.SPAN_DAYS:
+        print(f"ℹ️ 暦の期間を {shiomi.span_label(_span)}（{_span}日）で組む"
+              f"（既定は{shiomi.span_label(shiomi.SPAN_DAYS)}）")
+    cal = shiomi.make_shiomi(name, args.me, args.him, details, span=_span)
 
     print("\n" + "━" * 72)
     print("📦 潮見は三点セットや。この順番で送る:")
     print(f"   1) 個別鑑定書 PDF … {res['pdf']}")
-    print(f"   2) 九十日の暦 PDF … {cal['pdf']}")
+    print(f"   2) {shiomi.span_label(_span)}の暦 PDF … {cal['pdf']}")
     print(f"      （LINEで開きやすいんは画像の方や … {cal['png']}）")
     print("━" * 72)
 
@@ -412,6 +421,80 @@ def cmd_tsukiyomi(args: argparse.Namespace) -> None:
     store.add_reading(m["id"], f"月詠み {res['month_label']}", worry, res["body"][:15000])
     print(f"→ LINE公式アプリのチャットからPDFを添付して送付: {res['pdf']}")
     print(_DELIVERY_REMINDER)
+
+
+def cmd_weekly(args: argparse.Namespace) -> None:
+    """「週の一手」を、月詠みの会員ぶんまとめて下書きする（★送らん）。
+
+    ★2026-10-07 新設。毎週月曜の朝にGitHub Actionsで走らせる。
+      ★作るだけで、送らん。送るんはダッシュボードで目視した後や。
+      ★★全件目視は死守する（funnel/business_model_v3.md）。
+        自動生成をそのまま流したら質が落ちて、解約に直結する。
+    ★★★同じ週ぶんが控えにあったら作り直さん（二通届く事故を防ぐ）。
+      作り直したい時だけ --force を付ける。
+    """
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+
+    from . import membership, store, weekly
+
+    today = date.fromisoformat(args.date) if args.date else datetime.now(
+        ZoneInfo("Asia/Tokyo")).date()
+    mon = weekly.last_monday(today)
+    members = [dict(m) for m in store.list_members()]
+    # ★週の一手が付く層だけ。据え置きの「し放題」組には出さん（契約の中身を勝手に増やさん）
+    targets = [m for m in members
+               if membership.plan_info(membership.plan_of(m))["weekly"]]
+    print(f"週の一手：{mon.isoformat()}（月曜）ぶん　会員{len(members)}人のうち"
+          f"対象{len(targets)}人")
+    if not targets:
+        print("対象の会員がおらん。👥会員の画面で層を付けてな。")
+        return
+
+    made = skipped = failed = 0
+    for m in targets:
+        name = _clean_member_name(str(m["nickname"]))
+        rows = store.list_readings(m["id"], limit=60)
+        if weekly.already_done(rows, mon) and not args.force:
+            print(f"  － {name}：この週ぶんはもう控えにある（飛ばす）")
+            skipped += 1
+            continue
+        kantei_rows = [r for r in rows if r["month"] == "個別鑑定書"]
+        kantei_text = str(kantei_rows[0]["reading"]) if kantei_rows else ""
+        # ★この一週間のLINEだけを渡す。古い話を「今週」の中に並べさせんため
+        chats = []
+        uid = str(m.get("line_user_id") or "").strip()
+        if uid:
+            for r in store.recent_line_chats(uid, limit=200):
+                ts = str(r.get("created_at") or "")
+                if ts[:10] >= mon.isoformat():
+                    who = "会員" if str(r.get("role")) == "user" else "椿"
+                    chats.append(f"［{ts[5:16].replace('T', ' ')}］{who}: "
+                                 f"{str(r.get('text') or '')[:600]}")
+        try:
+            res = weekly.generate_weekly(
+                me_birth=str(m["me_birth"]), him_birth=str(m["him_birth"]),
+                nickname=name, note=str(m.get("note") or ""),
+                kantei=kantei_text, chats="\n".join(chats),
+                prevs=weekly.previous_weeklies(rows), today=mon)
+        except Exception as e:
+            print(f"  ✗ {name}：作れんかった（{type(e).__name__}: {e}）")
+            failed += 1
+            continue
+        if args.dry_run:
+            print(f"  ○ {name}：{len(res['body'])}字（--dry-run なんで控えには積まん）")
+            made += 1
+            continue
+        store.add_reading(m["id"], res["label"], "（週の一手・こちらから届ける一通）",
+                          res["body"][:15000])
+        made += 1
+        _w = f"　⚠️ {'／'.join(w[:40] for w in res['warns'])}" if res["warns"] else ""
+        print(f"  ○ {name}：{len(res['body'])}字{_w}")
+
+    print(f"\n作った{made}／飛ばした{skipped}／失敗{failed}")
+    print("★まだ送ってへん。💬会員相談の画面で読んで直してから送ること。")
+    if failed:
+        raise SystemExit(1)
 
 
 def cmd_join(args: argparse.Namespace) -> None:
@@ -500,7 +583,9 @@ def cmd_join(args: argparse.Namespace) -> None:
                         flags=_re.S)
             c = _re.sub(r"<[^>]+>", "\n", c)
             c = _re.sub(r"\n{3,}", "\n\n", c).strip()
-            store.add_reading(mid, "九十日の暦", "（納品済みの潮見の暦）", c)
+            # ★2026-10-07：暦を三十日に変えた。新しく書く控えはこのラベル。
+            #   ★古い「九十日の暦」の行はそのまま残す（読む側は month で絞ってへん）
+            store.add_reading(mid, "三十日の暦", "（納品済みの潮見の暦）", c)
             print(f"🌊 九十日の暦も控えに入れた（{len(c)}字）")
             print("   ★この人は潮見の人や。月詠みは【5,980円】の方やで")
 
@@ -603,11 +688,13 @@ def main() -> None:
     p_kan.add_argument("--line-user", default="",
                        help="LINEの表示名かuser_id。渡したら生年月日の一致を確かめて、食い違うたら止める")
     p_kan.set_defaults(func=cmd_kantei)
-    p_shi = sub.add_parser("shiomi", help="潮見＝鑑定書＋九十日の暦を一回で作る")
+    p_shi = sub.add_parser("shiomi", help="潮見＝鑑定書＋暦を一回で作る（既定は三十日。--span 90 で九十日）")
     p_shi.add_argument("--name", required=True, help="購入者の呼び名（表紙に載る）")
     p_shi.add_argument("--me", required=True, help="購入者の生年月日 YYYY-MM-DD")
     p_shi.add_argument("--him", required=True, help="彼の生年月日 YYYY-MM-DD")
     p_shi.add_argument("--details-file", required=True, help="悩み詳細のテキストファイル")
+    p_shi.add_argument("--span", type=int, default=0,
+                       help="暦が見る日数（既定は30）。★改定前に潮見を買うた人は 90 を指定する")
     p_shi.add_argument("--line-user", default="",
                        help="LINEの表示名かuser_id。渡したら生年月日の一致を確かめて、食い違うたら止める")
     p_shi.set_defaults(func=cmd_shiomi)
@@ -624,6 +711,12 @@ def main() -> None:
     p_ls.add_argument("--min-age", type=int, default=3, help="この分数より新しい未返信は触らない")
     p_ls.add_argument("--max-age", type=int, default=48, help="この時間より古い未返信は触らない")
     p_ls.set_defaults(func=cmd_line_sweep)
+    p_wk = sub.add_parser("weekly", help="週の一手を会員ぶんまとめて下書きする（送らん）")
+    p_wk.add_argument("--date", default="", help="その週の日付（YYYY-MM-DD。省略時は今日）")
+    p_wk.add_argument("--dry-run", action="store_true", help="作るだけで控えに積まん")
+    p_wk.add_argument("--force", action="store_true",
+                      help="同じ週ぶんが控えにあっても作り直す")
+    p_wk.set_defaults(func=cmd_weekly)
     p_join = sub.add_parser("join", help="月詠みに入ってくれた人を会員として登録する")
     p_join.add_argument("--line-name", required=True, help="LINEの表示名（そのままの綴りで）")
     p_join.add_argument("--kantei-name", help="鑑定書を作った時の呼び名（省略時はLINEの表示名）")
