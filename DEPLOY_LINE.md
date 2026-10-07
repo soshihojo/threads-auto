@@ -46,7 +46,28 @@
 | CLAUDE_MODEL | （任意）未設定なら claude-opus-4-8（LINE以外の生成） |
 | LINE_BOT_MODEL | （任意）未設定なら claude-sonnet-5（LINE自動返信） |
 
-5. デプロイ完了後のURL（例 `https://tsubaki-line.onrender.com`）を控える
+5. デプロイ完了後のURLを控える
+
+### ★★★今、実際に動いとるURL（2026-10-07 時点で確認済み）
+
+```
+https://threads-auto-5c6q.onrender.com
+```
+
+　・`/`          … 生きとるかの確認。`{"ok":true,"rev":"<コミットのsha>"}` が返る
+　　★rev が push したコミットと揃っとったら、デプロイは通っとる
+　・`/webhook`   … LINEのWebhookの宛先
+　・`/shindan`   … 無料診断のページ
+　・`/tokushoho` … 特商法の表記（★Stripeの決済ページからここへ飛ばす）
+
+★ここに書いてあったURL（`tsubaki-line.onrender.com`）は、もう存在せん。
+　全部のパスが404を返す。★サービス名が変わった時に、ここを直し忘れたらしい。
+　★★実害：生きとるか確かめるつもりで404を見て、「ボットが落ちた」と誤解する。
+　　（2026-10-07に実際にやった。ボットは普通に動いとった）
+　★★★RenderのURLが変わったら、必ずここと、下の三つを一緒に直すこと。
+　　① LINE DevelopersのWebhook URL
+　　② Stripeの決済ページから特商法へのリンク（※法定表記が開けんくなる）
+　　③ UptimeRobot などのスリープ対策の監視先
 
 ## STEP 3. Webhookをつなぐ
 1. LINE Developers → Messaging API設定 → **Webhook URL** に `https://<RenderのURL>/webhook` を設定
