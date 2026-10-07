@@ -29,14 +29,28 @@ def test_dashboard_has_only_the_two_views_in_use(tmp_path, monkeypatch):
       会員相談の画面が、手で返した記録（reply.ack）を読むのに使うからや。
       ★★一緒に消したら、手で返した分が「未返信」に化けて二重に返す。
     """
-    from src import store_sqlite
+    import importlib
+
+    from src import store, store_sqlite
     monkeypatch.setattr(store_sqlite, "DB_PATH", tmp_path / "app.db")
     monkeypatch.setenv("APP_PASSWORD", "")
-    # ★タイムアウトを60秒に。この画面はシートを何回も読むんで、15秒やと落ちる。
-    #   ★実際に「AppTest script run timed out after 15(s)」で、時々こけとった。
-    #     ★★中身の不具合やのうて、本番のシートの応答待ちや。待つ時間を伸ばすんが正しい。
-    app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=60)
-    app.run()
+    # ★★★2026-10-07：この画面を【本番のGoogle Sheets】で動かしたらあかん。
+    #   ★手元には .env があるんで STORE_BACKEND=sheets になる。
+    #     app.py は会員・LINEの記録・控えを何回も読むんで、シートの機嫌次第で
+    #     15秒でも60秒でも足りん時がある。★実際に二回こけた。
+    #   ★★中身の不具合やのうて、よそのAPIの応答待ちで落ちるテストは、
+    #     「赤くなっても誰も見んテスト」になる。それがいちばん質に悪い。
+    #   ★★★せやから、ここだけ手元のsqliteに差し替えて走らせる。速うて、毎回同じ結果になる。
+    monkeypatch.setenv("STORE_BACKEND", "sqlite")
+    importlib.reload(store)
+    try:
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"),
+                                default_timeout=60)
+        app.run()
+    finally:
+        # ★他のテストに持ち越さん。monkeypatch は環境変数しか戻さん（モジュールは戻らん）
+        monkeypatch.undo()
+        importlib.reload(store)
     assert not app.exception
     assert app.radio[0].options == ["💬 会員相談", "👥 会員"]
     # ★operations の読み取りは残っとること（会員相談がこれを使う）
