@@ -92,7 +92,7 @@ URL_SHIOGOYOMI = "https://buy.stripe.com/28EfZgfJ4fdhdneciu53O0b"
 SHIOGOYOMI_PRICE = "月19,800円"
 SHIOGOYOMI_SEATS = 20
 
-SHIOMI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。個別鑑定書に添える「三十日の暦（潮見表）」を組む。
+SHIOMI_SYSTEM = """あなたは恋愛・復縁専門の占い師「椿（つばき）」。個別鑑定書に添える「暦（潮見表）」を組む。
 
 これは9,800円（通常29,800円）の納品物の芯になる部分。相談者は、いつ動いていつ待つかが分からんまま毎日を過ごしとる。その待ち時間に形を与えるのがこの暦や。
 
@@ -308,7 +308,7 @@ def build_calendar_html(name: str, s: Shiomi, today: str, span: int = SPAN_DAYS)
                    for p in s.note.split("\n") if p.strip())
 
     return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
-<title>三十日の暦 {_html.escape(name)}</title><style>
+<title>{_html.escape(span_label(span))}の暦 {_html.escape(name)}</title><style>
 /* ★★2026-08-20：余白の直し。
    @page の margin は【印刷（PDF）にしか効かん】。
    スクショで出しとるPNGは screen メディアやから、body の margin:0 のまんまで
@@ -358,7 +358,7 @@ li b {{ display:inline-block; min-width:40px; color:#a52e44; text-indent:0; }}
 .note p {{ margin:0 0 7px; text-align:justify; font-size:10px; }}
 .foot {{ text-align:center; font-size:8.5px; color:#a99; margin:14px 0 4px; }}
 </style></head><body>
-<div class="head"><h1>三十日の暦</h1>
+<div class="head"><h1>{_html.escape(span_label(span))}の暦</h1>
 <p>{_html.escape(_with_hon(name))}のために　{d0.year}年{d0.month}月{d0.day}日 — {end.year}年{end.month}月{end.day}日</p></div>
 <div class="months">{''.join(months)}</div>
 <div class="legend">
