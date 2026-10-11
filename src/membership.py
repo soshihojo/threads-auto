@@ -63,7 +63,7 @@ def plan_info(plan: str) -> dict:
         "weekly": bool(p.get("weekly")),
         # ★毎月、三十日の暦を引き直して届ける層か
         "koyomi": bool(p.get("koyomi")),
-        # ★席数（0なら上限なし）。し放題を売る層は必ず切る
+        # ★席数（0なら上限なし）。★2026-10-11に潮暦の20席を外した（config.yaml）
         "seats": int(p.get("seats") or 0),
     }
 
