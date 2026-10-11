@@ -572,6 +572,19 @@ def cmd_join(args: argparse.Namespace) -> None:
     if info["seats"]:
         taken = sum(1 for m in store.list_members() if membership.plan_of(m) == args.tier)
         print(f"   席: {taken}/{info['seats']}" + ("　⚠️ 席を超えとる" if taken > info["seats"] else ""))
+    # ★★★2026-10-11（店主の判断）：最初の一通は、サービスの説明を改めてする挨拶。
+    #   ★十通に数えんよう、💬会員相談の画面を通さずLINEからそのまま送る。
+    from .diagnosis import with_honorific
+    call = with_honorific(args.kantei_name or args.line_name)
+    welcome = membership.welcome_message(call, args.tier)
+    wpath = OUT_DIR / f"入会あいさつ_{call}.txt"
+    try:
+        wpath.write_text(welcome + "\n", encoding="utf-8")
+        print(f"\n✉️ 最初の一通（サービスの説明・十通に数えん）→ {wpath.name}")
+    except OSError as e:
+        print(f"\n✉️ 最初の一通（ファイルに書けんかった: {e}）")
+    print("   ★💬会員相談の画面を通さず、LINEからそのまま送ること（通すと一通に数えられる）\n")
+    print(welcome)
     if _uid:
         print(f"   LINE紐付け: 「{_u.get('display_name')}」 {_uid[:16]}… ← user_idで固定した")
     else:
