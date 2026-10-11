@@ -558,6 +558,20 @@ def cmd_join(args: argparse.Namespace) -> None:
         mid = store.add_member(nickname, me, him, note)
     print(f"✅ 会員登録: id={mid}  {nickname}")
     print(f"   生年月日 あんた={me} / 彼={him}")
+    # ★★★2026-10-11：層（plan 列）をここで埋める。
+    #   前は --plan を note に書き足すだけで、plan 列は空のままやった。
+    #   ★空欄＝据え置き組（し放題・週の一手なし）として扱われる。
+    #   実例：新しい月詠みの最初の会員（S.Hirokoさん）が、手で直すまで据え置き組に入っとった。
+    #   ★★これからの入会は、ぜんぶ新しい層や。据え置き組に新しい人を入れることは無い。
+    from . import membership
+    store.set_member_plan(mid, args.tier)
+    info = membership.plan_info(args.tier)
+    print(f"   層: {info['label']}（月{info['price']:,}円・相談"
+          f"{str(info['consult_limit']) + '通まで' if info['consult_limit'] else '上限なし'}"
+          f"{'・週の一手あり' if info['weekly'] else ''}{'・毎月の暦あり' if info['koyomi'] else ''}）")
+    if info["seats"]:
+        taken = sum(1 for m in store.list_members() if membership.plan_of(m) == args.tier)
+        print(f"   席: {taken}/{info['seats']}" + ("　⚠️ 席を超えとる" if taken > info["seats"] else ""))
     if _uid:
         print(f"   LINE紐付け: 「{_u.get('display_name')}」 {_uid[:16]}… ← user_idで固定した")
     else:
@@ -722,7 +736,9 @@ def main() -> None:
     p_join.add_argument("--kantei-name", help="鑑定書を作った時の呼び名（省略時はLINEの表示名）")
     p_join.add_argument("--me", help="本人の生年月日。省略時は line_users から拾う")
     p_join.add_argument("--him", help="彼の生年月日。省略時は line_users から拾う")
-    p_join.add_argument("--plan", help="月詠みの値段のメモ（例: 5,980円）")
+    p_join.add_argument("--plan", help="月詠みの値段のメモ（例: 5,980円）。note に書くだけ")
+    p_join.add_argument("--tier", default="tsukiyomi", choices=("tsukiyomi", "koyomi"),
+                        help="層（plan 列）。月詠み=tsukiyomi（既定）／潮暦=koyomi")
     p_join.set_defaults(func=cmd_join)
     _acc(sub.add_parser("refresh-token")).set_defaults(func=cmd_refresh_token)
     args = parser.parse_args()
