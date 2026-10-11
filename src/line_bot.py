@@ -30,7 +30,7 @@ from .config import active_profile, env
 from .diagnosis import (AI_LEAK_RE, JARGON, NAME_GUARD, RESPECT_GUARD, TIME_GUARD, _Z2H,
                         find_birthdates, generate_reading, honmei_shuku,
                         now_context, parse_free_input, EN_OK, foreign_word, META_LEAK_RE, PRONOUN_ANSWER_RE, REASK_RE, TIC_OPENING_RE, DEMEANING_RE, inspect_reply, parrot_head, soften_rude,
-                        strip_ai_leak, strip_jargon)
+                        planning_leak, strip_ai_leak, strip_jargon)
 from .llm import complete, complete_vision
 
 LINE_API = "https://api.line.me/v2/bot"
@@ -1335,6 +1335,15 @@ def _plain_text(text: str) -> str:
         return ""  # Internal routing must not leak through generated or fallback copy.
     if re.search(r"[「『](?:視|見|み|診)て(?:ほしい|欲しい)[」』][^。\n]{0,24}受け(?:取|と)", text):
         return ""  # Retired consent acknowledgement must not be echoed from old history.
+    # ★★★2026-10-11：書く前の下書き・考えた道筋が混ざっとったら、一文字も送らん。
+    #   実害：大野桃佳さんに「案:」「書き方:…170字以内」「Check length ~140字. Good.」ごと届いた。
+    #   ★メモの行だけ消して残りを送る作りにはせん。どこまでがメモか機械では切り分けられん
+    #     （9/23 みさきさんの回は、全部がメモで本文が無かった）。
+    #   ★空を返す＝送信を失敗させる。未返信スイープが作り直して送る。どの経路から来た文もここを通る。
+    leak = planning_leak(text)
+    if leak:
+        print(f"[line_bot] 下書きの混入（「{leak}」）を検出したので送らん: {text[:80]!r}")
+        return ""
     text = "\n".join(ln for ln in text.splitlines() if not _ARTIFACT_LINE_RE.match(ln))
     text = _META_LEAK_RE.sub("", text)                     # 文中に紛れたmeta等を除去
     text = text.replace("**", "").replace("__", "")
@@ -1819,6 +1828,10 @@ _ASSERT_GUIDE = """
 
 ★長さは今までどおり。吹き出し合計170字以内。
 ★内部参考の生年月日が無い相手には、この回をやらん（性質の断定ができん）。
+
+★★出力するのは、相談者に送る本文だけ。
+　上のルールに沿うてるかの確認、方針、案、字数の数え、英語のメモは、一行も書かん。
+　考えるのは頭の中だけでやって、書くのは椿の返信そのものだけや。
 """
 
 _ASSERT_TARGETS = {2: "彼", 5: "相談者本人", 8: "二人の間に起きとること"}
@@ -1890,6 +1903,14 @@ def generate_nurture(user: dict, history: list[dict], incoming: str,
         if any(w in text for w in _JARGON):
             text = _strip_jargon(text)
         text = _META_LEAK_RE.sub("", text)  # 作り直しでも残ったら最終除去
+        # ★★★2026-10-11：作り直した文は、今まで一度も検品してへんかった。
+        #   実害（大野桃佳さん）：一回目が長すぎ・宿名漏れで作り直しになり、
+        #   作り直しの方が720字の下書き入りのまま、宿名だけ置き換えて送られた。
+        #   ★下書きの混入と長さは、作り直しのあとにもう一回見る。直ってへんかったら送らん。
+        #   ★例外にして _retry に任せる（もう一回まるごと作り直し、それでも駄目なら未返信スイープ）。
+        leak = planning_leak(text)
+        if leak or len(text.replace("---", "")) > 200:
+            raise RuntimeError(f"作り直しても直らんかった（下書き「{leak}」／{len(text)}字）ので送らん")
     return text
 
 
