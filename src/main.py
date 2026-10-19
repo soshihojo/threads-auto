@@ -423,6 +423,34 @@ def cmd_tsukiyomi(args: argparse.Namespace) -> None:
     print(_DELIVERY_REMINDER)
 
 
+def _weekly_material(uid: str, rows: list[dict], now) -> str:
+    """週の一手に渡す「この一週間」の材料。作る時点から【過去七日】のLINEと会員相談。
+
+    ★★★2026-10-19：前は「その週の月曜以降」のLINEだけを渡しとった。
+      ★月曜の朝8時に作るんで、読める範囲は「月曜の0時〜8時」だけ＝ほぼ毎回0通やった。
+      実害（S.Hirokoさん）：10/16に彼へ「Take care」で返して、5分後に彼から返信が来とった週に、
+      「今週も、LINEは一通も動かんかった。先週に続いて二週目の沈黙や」と書いた。
+      ★先週ぶんも同じ理由で「沈黙や」と書いとって、今週はそれを前提に間違いが重なった。
+    ★会員相談（readings の month=="相談"）も渡す。椿が何を答えたかを知らんと、週の一手が相談の答えと食い違う。
+    """
+    from datetime import timedelta
+    since = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
+    lines = []
+    if uid:
+        for r in store.recent_line_chats(uid, limit=300):
+            ts = str(r.get("created_at") or "").replace(" ", "T")[:19]
+            if ts >= since:
+                who = "会員" if str(r.get("role")) == "user" else "椿"
+                lines.append((ts, f"［{ts[5:16].replace('T', ' ')}］{who}: {str(r.get('text') or '')[:600]}"))
+    for r in rows:
+        ts = str(r.get("created_at") or "").replace(" ", "T")[:19]
+        if str(r.get("month") or "") == "相談" and ts >= since:
+            lines.append((ts, f"［{ts[5:16].replace('T', ' ')}］会員相談への椿の返事"
+                              f"（相談: {str(r.get('worry') or '')[:300]}）: {str(r.get('reading') or '')[:600]}"))
+    lines.sort(key=lambda x: x[0])
+    return "\n".join(l for _, l in lines)
+
+
 def cmd_weekly(args: argparse.Namespace) -> None:
     """「週の一手」を、月詠みの会員ぶんまとめて下書きする（★送らん）。
 
@@ -461,21 +489,14 @@ def cmd_weekly(args: argparse.Namespace) -> None:
             continue
         kantei_rows = [r for r in rows if r["month"] == "個別鑑定書"]
         kantei_text = str(kantei_rows[0]["reading"]) if kantei_rows else ""
-        # ★この一週間のLINEだけを渡す。古い話を「今週」の中に並べさせんため
-        chats = []
+        # ★作る時点から過去七日のLINEと会員相談を渡す（_weekly_material の説明を参照）
         uid = str(m.get("line_user_id") or "").strip()
-        if uid:
-            for r in store.recent_line_chats(uid, limit=200):
-                ts = str(r.get("created_at") or "")
-                if ts[:10] >= mon.isoformat():
-                    who = "会員" if str(r.get("role")) == "user" else "椿"
-                    chats.append(f"［{ts[5:16].replace('T', ' ')}］{who}: "
-                                 f"{str(r.get('text') or '')[:600]}")
+        chats = _weekly_material(uid, rows, datetime.now(ZoneInfo("Asia/Tokyo")).replace(tzinfo=None))
         try:
             res = weekly.generate_weekly(
                 me_birth=str(m["me_birth"]), him_birth=str(m["him_birth"]),
                 nickname=name, note=str(m.get("note") or ""),
-                kantei=kantei_text, chats="\n".join(chats),
+                kantei=kantei_text, chats=chats,
                 prevs=weekly.previous_weeklies(rows), today=mon)
         except Exception as e:
             print(f"  ✗ {name}：作れんかった（{type(e).__name__}: {e}）")
@@ -485,8 +506,13 @@ def cmd_weekly(args: argparse.Namespace) -> None:
             print(f"  ○ {name}：{len(res['body'])}字（--dry-run なんで控えには積まん）")
             made += 1
             continue
-        store.add_reading(m["id"], res["label"], "（週の一手・こちらから届ける一通）",
-                          res["body"][:15000])
+        # ★--force で作り直した時は、同じ週の控えを上書きする（足すと同じ週が二本並んで、どっちを送るか迷う）
+        same = [r for r in rows if str(r.get("month") or "") == res["label"]]
+        if same:
+            store.update_reading(same[0]["id"], res["body"][:15000])
+        else:
+            store.add_reading(m["id"], res["label"], "（週の一手・こちらから届ける一通）",
+                              res["body"][:15000])
         made += 1
         _w = f"　⚠️ {'／'.join(w[:40] for w in res['warns'])}" if res["warns"] else ""
         print(f"  ○ {name}：{len(res['body'])}字{_w}")
