@@ -71,17 +71,19 @@ def test_user_facing_texts_have_no_jargon():
              *(f[k] for f in texts.HEARING_FOCUS + texts.HEARING_FOCUS_NO_WORRY for k in ('reason', 'fallback')),
              *texts.OSHI_MONTH.values(), *texts.ME_MONTH.values(), *texts.WORRIES.values(),
              *(v for t in texts.EN_TYPES.values() for k, v in t.items()),
-             *(s["text"] for s in texts.STEPS)]
+             *(s["text"] for s in texts.STEPS), *(r for s in texts.STEPS for r in s["replies"].values())]
     for blob in blobs:
         for w in banned:
             assert w not in blob, (w, blob[:30])
 
 
 def test_step_options_fit_line_quick_reply_limits():
-    assert len(texts.STEPS) == 7
+    assert len(texts.STEPS) == 4
     for s in texts.STEPS:
         assert 1 <= len(s["options"]) <= 13
         assert all(len(o) <= 20 for o in s["options"])
+        assert set(s["replies"]) == set(s["options"])          # どのボタンにも、返すひとことがある
+        assert "すぐにお返しします" in s["text"] or "ひとことお返しします" in s["text"]   # 答える得を書いている
 
 
 # ---------------- 診断ページ ----------------
@@ -186,11 +188,12 @@ def test_full_flow_follow_code_hearing_closing_steps(line, monkeypatch):
     assert bot.send_due_steps(later.replace(minute=5)) == 1
     pushed = line[-1]
     assert pushed["path"] == "message/push" and "quickReply" in pushed["messages"][0]
-    assert "届けたい言葉が少し違うんです" in _text(pushed)
+    assert "年代に合わせた推し活のひとことを、すぐにお返しします" in _text(pushed)
     assert bot.send_due_steps(later.replace(minute=6)) == 0   # 同じ日に二度送らない
-    bot.handle_event(_msg("U1", "5〜10年"))
+    bot.handle_event(_msg("U1", "30代"))
+    assert texts.STEPS[0]["replies"]["30代"] in _text(line[-1])   # 押したらその場でひとことが返る
     ans = store._rows("kasumi_answers")
-    assert ans[-1]["kind"] == "oshi_years" and ans[-1]["answer"] == "5〜10年"
+    assert ans[-1]["kind"] == "age" and ans[-1]["answer"] == "30代"
     assert store.get_user("U1")["step_wait"] == ""
 
 
@@ -276,3 +279,14 @@ def test_after_hearing_replies_once_per_day(line, monkeypatch):
     bot.handle_event(_msg("U9", "楽しかった！"))
     assert len(line) == n   # 同じ日の2通目には返さない
     assert len(store.recent_chats("U9")) == 3   # 届いた言葉は記録する
+
+
+def test_four_days_then_stop(line):
+    store.upsert_user("U10", stage="done", step_day="1", bot="on", step_next_at="2026-10-23T20:00:00+09:00")
+    day = datetime(2026, 10, 23, 20, 5, tzinfo=JST)
+    from datetime import timedelta
+    for i in range(4):
+        assert bot.send_due_steps(day + timedelta(days=i)) == 1
+    assert bot.send_due_steps(day + timedelta(days=4)) == 0
+    u = store.get_user("U10")
+    assert u["step_day"] == "5" and u["step_next_at"] == "" and u["step_wait"] == "want_reading"

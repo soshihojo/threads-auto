@@ -4,7 +4,7 @@
   友だち追加 → あいさつ
   4桁の番号 or 生年月日2つ → 縁の詳しい読み（手書きの部品を組み合わせる。生成は使わない）＋最初の質問
   ヒアリング（生成で1通ずつ。3往復聞いて、4回目の答えで終わりのあいさつ）
-  終わった人だけ、翌日から7日間の配信（send_due_steps。ボタンで答える質問つき）
+  終わった人だけ、翌日から4日間の配信（send_due_steps。ボタンで答える質問つき）
 
 椿の line_bot とは鍵・保存先・文面がすべて別。椿の関数は呼ばない（宿の計算と検品の関数だけ借りる）。
 ボットは商品の案内をしない。
@@ -274,7 +274,7 @@ def _hearing(token: str, user: dict, text: str) -> None:
     store.add_event("closing", uid)
 
 
-# ---------------- 7日間の配信 ----------------
+# ---------------- 4日間の配信 ----------------
 def next_step_time(after: datetime) -> datetime:
     """after の翌日の STEP_HOUR 時（JST）。"""
     d = (after.astimezone(store.JST) + timedelta(days=1)).date()
@@ -395,7 +395,7 @@ def _handle(ev: dict, uid: str) -> None:
     if step and text in step["options"]:
         store.add_answer(uid, step["key"], text)
         store.upsert_user(uid, step_wait="")
-        reply(token, uid, texts.STEP_THANKS[len(text) % len(texts.STEP_THANKS)])
+        reply(token, uid, f"{texts.STEP_THANKS}\n{step['replies'][text]}")
         return
 
     stage = user.get("stage") or "new"
