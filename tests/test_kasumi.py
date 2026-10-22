@@ -66,7 +66,9 @@ def test_relation_from_birthdates_is_one_of_six_and_symmetric():
 def test_user_facing_texts_have_no_jargon():
     from src.diagnosis import SHUKU_27
     banned = [*SHUKU_27, "宿曜", "本命宿", *texts.EN_TYPES.keys()]
-    blobs = [texts.GREETING, texts.CODE_NOT_FOUND, texts.READING, texts.CLOSING, texts.DANGER,
+    blobs = [texts.GREETING, texts.CODE_NOT_FOUND, texts.READING, texts.CLOSING, texts.DANGER, texts.FINAL_HEAD,
+             texts.FINAL_FALLBACK, texts.FIRST_REASON, texts.FIRST_REASON_NO_WORRY,
+             *(f[k] for f in texts.HEARING_FOCUS + texts.HEARING_FOCUS_NO_WORRY for k in ('reason', 'fallback')),
              *texts.OSHI_MONTH.values(), *texts.ME_MONTH.values(), *texts.WORRIES.values(),
              *(v for t in texts.EN_TYPES.values() for k, v in t.items()),
              *(s["text"] for s in texts.STEPS)]
@@ -130,17 +132,25 @@ def test_build_reading_assembles_parts_with_honorific():
     assert texts.EN_TYPES["友衰"]["reading"] in t and texts.EN_TYPES["友衰"]["tired"] in t
     assert texts.OSHI_MONTH[3] in t and texts.ME_MONTH[11] in t
     assert t.rstrip().endswith("そのことを知ったとき、どんな気持ちになりましたか？")
+    assert "4つだけ聞かせてください" in t and "（1/4）" + texts.FIRST_REASON in t
     assert bot.build_reading("", "1990-11-12", "1995-03-03", "命", texts.NO_WORRY).startswith("お待たせしました。")
 
 
 # ---------------- 会話の流れ ----------------
+def _fake_complete(calls):
+    def fake(system, prompt, **kw):
+        calls.append((system, prompt))
+        if system == bot.HEARING_SYSTEM:
+            return '{"ack": "そう感じていたんですね。", "question": "それは、いつごろからですか？"}'
+        if system == bot.FINAL_SYSTEM:
+            return "あなたへのひとことの本文です。"
+        return "受け止めの返事です。"
+    return fake
+
+
 def test_full_flow_follow_code_hearing_closing_steps(line, monkeypatch):
     calls = []
-
-    def fake_complete(system, prompt, **kw):
-        calls.append(prompt)
-        return "そう感じていたんですね。" + ("いつごろからですか？" if "次に聞くこと：なし" not in prompt else "")
-    monkeypatch.setattr(bot, "complete", fake_complete)
+    monkeypatch.setattr(bot, "complete", _fake_complete(calls))
 
     bot.handle_event({"type": "follow", "replyToken": "r", "source": {"userId": "U1"}})
     assert "ゆいさん、来てくれてありがとうございます" in _text(line[-1])
@@ -149,32 +159,53 @@ def test_full_flow_follow_code_hearing_closing_steps(line, monkeypatch):
                      "worry": "ファン同士・界隈の人間関係"})
     bot.handle_event(_msg("U1", f"縁の番号{r['code']}"))
     reading = _text(line[-1])
-    assert "推しとあなたの縁を読みました" in reading and "モヤっとした出来事" in reading
+    assert "推しとあなたの縁を読みました" in reading and "モヤっとした出来事" in reading and "（1/4）" in reading
     assert store.get_user("U1")["stage"] == "hearing"
     assert diag.redeem(r["code"]) is None   # 使用済み
 
     for i in range(3):
         bot.handle_event(_msg("U1", f"答え{i}"))
+        out = _text(line[-1])
         assert line[-1]["path"] == "message/reply"
+        assert f"（{i + 2}/4）{texts.HEARING_FOCUS[i]['reason']}" in out   # なぜ聞くかと進み具合
+        assert out.startswith("そう感じていたんですね。")
     assert store.get_user("U1")["turns"] == "3"
-    assert "もしかすみがもっと深く読むとしたら" in calls[2]   # 3問目は「知りたいこと」
+    assert "もしかすみがもっと深く読むとしたら" in calls[2][1]   # 4問目は「知りたいこと」
 
     bot.handle_event(_msg("U1", "答え3"))
     u = store.get_user("U1")
     assert u["stage"] == "done" and u["step_day"] == "1"
-    assert texts.CLOSING.splitlines()[0] in _text(line[-1])
+    final = _text(line[-1])
+    assert final.startswith(texts.FINAL_HEAD) and "あなたへのひとことの本文です。" in final
+    assert texts.CLOSING.splitlines()[0] in final
+    assert calls[-1][0] == bot.FINAL_SYSTEM and "1995" not in calls[-1][1].split("相手の最新")[0][:0]
 
-    # 翌日20時を過ぎたら1日目の配信（ボタンつき）
+    # 翌日20時を過ぎたら1日目の配信（なぜ聞くか＋ボタンつき）
     later = datetime.fromisoformat(u["step_next_at"])
     assert later.hour == 20
     assert bot.send_due_steps(later.replace(minute=5)) == 1
     pushed = line[-1]
     assert pushed["path"] == "message/push" and "quickReply" in pushed["messages"][0]
+    assert "届けたい言葉が少し違うんです" in _text(pushed)
     assert bot.send_due_steps(later.replace(minute=6)) == 0   # 同じ日に二度送らない
     bot.handle_event(_msg("U1", "5〜10年"))
     ans = store._rows("kasumi_answers")
     assert ans[-1]["kind"] == "oshi_years" and ans[-1]["answer"] == "5〜10年"
     assert store.get_user("U1")["step_wait"] == ""
+
+
+def test_final_reading_falls_back_when_generation_fails(line, monkeypatch):
+    def fake(system, prompt, **kw):
+        if system == bot.FINAL_SYSTEM:
+            raise RuntimeError("api down")
+        return '{"ack": "はい。", "question": "誰かに話せていますか？"}'
+    monkeypatch.setattr(bot, "complete", fake)
+    store.upsert_user("U8", stage="hearing", turns="3", worry=texts.DEFAULT_WORRY, en_type="友衰",
+                      me_birth="1990-11-12", oshi_birth="1995-03-03", bot="on")
+    bot.handle_event(_msg("U8", "これからも続けるべきか"))
+    out = _text(line[-1])
+    assert out.startswith(texts.FINAL_HEAD) and texts.EN_TYPES["友衰"]["tired"] in out
+    assert store.get_user("U8")["stage"] == "done"
 
 
 def test_steps_not_sent_outside_window_or_over_cap(line, monkeypatch):
@@ -193,7 +224,7 @@ def test_unknown_code_and_birthdates_without_code(line):
 
 
 def test_money_amount_in_hearing_is_not_a_code(line, monkeypatch):
-    monkeypatch.setattr(bot, "complete", lambda *a, **k: "そうなんですね。誰かに話せていますか？")
+    monkeypatch.setattr(bot, "complete", lambda *a, **k: '{"ack": "そうなんですね。", "question": "いつごろからですか？"}')
     store.upsert_user("U4", stage="hearing", turns="0", worry=texts.DEFAULT_WORRY, bot="on")
     bot.handle_event(_msg("U4", "月5000円くらいです"))
     assert _text(line[-1]) != texts.CODE_NOT_FOUND
@@ -212,7 +243,7 @@ def test_danger_words_hold_the_bot(line, monkeypatch):
 
 
 def test_generated_reply_is_cleaned(line, monkeypatch):
-    monkeypatch.setattr(bot, "complete", lambda *a, **k: "**そうなんですね**。昴宿の縁ですね。誰かに話せていますか？")
+    monkeypatch.setattr(bot, "complete", lambda *a, **k: '{"ack": "**そうなんですね**。昴宿の縁ですね。", "question": "いつごろからですか？"}')
     store.upsert_user("U6", stage="hearing", turns="0", worry=texts.DEFAULT_WORRY, bot="on")
     bot.handle_event(_msg("U6", "最近しんどくて"))
     out = _text(line[-1])
@@ -225,7 +256,8 @@ def test_llm_failure_falls_back_to_fixed_question(line, monkeypatch):
     monkeypatch.setattr(bot, "complete", boom)
     store.upsert_user("U7", stage="hearing", turns="0", worry=texts.DEFAULT_WORRY, bot="on")
     bot.handle_event(_msg("U7", "こんにちは"))
-    assert _text(line[-1]) == texts.FALLBACK_QUESTIONS[0]
+    out = _text(line[-1])
+    assert texts.HEARING_FOCUS[0]["fallback"] in out and "（2/4）" in out
 
 
 def test_webhook_disabled_without_keys(monkeypatch):

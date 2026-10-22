@@ -74,6 +74,7 @@ def _clean(text: str) -> str:
     t = re.sub(r"\*\*|__|`", "", t)
     t = re.sub(r"(?m)^\s*#+\s*", "", t)
     t = re.sub(r"(?m)^\s*[-*]\s+", "・", t)
+    t = t.replace("🌙", "")          # 椿の印。かすみは使わない
     return t.strip()
 
 
@@ -135,10 +136,11 @@ def _name_prefix(name: str) -> str:
 def build_reading(name: str, me_birth: str, oshi_birth: str, rel: str, worry: str) -> str:
     t = texts.EN_TYPES[rel]
     question = texts.WORRIES.get(worry) or texts.WORRIES[texts.DEFAULT_WORRY]
+    reason = texts.FIRST_REASON_NO_WORRY if worry == texts.NO_WORRY else texts.FIRST_REASON
     return texts.READING.format(
         name_prefix=_name_prefix(name), en=t["reading"],
         oshi=texts.OSHI_MONTH[int(oshi_birth[5:7])], me=texts.ME_MONTH[int(me_birth[5:7])],
-        tired=t["tired"], question=question)
+        tired=t["tired"], reason=reason, question=question)
 
 
 def _send_reading(token: str, user: dict, me: str, oshi: str, state: str, worry: str, source: str) -> None:
@@ -152,25 +154,42 @@ def _send_reading(token: str, user: dict, me: str, oshi: str, state: str, worry:
 
 
 # ---------------- ヒアリング（生成） ----------------
-HEARING_SYSTEM = """あなたは推し活占い師「かすみ」。公式LINEで、推し活をしている人の話を聞いている。
-目的は、その人が推し活で感じていることを、安心して言葉にしてもらうこと。助言や販売はしない。
+# 生成を使うのはここだけ。1人あたり、ヒアリングの返事3通＋最後の「ひとこと」1通。
+# 質問の前の「なぜ聞くか」と「（2/4）」は、生成させずにこちらで必ず足す。
+_RULES = """口調：やわらかい丁寧語。一人称は「わたし」、相手は「あなた」。友だちに寄り添うような温度で。
 
-口調：やわらかい丁寧語。一人称は「わたし」、相手は「あなた」。友だちに寄り添うような温度で。
-
-書き方の決まり：
-・全体で60〜150字。プレーンテキストのみ（Markdownの記号、箇条書き、見出しは使わない）
-・最初に、相手の言葉を一つ拾って受け止める（例：「〜だったんですね」）。毎回同じ決まり文句にしない
-・「次に聞くこと」が指定されていれば、最後に質問を1つだけ書く。指定がなければ質問はしない
-・助言、解決策、商品やサービスの案内はしない。占いの見立ても入れない
+守ること：
+・プレーンテキストのみ（Markdownの記号、箇条書き、見出しは使わない）
+・助言の押しつけ、商品やサービスの案内はしない
 ・相手が書いた推しやグループ、他のファンの名前（固有名詞）は繰り返さない
 ・推しや他のファンを悪く言う話には乗らない。相手の気持ちだけを受け止める
 ・宿曜、宿の名前などの占いの専門用語は使わない。絵文字は使っても1つまで
-・相手がつらそうなときは、深追いせず、気持ちを受け止めることを優先する
 ・自分がAIか人間かを聞かれても、肯定も否定もせず「わたしはかすみです」とだけ答えて、相手の話に戻る（人間だとは言わない）
-・AI、モデル名、開発元の名前、署名は書かない
-・返事の本文だけを書く。前置きや説明は書かない"""
+・AI、モデル名、開発元の名前、署名は書かない"""
 
-AFTER_SYSTEM = HEARING_SYSTEM + "\n\n今はヒアリングが終わったあと。相手のメッセージを受け止める返事を40〜100字で書く。質問はしない。"
+HEARING_SYSTEM = """あなたは推し活占い師「かすみ」。公式LINEで、推し活をしている人の話を聞いている。
+目的は、その人が推し活で感じていることを、安心して言葉にしてもらうこと。
+
+""" + _RULES + """
+
+出力は次の形のJSONだけ。説明や前置きは書かない。
+{"ack": "相手の言葉を一つ拾って受け止める文（40〜100字。質問はしない。毎回同じ決まり文句にしない）",
+ "question": "「次に聞くこと」を聞く質問を1つだけ（40字以内。質問を2つ並べない）"}
+「次に聞くこと」が「なし」のときは question を空文字にする。"""
+
+FINAL_SYSTEM = """あなたは推し活占い師「かすみ」。公式LINEで4つの質問に答えてくれた人に、その人のためだけの「ひとこと」を書く。
+
+""" + _RULES + """
+
+書き方：
+・150〜250字。本文だけを書く
+・最初に、相手が話してくれたことを一つ受け止める
+・次に、渡された縁タイプと生まれ月の読みの範囲で、その人の推し活の良さやくせを言葉にする
+・最後に、その人が「一番知りたい」と言ったことに、占いとしての見立てをやさしく一つ渡す。小さな一歩の提案は一つまで
+・絵文字は使わない
+・結果を保証しない。不安をあおらない。続けるべき・やめるべきを断定しない（決めるのは本人）"""
+
+AFTER_SYSTEM = HEARING_SYSTEM.split("出力は次の形")[0] + "今はヒアリングが終わったあと。相手のメッセージを受け止める返事を40〜100字で書く。質問はしない。JSONではなく本文だけを書く。"
 
 
 def _history_text(user_id: str) -> str:
@@ -181,17 +200,49 @@ def _history_text(user_id: str) -> str:
     return "\n".join(lines)
 
 
-def _generate(system: str, user: dict, incoming: str, focus: str | None) -> str:
+def _context(user: dict, incoming: str) -> str:
     rel = texts.EN_TYPES.get(user.get("en_type", ""), {}).get("name", "")
-    prompt = (f"この人の縁タイプ：{rel or '未診断'}\n"
-              f"診断で選んだ、いま一番気になっていること：{user.get('worry') or '未回答'}\n\n"
-              f"これまでのやりとり（古い順）：\n{_history_text(user['user_id'])}\n\n"
-              f"相手の最新のメッセージ：{incoming}\n\n"
-              + (f"次に聞くこと：{focus}" if focus else "次に聞くこと：なし（質問はしない）"))
-    out = complete(system, prompt, model=MODEL, max_tokens=600, temperature=0.8)
+    return (f"この人の縁タイプ：{rel or '未診断'}\n"
+            f"診断で選んだ、いま一番気になっていること：{user.get('worry') or '未回答'}\n\n"
+            f"これまでのやりとり（古い順）：\n{_history_text(user['user_id'])}\n\n"
+            f"相手の最新のメッセージ：{incoming}\n")
+
+
+def _generate(system: str, user: dict, incoming: str, focus: str | None) -> str:
+    """ヒアリング後の返事（本文だけ）。"""
+    out = complete(system, _context(user, incoming), model=MODEL, max_tokens=600, temperature=0.8)
     out = _clean(out).strip("「」\"' \n")
     if not out or len(out) > 260:
         raise ValueError(f"生成の長さが範囲外: {len(out)}")
+    return out
+
+
+def _generate_turn(user: dict, incoming: str, focus: str | None) -> tuple[str, str]:
+    """ヒアリングの1往復ぶん：(受け止め, 質問)。"""
+    prompt = _context(user, incoming) + f"\n次に聞くこと：{focus or 'なし'}"
+    raw = complete(HEARING_SYSTEM, prompt, model=MODEL, max_tokens=600, temperature=0.8)
+    m = re.search(r"\{.*\}", raw, re.S)
+    data = json.loads(m.group(0)) if m else {}
+    ack = _clean(str(data.get("ack", ""))).strip("「」 \n")
+    q = _clean(str(data.get("question", ""))).strip("「」 \n")
+    if not ack or len(ack) > 160 or len(q) > 80 or (focus and not q):
+        raise ValueError(f"生成の形が想定外: ack={len(ack)} q={len(q)}")
+    if ack[-1] not in "。！？!?…）)":
+        ack += "。"
+    return ack, q
+
+
+def _final_reading(user: dict, incoming: str) -> str:
+    t = texts.EN_TYPES.get(user.get("en_type", ""), texts.EN_TYPES["命"])
+    me, oshi = str(user.get("me_birth") or ""), str(user.get("oshi_birth") or "")
+    material = (f"縁タイプの読み：{t['reading']}\n疲れやすいところ：{t['tired']}\n"
+                + (f"{texts.OSHI_MONTH[int(oshi[5:7])]}\n" if len(oshi) >= 7 else "")
+                + (f"{texts.ME_MONTH[int(me[5:7])]}\n" if len(me) >= 7 else ""))
+    out = complete(FINAL_SYSTEM, material + "\n" + _context(user, incoming), model=MODEL,
+                   max_tokens=900, temperature=0.8)
+    out = _clean(out).strip("「」\"' \n")
+    if not out or len(out) > 400:
+        raise ValueError(f"ひとことの長さが範囲外: {len(out)}")
     return out
 
 
@@ -200,23 +251,26 @@ def _hearing(token: str, user: dict, text: str) -> None:
     turns = int(user.get("turns") or 0) + 1
     focus_list = texts.HEARING_FOCUS_NO_WORRY if user.get("worry") == texts.NO_WORRY else texts.HEARING_FOCUS
     if turns <= len(focus_list):
+        f = focus_list[turns - 1]
         try:
-            msg = _generate(HEARING_SYSTEM, user, text, focus_list[turns - 1])
+            ack, q = _generate_turn(user, text, f["focus"])
         except Exception as e:
             print(f"[kasumi] ヒアリングの生成に失敗（予備の文面で返す）: {e}")
-            msg = texts.FALLBACK_QUESTIONS[turns - 1]
+            ack, q = "教えてくれて、ありがとうございます。", f["fallback"]
+        msg = f"{ack}\n\n（{turns + 1}/{texts.QUESTION_COUNT}）{f['reason']}\n{q}"
         store.upsert_user(uid, turns=str(turns))
         reply(token, uid, msg)
         return
-    # 最後の答え → 受け止め＋終わりのあいさつ。翌日20時から7日間の配信
+    # 4つ目の答え → あなたへのひとこと＋終わりのあいさつ。翌日20時から7日間の配信
     try:
-        ack = _generate(HEARING_SYSTEM, user, text, None)
+        final = _final_reading(user, text)
     except Exception as e:
-        print(f"[kasumi] 終わりの受け止めの生成に失敗（あいさつだけ送る）: {e}")
-        ack = ""
+        print(f"[kasumi] ひとことの生成に失敗（予備の文面で返す）: {e}")
+        t = texts.EN_TYPES.get(user.get("en_type", ""), texts.EN_TYPES["命"])
+        final = texts.FINAL_FALLBACK.format(tired=t["tired"])
     store.upsert_user(uid, turns=str(turns), stage="done", step_day="1",
                       step_next_at=next_step_time(datetime.now(store.JST)).isoformat(timespec="seconds"))
-    reply(token, uid, (ack + "\n\n" if ack else "") + texts.CLOSING)
+    reply(token, uid, f"{texts.FINAL_HEAD}\n\n{final}\n\n{texts.CLOSING}")
     store.add_event("closing", uid)
 
 
