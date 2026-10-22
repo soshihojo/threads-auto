@@ -404,8 +404,12 @@ def _handle(ev: dict, uid: str) -> None:
     elif stage == "hearing":
         _hearing(token, user, text)
     else:
+        # ヒアリングが終わったあとの返事は、1人1日1通まで（それ以上は返さない・通知もしない）
+        today = datetime.now(store.JST).strftime("%Y-%m-%d")
+        if user.get("after_date") == today:
+            return
         try:
-            reply(token, uid, _generate(AFTER_SYSTEM, user, text, None))
+            if reply(token, uid, _generate(AFTER_SYSTEM, user, text, None)):
+                store.upsert_user(uid, after_date=today)
         except Exception as e:
-            print(f"[kasumi] 返事の生成に失敗（店主に知らせる）: {e}")
-            _notify_owner(f"返事を作れなかったメッセージがあります。user_id={uid}")
+            print(f"[kasumi] 終わったあとの返事の生成に失敗（返さない）: {e}")

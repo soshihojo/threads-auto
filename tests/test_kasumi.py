@@ -265,3 +265,14 @@ def test_webhook_disabled_without_keys(monkeypatch):
     monkeypatch.delenv("LINE_CHANNEL_ACCESS_TOKEN_KASUMI", raising=False)
     assert not bot.enabled()
     assert bot.send_due_steps() == 0
+
+
+def test_after_hearing_replies_once_per_day(line, monkeypatch):
+    monkeypatch.setattr(bot, "complete", lambda *a, **k: "受け止めの返事です。")
+    store.upsert_user("U9", stage="done", turns="4", bot="on", step_day="2")
+    bot.handle_event(_msg("U9", "今日ライブでした"))
+    assert _text(line[-1]) == "受け止めの返事です。"
+    n = len(line)
+    bot.handle_event(_msg("U9", "楽しかった！"))
+    assert len(line) == n   # 同じ日の2通目には返さない
+    assert len(store.recent_chats("U9")) == 3   # 届いた言葉は記録する
