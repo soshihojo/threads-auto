@@ -290,3 +290,27 @@ def test_four_days_then_stop(line):
     assert bot.send_due_steps(day + timedelta(days=4)) == 0
     u = store.get_user("U10")
     assert u["step_day"] == "5" and u["step_next_at"] == "" and u["step_wait"] == "want_reading"
+
+
+def test_english_word_is_regenerated_then_falls_back(line, monkeypatch):
+    outs = iter(['{"ack": "話せる relationship があるんですね。", "question": "何を一番知りたいですか"}',
+                 '{"ack": "話せる人がいるんですね。", "question": "何を一番知りたいですか"}'])
+    monkeypatch.setattr(bot, "complete", lambda *a, **k: next(outs))
+    store.upsert_user("U11", stage="hearing", turns="0", worry=texts.DEFAULT_WORRY, bot="on")
+    bot.handle_event(_msg("U11", "友達に話せてる"))
+    out = _text(line[-1])
+    assert "relationship" not in out and "話せる人がいるんですね。" in out
+    assert out.rstrip().endswith("何を一番知りたいですか？")          # 「？」を足す
+
+    monkeypatch.setattr(bot, "complete", lambda *a, **k: '{"ack": "safe space ですね。", "question": "いつからですか？"}')
+    store.upsert_user("U12", stage="hearing", turns="0", worry=texts.DEFAULT_WORRY, bot="on")
+    bot.handle_event(_msg("U12", "最近つらい"))
+    out = _text(line[-1])
+    assert "safe" not in out and texts.HEARING_FOCUS[0]["fallback"] in out   # 2回ともだめなら予備の文面
+
+
+def test_english_written_by_user_is_allowed(line, monkeypatch):
+    monkeypatch.setattr(bot, "complete", lambda *a, **k: '{"ack": "LIVEに行けたんですね。", "question": "いつからですか？"}')
+    store.upsert_user("U13", stage="hearing", turns="0", worry=texts.DEFAULT_WORRY, bot="on")
+    bot.handle_event(_msg("U13", "LIVEに行けた"))
+    assert "LIVEに行けたんですね。" in _text(line[-1])

@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 import requests
 
 from ..config import env
-from ..diagnosis import find_birthdates, strip_ai_leak, strip_jargon, with_honorific
+from ..diagnosis import find_birthdates, foreign_word, strip_ai_leak, strip_jargon, with_honorific
 from ..llm import complete
 from . import store, texts
 from .diag import redeem
@@ -165,7 +165,8 @@ _RULES = """口調：やわらかい丁寧語。一人称は「わたし」、�
 ・推しや他のファンを悪く言う話には乗らない。相手の気持ちだけを受け止める
 ・宿曜、宿の名前などの占いの専門用語は使わない。絵文字は使っても1つまで
 ・自分がAIか人間かを聞かれても、肯定も否定もせず「わたしはかすみです」とだけ答えて、相手の話に戻る（人間だとは言わない）
-・AI、モデル名、開発元の名前、署名は書かない"""
+・AI、モデル名、開発元の名前、署名は書かない
+・英単語を使わず、日本語だけで書く（相手が英字で書いた言葉をそのまま使うときだけは可）"""
 
 HEARING_SYSTEM = """あなたは推し活占い師「かすみ」。公式LINEで、推し活をしている人の話を聞いている。
 目的は、その人が推し活で感じていることを、安心して言葉にしてもらうこと。
@@ -208,28 +209,57 @@ def _context(user: dict, incoming: str) -> str:
             f"相手の最新のメッセージ：{incoming}\n")
 
 
+_TRIES = 2   # 英単語が混ざったら、もう一度だけ作り直す（だめなら呼び出し元が予備の文面にする）
+
+
+def _ensure_question_mark(q: str) -> str:
+    q = q.rstrip("。 ")
+    return q if not q or q[-1] in "？?" else q + "？"
+
+
+def _no_foreign(prompt: str, text: str) -> None:
+    """相手が書いていない英単語（例：relationship）が混ざっていたら作り直させる。"""
+    w = foreign_word(prompt, text)
+    if w:
+        raise ValueError(f"英単語が混ざった: {w}")
+
+
 def _generate(system: str, user: dict, incoming: str, focus: str | None) -> str:
     """ヒアリング後の返事（本文だけ）。"""
-    out = complete(system, _context(user, incoming), model=MODEL, max_tokens=600, temperature=0.8)
-    out = _clean(out).strip("「」\"' \n")
-    if not out or len(out) > 260:
-        raise ValueError(f"生成の長さが範囲外: {len(out)}")
-    return out
+    prompt = _context(user, incoming)
+    last: Exception | None = None
+    for _ in range(_TRIES):
+        try:
+            out = _clean(complete(system, prompt, model=MODEL, max_tokens=600, temperature=0.8)).strip("「」\"' \n")
+            if not out or len(out) > 260:
+                raise ValueError(f"生成の長さが範囲外: {len(out)}")
+            _no_foreign(prompt, out)
+            return out
+        except Exception as e:
+            last = e
+    raise last
 
 
 def _generate_turn(user: dict, incoming: str, focus: str | None) -> tuple[str, str]:
     """ヒアリングの1往復ぶん：(受け止め, 質問)。"""
     prompt = _context(user, incoming) + f"\n次に聞くこと：{focus or 'なし'}"
-    raw = complete(HEARING_SYSTEM, prompt, model=MODEL, max_tokens=600, temperature=0.8)
-    m = re.search(r"\{.*\}", raw, re.S)
-    data = json.loads(m.group(0)) if m else {}
-    ack = _clean(str(data.get("ack", ""))).strip("「」 \n")
-    q = _clean(str(data.get("question", ""))).strip("「」 \n")
-    if not ack or len(ack) > 160 or len(q) > 80 or (focus and not q):
-        raise ValueError(f"生成の形が想定外: ack={len(ack)} q={len(q)}")
-    if ack[-1] not in "。！？!?…）)":
-        ack += "。"
-    return ack, q
+    last: Exception | None = None
+    for _ in range(_TRIES):
+        try:
+            raw = complete(HEARING_SYSTEM, prompt, model=MODEL, max_tokens=600, temperature=0.8)
+            m = re.search(r"\{.*\}", raw, re.S)
+            data = json.loads(m.group(0)) if m else {}
+            ack = _clean(str(data.get("ack", ""))).strip("「」 \n")
+            q = _ensure_question_mark(_clean(str(data.get("question", ""))).strip("「」 \n"))
+            if not ack or len(ack) > 160 or len(q) > 80 or (focus and not q):
+                raise ValueError(f"生成の形が想定外: ack={len(ack)} q={len(q)}")
+            _no_foreign(prompt, ack + q)
+            if ack[-1] not in "。！？!?…）)":
+                ack += "。"
+            return ack, q
+        except Exception as e:
+            last = e
+    raise last
 
 
 def _final_reading(user: dict, incoming: str) -> str:
@@ -238,12 +268,18 @@ def _final_reading(user: dict, incoming: str) -> str:
     material = (f"縁タイプの読み：{t['reading']}\n疲れやすいところ：{t['tired']}\n"
                 + (f"{texts.OSHI_MONTH[int(oshi[5:7])]}\n" if len(oshi) >= 7 else "")
                 + (f"{texts.ME_MONTH[int(me[5:7])]}\n" if len(me) >= 7 else ""))
-    out = complete(FINAL_SYSTEM, material + "\n" + _context(user, incoming), model=MODEL,
-                   max_tokens=900, temperature=0.8)
-    out = _clean(out).strip("「」\"' \n")
-    if not out or len(out) > 400:
-        raise ValueError(f"ひとことの長さが範囲外: {len(out)}")
-    return out
+    prompt = material + "\n" + _context(user, incoming)
+    last: Exception | None = None
+    for _ in range(_TRIES):
+        try:
+            out = _clean(complete(FINAL_SYSTEM, prompt, model=MODEL, max_tokens=900, temperature=0.8)).strip("「」\"' \n")
+            if not out or len(out) > 400:
+                raise ValueError(f"ひとことの長さが範囲外: {len(out)}")
+            _no_foreign(prompt, out)
+            return out
+        except Exception as e:
+            last = e
+    raise last
 
 
 def _hearing(token: str, user: dict, text: str) -> None:
