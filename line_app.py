@@ -20,11 +20,17 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from src import line_bot, tokushoho, store, web_diag
 from src.config import env
+from src.kasumi import bot as kasumi_bot, diag as kasumi_diag, store as kasumi_store
 
 app = FastAPI()
 from src.payments import router as payments_router
 app.include_router(payments_router)
 store.init_db()
+# かすみ（別ブランド）の表。作れんかっても椿は止めない
+try:
+    kasumi_store.init()
+except Exception as e:
+    print(f"[kasumi] 表の準備に失敗（かすみの受付だけ止まる）: {e}")
 
 # 未返信スイープ：生成失敗等で返信が落ちた会話を10分ごとに拾い直す安全網
 SWEEP_INTERVAL_SEC = int(env("LINE_SWEEP_INTERVAL_SEC") or "300")
@@ -49,6 +55,27 @@ async def _start_sweeper() -> None:
                 print(f"[sweep] 実行失敗（次周期で再試行）: {e}")
 
     if SWEEP_INTERVAL_SEC > 0:
+        asyncio.create_task(_loop())
+
+
+# かすみの7日間の配信。椿のスイープとは別のループで回す（片方が落ちても、もう片方は動く）
+KASUMI_STEP_INTERVAL_SEC = int(env("KASUMI_STEP_INTERVAL_SEC") or "600")
+
+
+@app.on_event("startup")
+async def _start_kasumi_steps() -> None:
+    async def _loop() -> None:
+        loop = asyncio.get_running_loop()
+        while True:
+            await asyncio.sleep(KASUMI_STEP_INTERVAL_SEC)
+            try:
+                n = await loop.run_in_executor(None, kasumi_bot.send_due_steps)
+                if n:
+                    print(f"[kasumi] 7日間の配信を {n}件送った")
+            except Exception as e:
+                print(f"[kasumi] 配信の実行失敗（次周期で再試行）: {e}")
+
+    if KASUMI_STEP_INTERVAL_SEC > 0:
         asyncio.create_task(_loop())
 
 
@@ -142,4 +169,55 @@ def _handle_event_logged(ev: dict) -> None:
         who = (ev.get("source") or {}).get("userId", "?")
         what = str((ev.get("message") or {}).get("text", ""))[:60]
         print(f"[webhook] ★受信の処理が落ちた: {who} 種別={ev.get('type')} 本文={what!r} → {e}")
+        raise
+
+
+# ================= かすみ（推し活占い・別のLINE公式アカウント） =================
+@app.get("/kasumi/shindan", response_class=HTMLResponse)
+def kasumi_shindan_page() -> str:
+    """かすみの診断「推しとあなたの縁診断」。"""
+    return kasumi_diag.page_html()
+
+
+@app.get("/kasumi/privacy", response_class=HTMLResponse)
+def kasumi_privacy_page() -> str:
+    return kasumi_diag.privacy_html()
+
+
+@app.post("/kasumi/shindan/track")
+def kasumi_shindan_track(e: str, background_tasks: BackgroundTasks, vid: str = "") -> dict:
+    if e in ("view", "line_click", "view_pc"):
+        background_tasks.add_task(kasumi_store.add_event, e, vid[:64])
+    return {"ok": True}
+
+
+@app.post("/kasumi/shindan/api")
+async def kasumi_shindan_api(request: Request) -> JSONResponse:
+    try:
+        return JSONResponse(kasumi_diag.submit(await request.json()))
+    except Exception as e:
+        print(f"[kasumi] 診断の受付失敗: {e}")
+        return JSONResponse({"ok": False, "error": "invalid input"}, status_code=400)
+
+
+@app.post("/webhook/kasumi")
+async def kasumi_webhook(request: Request, background_tasks: BackgroundTasks) -> str:
+    """かすみのLINE。鍵（LINE_CHANNEL_*_KASUMI）が無いうちは受け付けない（椿には影響しない）。"""
+    if not kasumi_bot.enabled():
+        raise HTTPException(status_code=503, detail="kasumi disabled")
+    body = await request.body()
+    if not kasumi_bot.verify_signature(body, request.headers.get("x-line-signature", "")):
+        raise HTTPException(status_code=400, detail="bad signature")
+    for ev in json.loads(body).get("events", []):
+        background_tasks.add_task(_kasumi_handle_logged, ev)
+    return "OK"
+
+
+def _kasumi_handle_logged(ev: dict) -> None:
+    try:
+        kasumi_bot.handle_event(ev)
+    except Exception as e:
+        who = (ev.get("source") or {}).get("userId", "?")
+        what = str((ev.get("message") or {}).get("text", ""))[:60]
+        print(f"[kasumi] ★受信の処理が落ちた: {who} 種別={ev.get('type')} 本文={what!r} → {e}")
         raise
