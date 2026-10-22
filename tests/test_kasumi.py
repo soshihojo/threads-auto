@@ -134,7 +134,7 @@ def test_build_reading_assembles_parts_with_honorific():
     assert texts.EN_TYPES["友衰"]["reading"] in t and texts.EN_TYPES["友衰"]["tired"] in t
     assert texts.OSHI_MONTH[3] in t and texts.ME_MONTH[11] in t
     assert t.rstrip().endswith("そのことを知ったとき、どんな気持ちになりましたか？")
-    assert "4つだけ聞かせてください" in t and "（1/4）" + texts.FIRST_REASON in t
+    assert "4つだけ聞かせてください" in t and texts.FIRST_REASON + "\n" in t and "/4）" not in t
     assert bot.build_reading("", "1990-11-12", "1995-03-03", "命", texts.NO_WORRY).startswith("お待たせしました。")
 
 
@@ -161,7 +161,7 @@ def test_full_flow_follow_code_hearing_closing_steps(line, monkeypatch):
                      "worry": "ファン同士・界隈の人間関係"})
     bot.handle_event(_msg("U1", f"縁の番号{r['code']}"))
     reading = _text(line[-1])
-    assert "推しとあなたの縁を読みました" in reading and "モヤっとした出来事" in reading and "（1/4）" in reading
+    assert "推しとあなたの縁を読みました" in reading and "モヤっとした出来事" in reading and "/4）" not in reading
     assert store.get_user("U1")["stage"] == "hearing"
     assert diag.redeem(r["code"]) is None   # 使用済み
 
@@ -169,7 +169,7 @@ def test_full_flow_follow_code_hearing_closing_steps(line, monkeypatch):
         bot.handle_event(_msg("U1", f"答え{i}"))
         out = _text(line[-1])
         assert line[-1]["path"] == "message/reply"
-        assert f"（{i + 2}/4）{texts.HEARING_FOCUS[i]['reason']}" in out   # なぜ聞くかと進み具合
+        assert f"\n\n{texts.HEARING_FOCUS[i]['reason']}\n" in out and "/4）" not in out   # なぜ聞くか（番号は付けない）
         assert out.startswith("そう感じていたんですね。")
     assert store.get_user("U1")["turns"] == "3"
     assert "もしかすみがもっと深く読むとしたら" in calls[2][1]   # 4問目は「知りたいこと」
@@ -260,7 +260,7 @@ def test_llm_failure_falls_back_to_fixed_question(line, monkeypatch):
     store.upsert_user("U7", stage="hearing", turns="0", worry=texts.DEFAULT_WORRY, bot="on")
     bot.handle_event(_msg("U7", "こんにちは"))
     out = _text(line[-1])
-    assert texts.HEARING_FOCUS[0]["fallback"] in out and "（2/4）" in out
+    assert texts.HEARING_FOCUS[0]["fallback"] in out and texts.HEARING_FOCUS[0]["reason"] in out
 
 
 def test_webhook_disabled_without_keys(monkeypatch):

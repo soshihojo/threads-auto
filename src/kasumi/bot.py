@@ -155,7 +155,7 @@ def _send_reading(token: str, user: dict, me: str, oshi: str, state: str, worry:
 
 # ---------------- ヒアリング（生成） ----------------
 # 生成を使うのはここだけ。1人あたり、ヒアリングの返事3通＋最後の「ひとこと」1通。
-# 質問の前の「なぜ聞くか」と「（2/4）」は、生成させずにこちらで必ず足す。
+# 質問の前の「なぜ聞くか」は、生成させずにこちらで必ず足す。
 _RULES = """口調：やわらかい丁寧語。一人称は「わたし」、相手は「あなた」。友だちに寄り添うような温度で。
 
 守ること：
@@ -293,7 +293,7 @@ def _hearing(token: str, user: dict, text: str) -> None:
         except Exception as e:
             print(f"[kasumi] ヒアリングの生成に失敗（予備の文面で返す）: {e}")
             ack, q = "教えてくれて、ありがとうございます。", f["fallback"]
-        msg = f"{ack}\n\n（{turns + 1}/{texts.QUESTION_COUNT}）{f['reason']}\n{q}"
+        msg = f"{ack}\n\n{f['reason']}\n{q}"
         store.upsert_user(uid, turns=str(turns))
         reply(token, uid, msg)
         return
