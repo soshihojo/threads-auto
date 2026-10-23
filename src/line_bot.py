@@ -1244,6 +1244,8 @@ _META_LEAK_RE = META_LEAK_RE
 # 実害: 2026-07-13〜08-03に6件、返信の最後に「0」だけの行が付いたまま送信された
 #（eriko・みき他）。椿は数字だけの行で文を終えないので、末尾に来たら必ず異物。
 _TRAILING_NUM_RE = re.compile(r"(?:[\r\n]+[ \t]*[0-9０-９]+[ \t]*)+\s*$")
+# 数字（と空白）だけの吹き出し。本文が他にある時は、一通ぶんごと捨てる
+_NUM_ONLY_RE = re.compile(r"[0-9０-９\s]+")
 
 
 def _strip_trailing_numbers(text: str) -> str:
@@ -1373,9 +1375,19 @@ def _split_bubbles(text: str) -> list[str]:
         吹き出しは三つのままや。ほんで、一通が5,000字を超えたらLINEが弾くんで、
         そこも守る（超えた分は続きの通へ回す）。
     """
+    # ★★★2026-10-23：阿部夏己さんに「0」だけの吹き出しが一通届いた（「0とはなんですか？」）。
+    #   生成の末尾に「\n\n0」が付いとった。それを _maybe_split_bubble が段落として切り分けて、
+    #   「0」が【一通まるごと】になった。★_plain_text の末尾数字の掃除は吹き出しごとに掛かるうえ、
+    #   全部消えたら元に戻す作り（数字だけの本文を空送りせんため）やから、「0」だけの吹き出しは素通りした。
+    #   ★★せやから、分ける【前】に全体の末尾を掃除する。ほんで、分けたあとに数字だけの吹き出しが
+    #     残っとったら、他に本文がある限り捨てる。
+    _t = re.sub(r"(?:[\r\n]+[ \t]*(?:[0-9０-９]+|-{3,})[ \t]*)+\s*$", "", text)   # 末尾の数字と、宙に浮いた区切り
+    text = _t if _t.strip() else text
     text = _maybe_split_bubble(text)   # モデルが分けてこん時は、こちらで3回に1回だけ分ける
     parts = [_plain_text(p).strip() for p in re.split(r"\n\s*---\s*\n", text) if p.strip()]
     parts = [p for p in parts if p]
+    if any(not _NUM_ONLY_RE.fullmatch(p) for p in parts):
+        parts = [p for p in parts if not _NUM_ONLY_RE.fullmatch(p)]
     if not parts:
         return [_plain_text(text)]
     if len(parts) > 3:
