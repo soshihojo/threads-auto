@@ -253,6 +253,15 @@ def _unmangle(text: str) -> str:
 def _build_consult_context(cb, cmem, chist, incoming, _lmsgs, _refs, _span_h):
     """返信生成に渡す hist_str を組む。戻り値は (hist_str, 画面に出す警告のリスト)。"""
     warns = []
+    # ★★★2026-10-23：会員が【椿の言葉で】傷ついた／やめたい、と言うてきた回は、店主に必ず知らせる。
+    #   田中麻衣さん（10/8）とａｉｒｉさん（10/23）。どっちも、椿が見立てを後出しで格下げした回の直後や。
+    #   ★この回の返事は、生成に任せきりにせん。店主が前後を読んでから送る。退会の手続きも店主が答える。
+    if diagnosis.hurt_by_tsubaki(incoming):
+        warns.append("⚠️ この会員は【椿の言葉で傷ついた】と言うてきとります。"
+                     "生成された返信をそのまま送らず、直前に椿が何を書いたかを読んでから送ってください。")
+    if diagnosis.cancel_intent(incoming):
+        warns.append("⚠️ この会員は【月詠みをやめたい（解約・退会）】と言うてきとります。"
+                     "手続きの案内は、返信とは別に店主から答えてください（返信の中では手順や期日を書かせてへん）。")
     _past = [h for h in chist[:13]
              if str(h.get('worry') or '').strip() != incoming.strip()][:12]
     hist_str = "\n\n".join(
