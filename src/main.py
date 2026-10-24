@@ -630,7 +630,10 @@ def cmd_join(args: argparse.Namespace) -> None:
         body = _re.sub(r"\n{3,}", "\n\n", body).strip()
         store.add_reading(mid, "個別鑑定書", "（納品済み個別鑑定PDFの全文）", body)
         print(f"📜 鑑定書を控えに入れた（{len(body)}字）")
-        cal = OUT_DIR / f"九十日の暦_{stem}.html"
+        # ★★2026-10-24：暦を三十日に変えた（10/07）あと、ここは「九十日の暦_」しか探してへんかった。
+        #   ★潮見の人が入会しても、暦が控えに入らんまま会員相談が回るとこやった（淳子さんの回で気づいた）。
+        _cals = [OUT_DIR / f"三十日の暦_{stem}.html", OUT_DIR / f"九十日の暦_{stem}.html"]
+        cal = next((c for c in _cals if c.exists()), _cals[0])
         if cal.exists():
             c = _re.sub(r"<(style|script)[^>]*>.*?</\1>", "", cal.read_text(encoding="utf-8"),
                         flags=_re.S)
@@ -639,7 +642,7 @@ def cmd_join(args: argparse.Namespace) -> None:
             # ★2026-10-07：暦を三十日に変えた。新しく書く控えはこのラベル。
             #   ★古い「九十日の暦」の行はそのまま残す（読む側は month で絞ってへん）
             store.add_reading(mid, "三十日の暦", "（納品済みの潮見の暦）", c)
-            print(f"🌊 九十日の暦も控えに入れた（{len(c)}字）")
+            print(f"🌊 {cal.name.split('_')[0]}も控えに入れた（{len(c)}字）")
             print("   ★この人は潮見の人や。月詠みは【5,980円】の方やで")
 
     print("\n→ ダッシュボードの💬会員相談に、この人が出るようになった")
