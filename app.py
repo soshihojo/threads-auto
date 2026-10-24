@@ -266,7 +266,7 @@ def _build_consult_context(cb, cmem, chist, incoming, _lmsgs, _refs, _span_h):
              if str(h.get('worry') or '').strip() != incoming.strip()][:12]
     hist_str = "\n\n".join(
         f"◆{str(h['created_at'])[:16]} 会員の相談: {str(h['worry'])[:800]}\n"
-        f"　椿の返信: {str(h['reading'])[:1600]}"
+        f"　椿の返信: {membership.strip_count_line(h['reading'])[:1600]}"
         for h in reversed(_past)
     )
     manual = cb.get("manual_replies", [])
@@ -408,6 +408,11 @@ def _draft_one(cb) -> dict:
     if _notice:
         res["reply"] = res["reply"].rstrip() + "\n\n" + _notice
         warns.append("今月の相談枠を使い切る回や。終わりを伝える一行を末尾に足してある。")
+    # ★2026-10-25：上限のある層は、末尾に「今月の相談 ◯通目」を足す（作り直しは二重に数えん）
+    _redo = any(h["month"] == "相談" and str(h["worry"]).strip() == incoming.strip() for h in _all_hist)
+    _cl = membership.count_line(cb.get("quota") or {"limit": 0}, redo=_redo)
+    if _cl:
+        res["reply"] = res["reply"].rstrip() + "\n\n" + _cl
     # ★控えに保存するんも、一人ずつの時と同じ作法にする（同じ相談文なら上書き）
     reading_id = None
     try:
@@ -1151,6 +1156,12 @@ if view == VIEW_CONSULT:
                     if _notice:
                         res["reply"] = res["reply"].rstrip() + "\n\n" + _notice
                         st.warning("今月の相談枠を使い切る回や。終わりを伝える一行を末尾に足してある。")
+                    # ★2026-10-25：上限のある層は、末尾に「今月の相談 ◯通目」を足す（一括の _draft_one と同じ作法）
+                    _redo = any(h["month"] == "相談" and str(h["worry"]).strip() == incoming.strip()
+                                for h in _all_hist)
+                    _cl = membership.count_line(cb.get("quota") or {"limit": 0}, redo=_redo)
+                    if _cl:
+                        res["reply"] = res["reply"].rstrip() + "\n\n" + _cl
                     # 相談と返信を自動で控えに保存（次回の返信生成が「前回までのやりとり」として参照する）。
                     # 同じ相談文で作り直した場合は前の控えを上書き＝重複させない
                     reading_id = None

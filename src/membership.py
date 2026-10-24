@@ -161,6 +161,27 @@ def welcome_message(call_name: str, plan: str) -> str:
     )
 
 
+# ★★★2026-10-25 新設（店主の指示）：月に上限がある層は、返信の末尾に【今月の何通目か】を一行足す。
+#   ★会員が残りを数えんで済むように。いきなり「使い切りや」と言われて驚かんように。
+#   ★redo … 同じ相談文で作り直した時は、もう一通に数えとるんで足さん（二重に数えん）。
+#   ★★この一行は、次の返信を作る時の履歴からは外す（strip_count_line）。
+#     残しとくと、生成が真似して自分で「◯通目」を書き出す。
+def count_line(st: dict, redo: bool = False) -> str:
+    """上限のある層だけ、末尾に足す「今月の相談 ◯通目」の一行を返す（上限なしは空）。"""
+    if not st.get("limit"):
+        return ""
+    lim = int(st["limit"])
+    n = int(st.get("used") or 0) + (0 if redo else 1)
+    n = max(1, min(n, lim))
+    return f"（今月の相談 {n}通目／{lim}通まで・残り{lim - n}通）"
+
+
+def strip_count_line(text: str) -> str:
+    """履歴に渡す前に、末尾の「今月の相談 ◯通目」の一行を外す。"""
+    import re as _re
+    return _re.sub(r"\s*（今月の相談 \d+通目／\d+通まで・残り\d+通）\s*$", "", str(text or ""))
+
+
 def limit_notice(st: dict) -> str:
     """その返信で枠を使い切るなら、末尾に足す一行を返す（要らん時は空）。"""
     if not st["limit"]:
