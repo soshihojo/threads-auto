@@ -359,6 +359,16 @@ def cmd_shiomi(args: argparse.Namespace) -> None:
         print(f"ℹ️ 暦の期間を {shiomi.span_label(_span)}（{_span}日）で組む"
               f"（既定は{shiomi.span_label(shiomi.SPAN_DAYS)}）")
     cal = shiomi.make_shiomi(name, args.me, args.him, details, span=_span)
+    # ★2026-10-25：名簿に LINE の表示名と user_id も埋める（売上ツールが潮見を見分けられるように）
+    _uid = getattr(args, "line_user", "") or ""
+    if _uid:
+        try:
+            from . import store
+            _disp = next((str(u.get("display_name") or "") for u in store.list_line_users()
+                          if u.get("user_id") == _uid), "") if hasattr(store, "list_line_users") else ""
+            shiomi.fill_shiomi_buyer_line(name, _disp, _uid)
+        except Exception as e:
+            print(f"⚠️ 潮見の名簿に user_id を埋められんかった（手で埋めてな）: {e}")
 
     print("\n" + "━" * 72)
     print("📦 潮見は三点セットや。この順番で送る:")

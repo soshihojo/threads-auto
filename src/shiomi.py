@@ -466,6 +466,30 @@ def _norm_name(s: str) -> str:
     return s
 
 
+def fill_shiomi_buyer_line(name: str, display: str, user_id: str) -> bool:
+    """名簿のその人の行に、LINEの表示名と user_id を埋める（空欄の時だけ）。
+
+    ★2026-10-25 新設：売上ツールは user_id か表示名でしか潮見を見分けられん。
+      ★名前の列（鑑定書の呼び名「なつきさん」）と表示名（「natsuki」）がちがう人は、
+        潮見を売っても鑑定書（3,980円）として数えられとった（10/23〜24で三人）。"""
+    if not (SHIOMI_LEDGER.exists() and user_id):
+        return False
+    key = _norm_name(name)
+    out, hit = [], False
+    for l in SHIOMI_LEDGER.read_text(encoding="utf-8").splitlines():
+        cols = l.split("\t")
+        if (not hit and l.strip() and not l.startswith("#") and len(cols) >= 2
+                and _norm_name(cols[1]) == key):
+            cols += [""] * (4 - len(cols))
+            cols[2] = cols[2] or display
+            cols[3] = cols[3] or user_id
+            l, hit = "\t".join(cols[:4]), True
+        out.append(l)
+    if hit:
+        SHIOMI_LEDGER.write_text("\n".join(out) + "\n", encoding="utf-8")
+    return hit
+
+
 def record_shiomi_buyer(name: str, today: str) -> None:
     """潮見の名簿に一行足す。★同じ人が二回来ても、重ねて書かん。
 
