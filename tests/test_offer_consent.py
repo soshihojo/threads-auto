@@ -444,3 +444,17 @@ def test_diag_url_is_not_doubled_and_needs_config():
     already = "見てみ https://example.test/shindan?a=cr"
     assert rp._append_diag_url(already, {"web_diag_url": "https://example.test/shindan"}) == already
     assert rp._append_diag_url("案内の文", {}) == "案内の文"
+
+
+def test_diag_url_carries_the_post_tag(monkeypatch):
+    """2026-10-25：コメント返信の診断リンクに、どの投稿へのコメントかの印を付ける。"""
+    from src import replies as rp
+    prof = {"web_diag_url": "https://example.test/shindan"}
+    monkeypatch.setattr(rp, "_SRC_BY_MEDIA", {"17900000000000001": "cr1590"})
+    out = rp._append_diag_url("下のリンクから入れてみ。", prof, src=rp._diag_src("17900000000000001"))
+    assert out.endswith("?a=cr1590")
+    # 予約表に無い投稿は、投稿IDの末尾12桁。16字を超えん
+    tag = rp._diag_src("18123456789012345678")
+    assert tag.startswith("cr") and len(tag) <= 16 and tag.endswith("456789012345678"[-12:])
+    # 投稿IDが分からん時は、今まで通り cr だけ
+    assert rp._diag_src("") == "cr"

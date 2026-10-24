@@ -100,7 +100,8 @@ def _choice_mismatch(reply_text: str, draft: str) -> str | None:
 
 
 def _draft_reply(reply_text: str, username: str, is_lead: bool,
-                 recent: list[str] | None = None, post_text: str = "") -> str:
+                 recent: list[str] | None = None, post_text: str = "",
+                 post_id: str = "") -> str:
     """コメントへの返信を作る。
 
     ★★★2026-08-31：post_text（元の投稿の本文）を渡すようにした。理由を残す。
@@ -192,7 +193,7 @@ def _draft_reply(reply_text: str, username: str, is_lead: bool,
             return ""
     text = strip_ai_leak(text)
     if is_lead:
-        text = _append_diag_url(text, profile)
+        text = _append_diag_url(text, profile, src=_diag_src(post_id))
     return text
 
 
@@ -216,16 +217,42 @@ def _draft_reply(reply_text: str, username: str, is_lead: bool,
 #     固定投稿から来た人（source空）とコメント返信から来た人（cr）を後で分けて数えられる。
 _DIAG_SRC = "cr"
 
+# ★★★2026-10-25 新設（店主の指示）：a=cr の後ろに【どの投稿へのコメントか】を付ける。
+#   10/24に5件売れた時、どの投稿から来た人が買うたんか一人も追えんかった。全員 a=cr やったからや。
+#   ★形は「cr＋予約表のid」（例 cr1590）。予約表に無い投稿（手で出した等）は
+#     「cr＋投稿IDの末尾12桁」。★診断ページは a を16字・英数と_-だけに切るんで、その中に収める。
+#   ★★頭の「cr」は残す。今までの「コメント返信から来た」の数え方（source が cr で始まる）はそのまま効く。
+_SRC_BY_MEDIA: dict[str, str] | None = None
 
-def _append_diag_url(text: str, profile: dict) -> str:
-    """誘導する回の末尾に、診断ページのURLを足す。"""
+
+def _diag_src(post_id: str = "") -> str:
+    """コメント返信に付ける流入元の印。分かれば投稿ごと、分からんかったら cr だけ。"""
+    global _SRC_BY_MEDIA
+    pid = re.sub(r"[^0-9a-zA-Z]", "", str(post_id or ""))
+    if not pid:
+        return _DIAG_SRC
+    if _SRC_BY_MEDIA is None:
+        _SRC_BY_MEDIA = {}
+        try:
+            for r in store.list_scheduled(limit=100000):
+                mid = str((r["media_id"] if "media_id" in r.keys() else "") or "").strip()
+                if mid and str(r["id"]).isdigit():
+                    _SRC_BY_MEDIA[mid] = f"{_DIAG_SRC}{r['id']}"
+        except Exception as e:
+            print(f"[replies] 予約表から投稿の印を引けんかった（投稿IDで代用）: {e}")
+    return (_SRC_BY_MEDIA.get(pid) or f"{_DIAG_SRC}{pid[-12:]}")[:16]
+
+
+def _append_diag_url(text: str, profile: dict, src: str = _DIAG_SRC) -> str:
+    """誘導する回の末尾に、診断ページのURLを足す。src は流入元の印（既定は cr）。"""
     base = str(profile.get("web_diag_url") or "").strip()
     if not base or not text.strip():
         return text
     if "://" in text:          # もう本文にURLが入っとるなら足さん
         return text
     sep = "&" if "?" in base else "?"
-    url = f"{base}{sep}a={_DIAG_SRC}"
+    src = re.sub(r"[^0-9a-zA-Z_-]", "", src or _DIAG_SRC)[:16] or _DIAG_SRC
+    url = f"{base}{sep}a={src}"
     return f"{text.rstrip()}\n{url}"
 
 
@@ -272,6 +299,8 @@ def process_replies(client: ThreadsClient) -> dict:
     my_username = client.me().get("username", "")
 
     store.init_db()
+    global _SRC_BY_MEDIA
+    _SRC_BY_MEDIA = None          # 予約表は巡回のたびに読み直す（新しく出た投稿の印を拾うため）
     posts = client.my_threads(limit=lookback)
     stats = {"new_replies": 0, "leads": 0, "drafts": 0, "auto_sent": 0}
     # 骨格の被りを避けるため、前回までに送った返信を種にしてから始める
@@ -401,7 +430,8 @@ def process_replies(client: ThreadsClient) -> dict:
         #   一人の失敗は一人分で済ませる。残りは続ける。
         try:
             draft = _draft_reply(rtext, ruser, is_lead, recent=_recent,
-                                 post_text=post_texts.get(str(post_id), ""))
+                                 post_text=post_texts.get(str(post_id), ""),
+                                 post_id=str(post_id))
         except Exception as e:
             stats["errors"] = stats.get("errors", 0) + 1
             print(f"[replies] 下書きの生成に失敗（この人は次の巡回に回す）: @{ruser} {e}")
