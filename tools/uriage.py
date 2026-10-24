@@ -92,6 +92,9 @@ def main() -> int:
     shiomi = _shiomi_names()
 
     buys: list[tuple[str, str]] = []       # (日付, user_id)
+    # ★2026-10-25：同じオーダー番号は一回だけ数える。スクショを送ると【画像の読み取り】と
+    #   その控えの二行が入るんで、10/24 の順子さんが二件に数えられて売上が 3,980円 多う出とった。
+    seen_orders: set[str] = set()
     offers: list[tuple[str, str]] = []     # (日付, user_id)
     new_offers: set[str] = set()
     for r in ss._records("line_chats"):
@@ -104,7 +107,8 @@ def main() -> int:
             #   実際は「オーダー番号 9763585092」「購入しました\n8137027212」と
             #   書いてくる人がぎょうさんおる。★実測で28件が抜けとった。
             m = re.search(r"(?<!\d)\d{10}(?!\d)", re.sub(r"[\s\-]", "", t))
-            if m:
+            if m and m.group(0) not in seen_orders:
+                seen_orders.add(m.group(0))
                 buys.append((d, r["user_id"]))
         else:
             if any(m in t for m in OFFER_MARKS):
