@@ -28,8 +28,38 @@ try:
 except Exception:
     pass
 
+# ★★★2026-10-25：push しても、src/ の部品が古いまま動いとった。
+#   実害：会員相談の返信が「AttributeError: module 'src.membership' has no attribute
+#   'strip_count_line'」で二人分作れんかった（みきん❦さん・Junkoさん）。
+#   ★Streamlit は push で app.py を読み直すけど、いっぺん読んだ src/ の部品は握ったままや。
+#     ★★新しい app.py が、古い membership に新しい関数を探しにいって落ちた。
+#   ★せやから、画面を描くたびに src/ の部品のファイルの日時を見て、変わっとったら読み直す。
+#     ★印（__ta_mtime__）が無い部品も一回は読み直す（この仕組みが入る前から握っとった古い部品のため）。
+import importlib as _importlib
+import sys as _sys
+
+
+def _reload_changed_src() -> None:
+    for _name, _mod in sorted(list(_sys.modules.items())):
+        if not _name.startswith("src.") or _mod is None:
+            continue
+        _f = getattr(_mod, "__file__", None)
+        if not _f or not os.path.exists(_f):
+            continue
+        _m = os.path.getmtime(_f)
+        if getattr(_mod, "__ta_mtime__", None) == _m:
+            continue
+        try:
+            _importlib.reload(_mod)
+        except Exception as _e:
+            print(f"[app] 部品の読み直しに失敗（古いまま続ける）: {_name} {_e}")
+        _mod.__ta_mtime__ = _m
+
+
+_reload_changed_src()
 from src import diagnosis, membership, store
 from src.config import active_profile, env
+_reload_changed_src()
 from src.schedule import now_jst
 
 st.set_page_config(page_title="Threads運用ダッシュボード", page_icon="🧵", layout="wide")
