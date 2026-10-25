@@ -434,6 +434,7 @@ def _draft_one(cb) -> dict:
     #   ★黙って止めたらあかん。「無視された」になる。
     #   ★★実測で10通目が届くんは【月の中央値12日目】や。4割強が月の前半で窓が閉まる。
     #     そこで何も言わんかったら、残り三週間を「見捨てられた」で過ごすことになる。
+    res["reply"] = membership.strip_count_line(res["reply"])   # 生成が自分で書いた「◯通目」は消す
     _notice = membership.limit_notice(cb.get("quota") or {"limit": 0})
     if _notice:
         res["reply"] = res["reply"].rstrip() + "\n\n" + _notice
@@ -854,10 +855,10 @@ def _consult_board() -> tuple[str, list[dict], dict]:
     #   ★ここで一回だけ数える。会員ごとに数えたら人数ぶんシートを読むことになる。
     #   ★★数えられんかっても画面は動かす（通数が出んだけ）。ここで落としたらあかん。
     try:
-        _used = store.consult_counts(membership.this_month())
+        _cdates = store.consult_dates()
     except Exception as e:
         print(f"[consult] 通数を数えられんかった（画面は続ける）: {e}")
-        _used = {}
+        _cdates = {}
 
     # ★★★2026-08-26：会員に line_user_id が入っとったら、そっちを先に使う。
     #   生年月日2つの一致だけで繋いどった頃は、会員が「新しい人を視てほしい」いうて
@@ -921,7 +922,7 @@ def _consult_board() -> tuple[str, list[dict], dict]:
             "id": str(m["id"]), "nickname": str(m["nickname"]),
             # ★2026-10-07：層（plan が空欄なら据え置きの「し放題」）と、今月の相談の残り。
             "plan": membership.plan_of(m),
-            "quota": membership.consult_status(m, _used.get(str(m["id"]), 0)),
+            "quota": membership.consult_status_for(m, _cdates.get(str(m["id"]), [])),
             # ★2026-08-23：会員メモも持ってくる。呼び名の指定がここに入っとる
             #   （例：「必ず『なつみさん』。呼び捨て禁止」）。生成に渡さんかったら、
             #   ★実際に「なんで呼び捨てですか」と言われた事故が、また起きる。
@@ -1208,6 +1209,7 @@ if view == VIEW_CONSULT:
                     # ★★★2026-10-07：これで今月の枠を使い切るなら、終わりを伝える一行を足す。
                     #   ★一括の _draft_one と同じ作法にする。片方だけに乗ったら、
                     #     どっちで作ったかで会員への伝わり方が変わる。それは前にやらかしとる型や。
+                    res["reply"] = membership.strip_count_line(res["reply"])   # 生成が自分で書いた「◯通目」は消す
                     _notice = membership.limit_notice(cb.get("quota") or {"limit": 0})
                     if _notice:
                         res["reply"] = res["reply"].rstrip() + "\n\n" + _notice
@@ -1372,10 +1374,10 @@ if view == VIEW_MEMBERS:
         members = []
     # ★2026-10-07：今月の相談の通数（会員ごと）。ここで一回だけ読む
     try:
-        _used_mem = store.consult_counts(membership.this_month())
+        _cdates_mem = store.consult_dates()
     except Exception as e:
         print(f"[members] 通数を数えられんかった（画面は続ける）: {e}")
-        _used_mem = {}
+        _cdates_mem = {}
     if not members:
         st.info("まだ会員がいません。上の「会員を登録する」から追加してください。")
     else:
@@ -1422,7 +1424,8 @@ if view == VIEW_MEMBERS:
                         else:
                             st.error("層を変えられませんでした")
                 else:
-                    _pl[1].caption(f"今月 {_used_mem.get(str(m['id']), 0)}通")
+                    _q = membership.consult_status_for(m, _cdates_mem.get(str(m["id"]), []))
+                    _pl[1].caption(f"{_q['renew'].month}/{_q['renew'].day}の更新まで {_q['used']}通")
                 if m["note"]:
                     st.caption(f"メモ: {m['note']}")
                 hist = store.list_readings(m["id"])

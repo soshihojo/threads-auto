@@ -707,6 +707,21 @@ def set_member_plan(member_id, plan: str) -> bool:
     return True
 
 
+def consult_dates() -> dict[str, list[str]]:
+    """会員ごとに、相談の控え（month=="相談"）を作った日時を並べて返す。
+
+    ★2026-10-25：十通は【暦の月】やのうて【その人の更新日から次の更新日まで】で数える。
+      月の途中で入った人（10/24入会など）が、10/31で枠が切れて11/1に十通戻るんはおかしい。"""
+    out: dict[str, list[str]] = {}
+    for r in _records("readings"):
+        if str(r.get("month")) != "相談":
+            continue
+        mid = str(r.get("member_id") or "").strip()
+        if mid:
+            out.setdefault(mid, []).append(str(r.get("created_at") or ""))
+    return out
+
+
 def consult_counts(ym: str) -> dict[str, int]:
     """その年月（"2026-10"）に、会員ごとに何通の相談へ返したかを数える。
 

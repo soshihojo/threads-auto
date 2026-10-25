@@ -382,6 +382,16 @@ def set_member_plan(member_id, plan: str) -> bool:
                          (str(plan or "").strip(), member_id)).rowcount > 0
 
 
+def consult_dates() -> dict[str, list[str]]:
+    """会員ごとに、相談の控えを作った日時を並べて返す（sheets 側と同じ約束）。"""
+    with conn() as c:
+        rows = c.execute("SELECT member_id, created_at FROM readings WHERE month='相談'").fetchall()
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        out.setdefault(str(r["member_id"]), []).append(str(r["created_at"] or ""))
+    return out
+
+
 def consult_counts(ym: str) -> dict[str, int]:
     """その年月（"2026-10"）に、会員ごとに何通の相談へ返したかを数える。"""
     with conn() as c:

@@ -95,12 +95,69 @@ def consult_status(member, used: int) -> dict:
             "upsell": 0 < remaining <= at}
 
 
+# ★★2026-10-25（店主の指示）：十通は【その人の更新日で区切る】。
+#   入会日（＝支払いの日）と同じ日付が、毎月の更新日になる。月末の入会は、その月の最終日に寄せる。
+def join_date(member):
+    """会員の入会日（date）。note の「月詠み入会 YYYY-MM-DD」を先に、無ければ登録日時を使う。"""
+    import re as _re
+    from datetime import date as _date
+    try:
+        note = str((member or {})["note"] or "")
+    except Exception:
+        note = ""
+    m = _re.search(r"入会\s*(\d{4})-(\d{2})-(\d{2})", note)
+    if not m:
+        try:
+            m = _re.match(r"(\d{4})-(\d{2})-(\d{2})", str((member or {})["created_at"] or ""))
+        except Exception:
+            m = None
+    if not m:
+        return None
+    return _date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+def _add_months(d, n: int, day: int):
+    import calendar
+    from datetime import date as _date
+    y, mo = d.year + (d.month - 1 + n) // 12, (d.month - 1 + n) % 12 + 1
+    return _date(y, mo, min(day, calendar.monthrange(y, mo)[1]))
+
+
+def cycle(join, today):
+    """今の周期の (始まり, 次の更新日) を返す。join が無ければ暦の月で代用。"""
+    from datetime import date as _date
+    if join is None:
+        start = _date(today.year, today.month, 1)
+        return start, _add_months(start, 1, 1)
+    day = join.day
+    start = _add_months(_date(today.year, today.month, 1), 0, day)
+    if start > today:
+        start = _add_months(_date(today.year, today.month, 1), -1, day)
+    if start < join:
+        start = join
+    return start, _add_months(_date(start.year, start.month, 1), 1, day)
+
+
+def consult_status_for(member, dates: list[str], now: datetime | None = None) -> dict:
+    """更新日で区切った「今の周期」の相談数で、consult_status を返す（renew＝次の更新日 を足す）。"""
+    today = (now or datetime.now(JST)).date()
+    start, renew = cycle(join_date(member), today)
+    s_iso = start.isoformat()
+    used = sum(1 for d in (dates or []) if str(d)[:10] >= s_iso)
+    st = consult_status(member, used)
+    st["start"], st["renew"] = start, renew
+    return st
+
+
 def status_line(st: dict) -> str:
     """画面に一行で出す用。"""
     if not st["limit"]:
         return f"{st['label']}・相談し放題（今月 {st['used']}通）"
     if st["blocked"]:
         return f"{st['label']}・今月の枠は使い切り（{st['used']}/{st['limit']}通）"
+    if st.get("renew"):
+        r = st["renew"]
+        return f"{st['label']}・{r.month}/{r.day}の更新まで {st['used']}/{st['limit']}通（残り{st['remaining']}）"
     return f"{st['label']}・今月 {st['used']}/{st['limit']}通（残り{st['remaining']}）"
 
 
@@ -173,17 +230,34 @@ def count_line(st: dict, redo: bool = False) -> str:
     lim = int(st["limit"])
     n = int(st.get("used") or 0) + (0 if redo else 1)
     n = max(1, min(n, lim))
+    r = st.get("renew")
+    if r:
+        return f"（{r.month}月{r.day}日の更新まで　相談 {n}通目／{lim}通・残り{lim - n}通）"
     return f"（今月の相談 {n}通目／{lim}通まで・残り{lim - n}通）"
 
 
 def strip_count_line(text: str) -> str:
-    """履歴に渡す前に、末尾の「今月の相談 ◯通目」の一行を外す。"""
+    """末尾にある「◯通目」の括弧の行を外す。
+
+    ・履歴に渡す前（生成が真似せんように）
+    ・★生成が自分で書いてもうた数の行（実例「（10月・2通目や）」2026-10-25 Junkoさん）を消してから、
+      仕組みの正しい一行を足すため。"""
     import re as _re
-    return _re.sub(r"\s*（今月の相談 \d+通目／\d+通まで・残り\d+通）\s*$", "", str(text or ""))
+    t = str(text or "").rstrip()
+    while True:
+        t2 = _re.sub(r"\s*（[^（）\n]*\d+\s*通目[^（）\n]*）\s*$", "", t)
+        if t2 == t:
+            return t
+        t = t2.rstrip()
 
 
 def limit_notice(st: dict) -> str:
     """その返信で枠を使い切るなら、末尾に足す一行を返す（要らん時は空）。"""
     if not st["limit"]:
         return ""
-    return LIMIT_NOTICE if st["remaining"] <= 1 else ""
+    if st["remaining"] > 1:
+        return ""
+    r = st.get("renew")
+    if r:
+        return LIMIT_NOTICE.replace("次の相談は更新日からや。", f"次の相談は{r.month}月{r.day}日の更新日からや。")
+    return LIMIT_NOTICE
