@@ -58,6 +58,8 @@ TABLES = {
     #   ★★シートごと分けたら、貼る場所を間違えん限り混ざりようがない。
     #   （account 列は残す。どっちのシートの行か、行だけ見ても分かるようにするため）
     "scheduled_posts_b": ["id", "text", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at", "account"],
+    # ★2026-10-26：三本目（かすみ・推し活占い）の予約シート。椿の二本とは混ぜん。
+    "scheduled_posts_c": ["id", "text", "scheduled_at", "status", "media_id", "error", "created_at", "posted_at", "account"],
     # ★2026-10-07：末尾に plan を足した（月詠みの層。空欄＝据え置きの「し放題」）。
     #   ★末尾に足す限り既存の行は "" になるだけで壊れん（_records は位置で読む）。
     #   ★★空欄を「し放題」に寄せるんは意図や。今おる会員の中身を縮めたらあかん。

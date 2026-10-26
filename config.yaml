@@ -43,8 +43,27 @@ accounts:
     #   ★★これは【賭け】や。生まれ月の数字は椿で採れたもんで、
     #     椿さんの装置はまだ一本も実測が無い。★出たら測って、ここを直す。
     device_min: 0.0
+  c:
+    label: かすみ（oshikatsu_uranaishi）
+    # ★2026-10-26：推し活占い「かすみ」。椿とは別ブランドの三本目。
+    #   ★ここで回すのは【予約投稿（run-due）とトークンの更新】だけ。
+    #     返信巡回・学習・生成は椿の文面で動くんで、かすみでは回さん（scheduler の replies も [a] のまま）。
+    #   ★予約シートは scheduled_posts_c（椿のシートとは別）。
+    #   ★LINE・診断は src/kasumi/ が別に持っとる（line_app の /webhook/kasumi）。
+    profile: kasumi
+    env_suffix: "_C"          # THREADS_ACCESS_TOKEN_C / THREADS_USER_ID_C
+    source: c
+    device_min: 0.0
 
 profiles:
+  # ---- 推し活占い（かすみ／oshikatsu_uranaishi）----
+  # ★2026-10-26：予約投稿だけ使う。投稿の保存（posts の profile 列）で椿と見分けるための名前。
+  #   ★文面の生成・返信・学習はここでは回さん（かすみの原稿は oshikatsu-uranai 側で作る）。
+  kasumi:
+    rules_dir: rules_tsubaki      # 未使用（必須キーを埋めとくだけ。かすみでは生成を回さん）
+    persona_file: 01_persona.md
+    region_words: []
+    tag_location: false
   # ---- C：占い・恋愛（椿／tsubaki_honne）----
   # 「彼の本音を視る」関西弁・毒舌・宿曜鑑定キャラ。慰めず本音を伝えるtough love。
   # 集客系のSYSTEM/締め/採点/返信はすべてここで占い用に上書きする（エンジン共通・差し替え式）。

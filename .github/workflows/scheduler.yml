@@ -20,7 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        account: [a, b]
+        # ★2026-10-26：c＝かすみ（推し活占い）を足した。予約投稿とトークン更新だけ回す。
+        account: [a, b, c]
     # ★同時に走らんようにする。ここが二重投稿の原因やった（下の但し書き参照）。
     #   ★アカウントごとに別のグループにする。二本が互いを待つ必要は無い。
     concurrency:
@@ -34,6 +35,8 @@ jobs:
       THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
       THREADS_ACCESS_TOKEN_B: ${{ secrets.THREADS_ACCESS_TOKEN_B }}
       THREADS_USER_ID_B: ${{ secrets.THREADS_USER_ID_B }}
+      THREADS_ACCESS_TOKEN_C: ${{ secrets.THREADS_ACCESS_TOKEN_C }}
+      THREADS_USER_ID_C: ${{ secrets.THREADS_USER_ID_C }}
       GH_SECRET_WRITE_TOKEN: ${{ secrets.GH_SECRET_WRITE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
