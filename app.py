@@ -530,6 +530,32 @@ def _render_weekly(board):
                    + "\n\n端末から `python -m src.main weekly` を走らせるか、"
                      "GitHubの weekly-ichite を手で動かしてな。")
 
+    # ★2026-10-26：未送信をまとめて送るボタン（店主の指示）。
+    #   ★送るんは【まだ送ってへん・LINEが紐付いとる】人だけ。送信済みは触らん（二通送らんため）。
+    #   ★★画面で直した文面があれば、その文面で送る（下の text_area の値を見る）。
+    #   ★★★「全員ぶん読んだ」に印を付けるまで押せん。下書きは生成物やから、読まずに一斉に出したらあかん。
+    _pending = [(cb, got) for cb, got in rows
+                if got and cb["uid"] and not _weekly_sent(cb, str(got.get("reading") or ""))]
+    _last = st.session_state.pop("wk_bulk_result", None)   # 送った直後の再描画で、結果を出す
+    if _last:
+        for ok, msg in _last:
+            (st.success if ok else st.error)(msg)
+    if _pending:
+        with st.container(border=True):
+            st.markdown(f"**📮 未送信をまとめて送る**　対象 {len(_pending)}人："
+                        + "、".join(cb["nickname"] for cb, _ in _pending))
+            _ok_read = st.checkbox("下の全員ぶんの文面を読んで、確認した", key="wk_bulk_confirm")
+            if st.button(f"📮 {len(_pending)}人にまとめて送る", key="wk_bulk_send",
+                         type="primary", disabled=not _ok_read):
+                _results = []
+                for cb, got in _pending:
+                    _txt = st.session_state.get(f"wk_txt_{cb['id']}", str(got.get("reading") or ""))
+                    ok, msg = _send_one(cb, _txt, got.get("id"))
+                    _results.append((ok, msg))
+                _n_ok = sum(1 for ok, _ in _results if ok)
+                st.session_state["wk_bulk_result"] = _results + [(_n_ok == len(_results), f"{_n_ok}／{len(_results)}人に送りました。")]
+                st.rerun()
+
     for cb, got in rows:
         if not got:
             continue
