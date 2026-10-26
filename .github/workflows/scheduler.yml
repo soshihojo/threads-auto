@@ -106,3 +106,32 @@ jobs:
       - run: pip install -r requirements.txt
       - name: replies + leads
         run: python -m src.main replies --account ${{ matrix.account }}
+
+  # ★2026-10-26 新設：かすみ（推し活占い・アカウント c）のコメント自動返信（診断URLつき）。
+  #   ★椿の replies とは別のジョブ・別のコード（src/kasumi/threads_replies.py）。文面も宛先も混ざらん。
+  #   ★1回12件まで・返信どうしは35〜65秒あける・1日200件で止める（Threadsの上限は24時間で250件）。
+  #   ★つらさの強いコメントには自動で返さず、Chatworkで店主に知らせる。
+  kasumi-replies:
+    runs-on: ubuntu-latest
+    needs: run-due
+    if: ${{ !cancelled() }}
+    timeout-minutes: 20
+    concurrency:
+      group: kasumi-replies
+      cancel-in-progress: false
+    env:
+      STORE_BACKEND: sheets
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_KEY: ${{ secrets.GOOGLE_SHEET_KEY }}
+      THREADS_ACCESS_TOKEN_C: ${{ secrets.THREADS_ACCESS_TOKEN_C }}
+      THREADS_USER_ID_C: ${{ secrets.THREADS_USER_ID_C }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CHATWORK_API_TOKEN: ${{ secrets.CHATWORK_API_TOKEN }}
+      CHATWORK_ROOM_ID: ${{ secrets.CHATWORK_ROOM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - name: kasumi comment replies
+        run: python -m src.kasumi.threads_replies

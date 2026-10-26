@@ -33,6 +33,9 @@ TABLES: dict[str, list[str]] = {
     "kasumi_answers": ["id", "user_id", "kind", "answer", "created_at"],
     # event：view / view_pc / submit / line_click / follow / unfollow / reading / closing / push / danger
     "kasumi_events": ["id", "event", "vid", "created_at"],
+    # Threadsのコメントへの自動返信の控え。status：sent / already（手で返信済み）/ skip / error
+    "kasumi_thread_replies": ["comment_id", "post_id", "username", "comment", "reply", "status",
+                              "reply_id", "created_at"],
 }
 _KEYS = {"kasumi_users": "user_id", "kasumi_diag": "code"}
 
@@ -183,3 +186,20 @@ def count_events(event: str, created_prefix: str) -> int:
     """created_at が created_prefix（例 "2026-10"）で始まる event の件数。"""
     return sum(1 for r in _rows("kasumi_events")
                if r.get("event") == event and str(r.get("created_at", "")).startswith(created_prefix))
+
+
+# ---------------- Threadsのコメント返信 ----------------
+def handled_comment_ids() -> set[str]:
+    return {str(r.get("comment_id")) for r in _rows("kasumi_thread_replies")}
+
+
+def add_thread_reply(comment_id: str, post_id: str, username: str, comment: str, reply: str,
+                     status: str, reply_id: str = "") -> None:
+    _append("kasumi_thread_replies", {"comment_id": comment_id, "post_id": post_id, "username": username,
+                                      "comment": comment[:500], "reply": reply, "status": status,
+                                      "reply_id": reply_id, "created_at": now()})
+
+
+def count_thread_replies_since(prefix: str) -> int:
+    return sum(1 for r in _rows("kasumi_thread_replies")
+               if r.get("status") == "sent" and str(r.get("created_at", "")).startswith(prefix))

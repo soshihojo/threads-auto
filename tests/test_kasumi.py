@@ -314,3 +314,83 @@ def test_english_written_by_user_is_allowed(line, monkeypatch):
     store.upsert_user("U13", stage="hearing", turns="0", worry=texts.DEFAULT_WORRY, bot="on")
     bot.handle_event(_msg("U13", "LIVEに行けた"))
     assert "LIVEに行けたんですね。" in _text(line[-1])
+
+
+# ---------------- Threadsのコメント自動返信 ----------------
+from src.kasumi import threads_replies as tr
+
+POST_OSHI = "推しが一番うれしい応援、生まれ月で違うんです。\n\nあなたの推しは何月生まれですか？"
+POST_ME = "推しの新情報が出た瞬間。\n\nあなたは何月生まれですか？"
+POST_RULE = "推し活で、自分を守るためのルール。\n\nあなたのマイルール、ひとつ教えてください。"
+
+
+def test_asks_detects_which_month():
+    assert tr._asks(POST_OSHI) == "oshi" and tr._asks(POST_ME) == "me" and tr._asks(POST_RULE) == ""
+    assert tr._asks("あなたと推しの生まれ月、両方置いていってください") == "both"
+
+
+def test_compose_month_only_uses_fixed_table(monkeypatch):
+    monkeypatch.setattr(tr, "complete", lambda *a, **k: pytest.fail("生成を呼んではいけない"))
+    r = tr.compose(POST_OSHI, "3月です💗", 0)
+    assert r.startswith(texts.REPLY_OSHI[3]) and r.endswith(texts.DIAG_URL_COMMENT)
+    assert tr.compose(POST_ME, "１０月です！", 1).startswith(texts.REPLY_ME[10])
+    multi = tr.compose(POST_OSHI, "4月と10月です。", 2)
+    assert texts.OSHI_SHORT[4] in multi and texts.OSHI_SHORT[10] in multi
+
+
+def test_compose_other_comments_use_generated_ack(monkeypatch):
+    monkeypatch.setattr(tr, "complete", lambda *a, **k: "比べないって、いちばん難しくて大事なことですよね")
+    r = tr.compose(POST_RULE, "他人と比べない", 0)
+    assert r.startswith("比べないって、いちばん難しくて大事なことですよね。")
+    # 推しの月と自分の月が両方あるときは、表を使わず受け止めにする
+    r2 = tr.compose(POST_OSHI, "推し8月 自分12月", 1)
+    assert texts.REPLY_OSHI[8] not in r2
+
+
+def test_compose_rejects_questions_and_english(monkeypatch):
+    outs = iter(["推しさんは誰ですか？", "safe space ですね", "すてきな習慣ですね"])
+    monkeypatch.setattr(tr, "complete", lambda *a, **k: next(outs))
+    assert tr._ack(POST_RULE, "推しの曲で起きる") == texts.COMMENT_ACK_FALLBACK   # 2回ともだめなら予備
+    monkeypatch.setattr(tr, "complete", lambda *a, **k: "すてきな習慣ですね")
+    assert tr._ack(POST_RULE, "推しの曲で起きる") == "すてきな習慣ですね。"
+
+
+class _FakeClient:
+    def __init__(self):
+        self.sent = []
+        now = datetime.now(JST).strftime("%Y-%m-%dT%H:%M:%S+0900")
+        self.posts = [{"id": "P1", "text": POST_OSHI, "timestamp": now}]
+        self.conv = {"P1": [
+            {"id": "C1", "username": "a", "text": "3月です", "timestamp": now, "replied_to": {"id": "P1"}},
+            {"id": "C2", "username": "b", "text": "LINE交換しない？", "timestamp": now, "replied_to": {"id": "P1"}},
+            {"id": "C3", "username": "c", "text": "もう消えたい", "timestamp": now, "replied_to": {"id": "P1"}},
+            {"id": "C4", "username": "d", "text": "11月", "timestamp": now, "replied_to": {"id": "P1"}},
+            {"id": "R4", "username": "kasumi", "text": "返信済み", "timestamp": now, "replied_to": {"id": "C4"}},
+            {"id": "C5", "username": "e", "text": "わかる", "timestamp": now, "replied_to": {"id": "C1"}},
+        ]}
+
+    def me(self): return {"username": "kasumi"}
+    def my_threads(self, limit=25): return self.posts
+    def replies(self, mid, top_level_only=True): return self.conv[mid]
+    user_id = "ME"
+    def _get(self, path, params=None): return {"data": [{"reply_quota_usage": 0}]}
+    def reply_to(self, cid, text):
+        self.sent.append((cid, text)); return "NEW" + cid
+
+
+def test_run_replies_once_and_skips_spam_danger_and_already(monkeypatch):
+    monkeypatch.setattr(tr.time, "sleep", lambda s: None)
+    monkeypatch.setattr(tr, "_notify", lambda m: None)
+    c = _FakeClient()
+    s = tr.run(c, max_per_run=10)
+    assert [cid for cid, _ in c.sent] == ["C1"]            # C2=勧誘・C3=つらい言葉・C4=返信済み・C5=人どうし
+    assert s["sent"] == 1 and s["skip"] == 2 and s["already"] == 1
+    assert tr.run(c, max_per_run=10)["sent"] == 0         # 二度目は返さない
+
+
+def test_ack_rejects_nicknames_and_strips_emoji(monkeypatch):
+    outs = iter(["キング・オブ・ポップと呼ばれる方なんですね", "Michaelさん素敵ですね", "その輝きが伝わってきます"])
+    monkeypatch.setattr(tr, "complete", lambda *a, **k: next(outs))
+    assert tr._ack(POST_OSHI, "8月生まれ キング・オブ・ポップ") == texts.COMMENT_ACK_FALLBACK
+    monkeypatch.setattr(tr, "complete", lambda *a, **k: "まっすぐな想い、とても素敵です♥🥰")
+    assert tr._ack(POST_OSHI, "推しと結婚したい♥") == "まっすぐな想い、とても素敵です。"
