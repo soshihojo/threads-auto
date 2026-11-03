@@ -722,6 +722,22 @@ def consult_dates() -> dict[str, list[str]]:
     return out
 
 
+def consult_entries() -> dict[str, list[tuple[str, str]]]:
+    """会員ごとに、相談の控えの (作った日時, 本文) を並べて返す。
+
+    ★2026-11-04：十通は【送った返信】だけで数える（membership.sent_consult_dates で絞る）。
+      作っただけで送らんかった下書きや、追記が来て作り直した下書きまで数えとった。
+      実例：S.Hirokoさん、送ったんは5通やのにダッシュボードは10通（＝使い切り）と出とった。"""
+    out: dict[str, list[tuple[str, str]]] = {}
+    for r in _records("readings"):
+        if str(r.get("month")) != "相談":
+            continue
+        mid = str(r.get("member_id") or "").strip()
+        if mid:
+            out.setdefault(mid, []).append((str(r.get("created_at") or ""), str(r.get("reading") or "")))
+    return out
+
+
 def consult_counts(ym: str) -> dict[str, int]:
     """その年月（"2026-10"）に、会員ごとに何通の相談へ返したかを数える。
 

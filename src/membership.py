@@ -138,6 +138,32 @@ def cycle(join, today):
     return start, _add_months(_date(start.year, start.month, 1), 1, day)
 
 
+# ★★★2026-11-04（店主の指摘）：十通は【送った返信】だけで数える。
+#   ★前は下書きを作った時点で一通に数えとった。送らんかった下書きも、追記が来て作り直した下書きも入る。
+#     実例：S.Hirokoさん。LINEに届いた相談の返信は5通やのに、ダッシュボードは10通（使い切り）。
+#     11/2・11/3の下書きには「次の相談は11月11日の更新日からや」まで付いとった。送っとったら嘘になる。
+#   ★★送ったかどうかは、週の一手と同じやり方で見る：本文の頭がLINEの記録に椿の発言として残っとるか。
+#     送る時に控えは送った文面で上書きされるんで、手で直した分も頭は揃う。
+#   ★LINEアプリから直接送った返信は記録に残らんので、数えに入らん（多めに数えるより、少なめの方がまし）。
+def is_sent(reading: str, chats) -> bool:
+    """控えの本文が、LINEの記録に椿の発言として残っとるか。"""
+    import re as _re
+    head = _re.sub(r"\s+", "", str(reading or ""))[:40]
+    if not head:
+        return False
+    for r in (chats or []):
+        if str(r.get("role")) != "assistant":
+            continue
+        if head in _re.sub(r"\s+", "", str(r.get("text") or "")):
+            return True
+    return False
+
+
+def sent_consult_dates(entries, chats) -> list[str]:
+    """(作った日時, 本文) の並びから、送った分の日時だけを返す。"""
+    return [d for d, body in (entries or []) if is_sent(body, chats)]
+
+
 def consult_status_for(member, dates: list[str], now: datetime | None = None) -> dict:
     """更新日で区切った「今の周期」の相談数で、consult_status を返す（renew＝次の更新日 を足す）。"""
     today = (now or datetime.now(JST)).date()

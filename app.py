@@ -440,7 +440,9 @@ def _draft_one(cb) -> dict:
         res["reply"] = res["reply"].rstrip() + "\n\n" + _notice
         warns.append("今月の相談枠を使い切る回や。終わりを伝える一行を末尾に足してある。")
     # ★2026-10-25：上限のある層は、末尾に「今月の相談 ◯通目」を足す（作り直しは二重に数えん）
-    _redo = any(h["month"] == "相談" and str(h["worry"]).strip() == incoming.strip() for h in _all_hist)
+    # ★2026-11-04：数えるんは送った分だけになったんで、「作り直し」も送った控えがある時だけ（送ってへん下書きは数に入ってへん）
+    _redo = any(h["month"] == "相談" and str(h["worry"]).strip() == incoming.strip()
+                and membership.is_sent(h["reading"], cb.get("chats")) for h in _all_hist)
     _cl = membership.count_line(cb.get("quota") or {"limit": 0}, redo=_redo)
     if _cl:
         res["reply"] = res["reply"].rstrip() + "\n\n" + _cl
@@ -855,10 +857,11 @@ def _consult_board() -> tuple[str, list[dict], dict]:
     #   ★ここで一回だけ数える。会員ごとに数えたら人数ぶんシートを読むことになる。
     #   ★★数えられんかっても画面は動かす（通数が出んだけ）。ここで落としたらあかん。
     try:
-        _cdates = store.consult_dates()
+        # ★2026-11-04：送った返信だけで数える（下の membership.sent_consult_dates）。作っただけの下書きは数えん
+        _centries = store.consult_entries()
     except Exception as e:
         print(f"[consult] 通数を数えられんかった（画面は続ける）: {e}")
-        _cdates = {}
+        _centries = {}
 
     # ★★★2026-08-26：会員に line_user_id が入っとったら、そっちを先に使う。
     #   生年月日2つの一致だけで繋いどった頃は、会員が「新しい人を視てほしい」いうて
@@ -922,7 +925,8 @@ def _consult_board() -> tuple[str, list[dict], dict]:
             "id": str(m["id"]), "nickname": str(m["nickname"]),
             # ★2026-10-07：層（plan が空欄なら据え置きの「し放題」）と、今月の相談の残り。
             "plan": membership.plan_of(m),
-            "quota": membership.consult_status_for(m, _cdates.get(str(m["id"]), [])),
+            "quota": membership.consult_status_for(
+                m, membership.sent_consult_dates(_centries.get(str(m["id"]), []), chats)),
             # ★2026-08-23：会員メモも持ってくる。呼び名の指定がここに入っとる
             #   （例：「必ず『なつみさん』。呼び捨て禁止」）。生成に渡さんかったら、
             #   ★実際に「なんで呼び捨てですか」と言われた事故が、また起きる。
@@ -1216,6 +1220,7 @@ if view == VIEW_CONSULT:
                         st.warning("今月の相談枠を使い切る回や。終わりを伝える一行を末尾に足してある。")
                     # ★2026-10-25：上限のある層は、末尾に「今月の相談 ◯通目」を足す（一括の _draft_one と同じ作法）
                     _redo = any(h["month"] == "相談" and str(h["worry"]).strip() == incoming.strip()
+                                and membership.is_sent(h["reading"], cb.get("chats"))
                                 for h in _all_hist)
                     _cl = membership.count_line(cb.get("quota") or {"limit": 0}, redo=_redo)
                     if _cl:
@@ -1374,10 +1379,11 @@ if view == VIEW_MEMBERS:
         members = []
     # ★2026-10-07：今月の相談の通数（会員ごと）。ここで一回だけ読む
     try:
-        _cdates_mem = store.consult_dates()
+        # ★2026-11-04：会員相談の画面と同じ数（送った返信だけ）を出す。数え方を二か所に持たんため、板から引く
+        _quota_mem = {str(b["id"]): b["quota"] for b in _consult_board()[1]}
     except Exception as e:
         print(f"[members] 通数を数えられんかった（画面は続ける）: {e}")
-        _cdates_mem = {}
+        _quota_mem = {}
     if not members:
         st.info("まだ会員がいません。上の「会員を登録する」から追加してください。")
     else:
@@ -1424,8 +1430,9 @@ if view == VIEW_MEMBERS:
                         else:
                             st.error("層を変えられませんでした")
                 else:
-                    _q = membership.consult_status_for(m, _cdates_mem.get(str(m["id"]), []))
-                    _pl[1].caption(f"{_q['renew'].month}/{_q['renew'].day}の更新まで {_q['used']}通")
+                    _q = _quota_mem.get(str(m["id"]))
+                    if _q:
+                        _pl[1].caption(f"{_q['renew'].month}/{_q['renew'].day}の更新まで {_q['used']}通")
                 if m["note"]:
                     st.caption(f"メモ: {m['note']}")
                 hist = store.list_readings(m["id"])
