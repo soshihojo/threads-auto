@@ -4,7 +4,7 @@
   友だち追加 → あいさつ
   4桁の番号 or 生年月日2つ → 縁の詳しい読み（手書きの部品を組み合わせる。生成は使わない）＋最初の質問
   ヒアリング（生成で1通ずつ。3往復聞いて、4回目の答えで終わりのあいさつ）
-  終わった人だけ、翌日から4日間の配信（send_due_steps。ボタンで答える質問つき）
+  終わった人だけ、翌日から4日間の配信。1問目に答えないまま24時間たった人には、1回だけ声をかける（send_due_steps。ボタンで答える質問つき）
 
 椿の line_bot とは鍵・保存先・文面がすべて別。椿の関数は呼ばない（宿の計算と検品の関数だけ借りる）。
 ボットは商品の案内をしない。
@@ -31,7 +31,7 @@ from .en import relation
 LINE_API = "https://api.line.me/v2/bot"
 MODEL = env("KASUMI_MODEL") or env("LINE_BOT_MODEL") or "claude-sonnet-5"
 PUSH_MONTHLY_CAP = int(env("KASUMI_PUSH_MONTHLY_CAP") or "180")   # 無料プラン200通の内側で止める
-STEP_HOUR = 20          # 7日間の配信は毎日20時（JST）
+STEP_HOUR = 20          # 4日間の配信は毎日20時（JST）
 STEP_WINDOW = (9, 22)   # この時間帯の外では送らない
 
 DANGER_WORDS = ["死にたい", "消えたい", "自殺", "自傷", "リスカ", "死のう", "死んだほうが", "いなくなりたい"]
@@ -138,7 +138,7 @@ def build_reading(name: str, me_birth: str, oshi_birth: str, rel: str, worry: st
     question = texts.WORRIES.get(worry) or texts.WORRIES[texts.DEFAULT_WORRY]
     reason = texts.FIRST_REASON_NO_WORRY if worry == texts.NO_WORRY else texts.FIRST_REASON
     return texts.READING.format(
-        name_prefix=_name_prefix(name), en=t["reading"],
+        name_prefix=_name_prefix(name), en=t["reading"], view=t["view"],
         oshi=texts.OSHI_MONTH[int(oshi_birth[5:7])], me=texts.ME_MONTH[int(me_birth[5:7])],
         tired=t["tired"], reason=reason, question=question)
 
@@ -148,7 +148,8 @@ def _send_reading(token: str, user: dict, me: str, oshi: str, state: str, worry:
     rel = relation(me, oshi)
     text = build_reading(user.get("display_name", ""), me, oshi, rel, worry)
     store.upsert_user(uid, me_birth=me, oshi_birth=oshi, en_type=rel, state=state, worry=worry,
-                      source=source, stage="hearing", turns="0")
+                      source=source, stage="hearing", turns="0",
+                      read_at=datetime.now(store.JST).isoformat(timespec="seconds"), nudged="")
     reply(token, uid, text)
     store.add_event("reading", uid)
 
@@ -330,6 +331,29 @@ def send_due_steps(now: datetime | None = None) -> int:
         return 0
     used = store.count_events("push", now.strftime("%Y-%m"))
     sent = 0
+    # 縁の読みのあと、1問目に答えないまま24時間たった人に、1回だけ声をかける
+    for u in store.list_users():
+        if (u.get("stage") != "hearing" or u.get("bot") != "on" or str(u.get("turns") or "0") != "0"
+                or u.get("nudged") or not u.get("en_type")):
+            continue
+        base = u.get("read_at") or u.get("updated_at") or u.get("created_at") or ""
+        try:
+            t0 = datetime.fromisoformat(str(base))
+        except ValueError:
+            continue
+        if t0.tzinfo is None:
+            t0 = t0.replace(tzinfo=store.JST)
+        if now - t0 < timedelta(hours=24) or used + sent >= PUSH_MONTHLY_CAP:
+            continue
+        worry = u.get("worry") or texts.DEFAULT_WORRY
+        msg = texts.NUDGE.format(
+            name_prefix=_name_prefix(u.get("display_name", "")),
+            reason=texts.FIRST_REASON_NO_WORRY if worry == texts.NO_WORRY else texts.FIRST_REASON,
+            question=texts.WORRIES.get(worry) or texts.WORRIES[texts.DEFAULT_WORRY])
+        if push(u["user_id"], msg):
+            sent += 1
+            store.upsert_user(u["user_id"], nudged=now.isoformat(timespec="seconds"))
+            store.add_event("nudge", u["user_id"])
     for u in store.list_users():
         day = int(u.get("step_day") or 0)
         if u.get("stage") != "done" or u.get("bot") != "on" or not (1 <= day <= len(texts.STEPS)):

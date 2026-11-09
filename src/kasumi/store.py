@@ -25,7 +25,7 @@ TABLES: dict[str, list[str]] = {
     # bot: on / hold（店主が手で対応する。つらさの強い言葉が出たら自動で hold）
     "kasumi_users": ["user_id", "display_name", "me_birth", "oshi_birth", "en_type", "state", "worry",
                      "stage", "turns", "step_day", "step_next_at", "step_wait", "bot", "source",
-                     "created_at", "updated_at", "after_date"],
+                     "created_at", "updated_at", "after_date", "read_at", "nudged"],
     "kasumi_chats": ["id", "user_id", "role", "text", "created_at"],
     "kasumi_diag": ["code", "me_birth", "oshi_birth", "state", "worry", "en_type", "used",
                     "created_at", "used_at", "source", "user_id"],

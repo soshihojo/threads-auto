@@ -145,8 +145,8 @@ __FLOWER__
   </div>
   <div class="card next">
     LINEでは、ここから先を詳しく読んでお届けします。
-    <ul><li>推しとあなたの縁の、詳しい読み</li><li>推しの生まれ月から見える、推しの素顔</li><li>あなたの推し方のくせと、疲れやすいところのほどき方</li></ul>
-    <a class="btn lbtn" id="lbtn" href="#">LINEで続きを受け取る（無料）</a>
+    <ul><li><b>推しから見た、あなたという存在</b></li><li>推しの生まれ月から見える、推しの素顔</li><li>あなたの推し方のくせと、疲れやすいところのほどき方</li></ul>
+    <a class="btn lbtn" id="lbtn" href="#">推しから見たあなたを、LINEで受け取る（無料）</a>
     <div class="codebox">
       <p id="stept">ボタンを押すと、番号が入った状態でトークが開きます。そのまま送信してください。<br>開かないときは、この番号をLINEで送ってください。</p>
       <p class="code" id="code"></p>

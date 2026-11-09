@@ -394,3 +394,29 @@ def test_ack_rejects_nicknames_and_strips_emoji(monkeypatch):
     assert tr._ack(POST_OSHI, "8月生まれ キング・オブ・ポップ") == texts.COMMENT_ACK_FALLBACK
     monkeypatch.setattr(tr, "complete", lambda *a, **k: "まっすぐな想い、とても素敵です♥🥰")
     assert tr._ack(POST_OSHI, "推しと結婚したい♥") == "まっすぐな想い、とても素敵です。"
+
+
+
+# ---------------- 推しから見たあなた／声かけ ----------------
+def test_reading_has_oshi_view_and_page_promises_it():
+    t = bot.build_reading("ゆい", "1990-11-12", "1995-03-03", "業胎", texts.DEFAULT_WORRY)
+    assert "推しから見たあなたは——\n" + texts.EN_TYPES["業胎"]["view"] in t
+    assert all(v["view"] and not v["view"].startswith("推しにとって") for v in texts.EN_TYPES.values())
+    assert "推しから見た、あなたという存在" in diag.page_html()
+
+
+def test_nudge_once_after_24h_without_answer(line):
+    store.upsert_user("N1", stage="hearing", turns="0", bot="on", en_type="命", worry="推し活のお金や時間のバランス",
+                      display_name="ゆい", read_at="2026-11-09T10:00:00+09:00", nudged="")
+    store.upsert_user("N2", stage="hearing", turns="0", bot="on", en_type="命", worry=texts.DEFAULT_WORRY,
+                      read_at="2026-11-10T09:30:00+09:00", nudged="")      # まだ24時間たっていない
+    store.upsert_user("N3", stage="hearing", turns="1", bot="on", en_type="命",
+                      read_at="2026-11-09T10:00:00+09:00", nudged="")      # もう答えている
+    now = datetime(2026, 11, 10, 10, 30, tzinfo=JST)
+    assert bot.send_due_steps(now) == 1
+    out = _text(line[-1])
+    assert line[-1]["to"] == "N1" and out.startswith("ゆいさん、先日は")
+    assert texts.WORRIES["推し活のお金や時間のバランス"] in out
+    assert store.get_user("N1")["nudged"]
+    assert bot.send_due_steps(datetime(2026, 11, 11, 10, 30, tzinfo=JST)) == 1   # N2 だけ（N1 は二度送らない）
+    assert line[-1]["to"] == "N2"
