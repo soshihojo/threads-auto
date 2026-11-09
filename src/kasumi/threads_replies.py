@@ -4,6 +4,7 @@ GitHub Actions の scheduler（15分おき）から呼ぶ：python -m src.kasumi
 鍵は THREADS_ACCESS_TOKEN_C（無ければ何もせず終わる）。
 
 返信の形：前半（生まれ月の読み or コメントの受け止め）＋後半（診断への案内3種を順に）＋診断URL。
+★後半とURLは、生まれ月が書かれたコメントにだけ付ける（2026-11-09〜）。それ以外は前半だけ。
 - 生まれ月だけのコメント → docs/07 の返信文（生成なし）
 - それ以外 → 1件ずつ生成で受け止めの一文を作る（まとめて作ると、どのコメント宛てかがずれる事故があった）
 返さないもの：自分のコメント、他の人への返信、URL・勧誘っぽいもの、つらさの強い言葉（店主に通知）。
@@ -94,6 +95,11 @@ def compose(post_text: str, comment: str, n: int) -> str:
         head = _ack(post_text, comment)
         if months and asks == "oshi" and len(months) == 1:
             head += texts.OSHI_SHORT[months[0]]
+    # ★2026-11-09：URLは【生まれ月が書かれたコメント】にだけ付ける。
+    #   10日で同じURLつきの返信を約390件送ったあと、露出が大きく落ちた（スパム扱いの疑い）。
+    #   それ以外のコメントには、受け止めの一文だけを返す。
+    if not months:
+        return head
     return f"{head}\n\n{texts.COMMENT_CTA[n % len(texts.COMMENT_CTA)]}\n{texts.DIAG_URL_COMMENT}"
 
 

@@ -341,7 +341,8 @@ def test_compose_month_only_uses_fixed_table(monkeypatch):
 def test_compose_other_comments_use_generated_ack(monkeypatch):
     monkeypatch.setattr(tr, "complete", lambda *a, **k: "比べないって、いちばん難しくて大事なことですよね")
     r = tr.compose(POST_RULE, "他人と比べない", 0)
-    assert r.startswith("比べないって、いちばん難しくて大事なことですよね。")
+    assert r == "比べないって、いちばん難しくて大事なことですよね。"     # 生まれ月が無いコメントにはURLを付けない
+    assert texts.DIAG_URL_COMMENT not in r
     # 推しの月と自分の月が両方あるときは、表を使わず受け止めにする
     r2 = tr.compose(POST_OSHI, "推し8月 自分12月", 1)
     assert texts.REPLY_OSHI[8] not in r2
@@ -420,3 +421,10 @@ def test_nudge_once_after_24h_without_answer(line):
     assert store.get_user("N1")["nudged"]
     assert bot.send_due_steps(datetime(2026, 11, 11, 10, 30, tzinfo=JST)) == 1   # N2 だけ（N1 は二度送らない）
     assert line[-1]["to"] == "N2"
+
+
+def test_url_only_for_comments_with_birth_month(monkeypatch):
+    monkeypatch.setattr(tr, "complete", lambda *a, **k: "すてきな推しさんですね")
+    with_month = tr.compose(POST_OSHI, "9月生まれ。笑顔がかわいい人", 0)
+    assert with_month.endswith(texts.DIAG_URL_COMMENT) and texts.OSHI_SHORT[9] in with_month
+    assert texts.DIAG_URL_COMMENT not in tr.compose(POST_OSHI, "笑顔がかわいい人です", 1)
